@@ -13,6 +13,7 @@ logs/
 runs/
 outputs/
 checkpoints/
+snth/
 
 .DS_Store
 Thumbs.db
