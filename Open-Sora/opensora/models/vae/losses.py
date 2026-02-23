@@ -91,6 +91,7 @@ class VAELoss(nn.Module):
         kl_loss_weight=5e-4,
         device="cpu",
         dtype="bf16",
+        view_consistency_weight=0.0,
     ):
         super().__init__()
 
@@ -111,6 +112,8 @@ class VAELoss(nn.Module):
         self.perceptual_loss_fn.requires_grad_(False)
         self.perceptual_loss_weight = perceptual_loss_weight
         self.logvar = nn.Parameter(torch.ones(size=()) * logvar_init)
+        # Multi-view loss weight
+        self.view_consistency_weight = view_consistency_weight
 
     def forward(
         self,
@@ -122,11 +125,15 @@ class VAELoss(nn.Module):
         
         # Check input format and handle different shapes
         # Expected formats: [B, C, T, H, W] or [B, T, C, H, W] or [B, V, C, T, H, W]
+        is_multiview = False
+        b, v = None, None
         if video.dim() == 6:
-            # Multi-view: [B, V, C, T, H, W] - flatten views into batch
+            # Multi-view: [B, V, C, T, H, W] - preserve view dimension initially
+            is_multiview = True
             b, v, c, t, h, w = video.shape
-            video = video.view(b * v, c, t, h, w)
-            recon_video = recon_video.view(b * v, c, t, h, w)
+            # Reshape for temporal batching: [B*V, C, T, H, W]
+            video_reshaped = video.view(b * v, c, t, h, w)
+            recon_video_reshaped = recon_video.view(b * v, c, t, h, w)
         elif video.dim() == 5:
             # Check if it's [B, T, C, H, W] or [B, C, T, H, W]
             # If T dimension (dim=1) is larger than C dimension (dim=2), it's likely [B, T, C, H, W]
@@ -134,40 +141,106 @@ class VAELoss(nn.Module):
                 # It's [B, T, C, H, W], permute to [B, C, T, H, W]
                 video = video.permute(0, 2, 1, 3, 4).contiguous()
                 recon_video = recon_video.permute(0, 2, 1, 3, 4).contiguous()
+            video_reshaped = video
+            recon_video_reshaped = recon_video
+        else:
+            video_reshaped = video
+            recon_video_reshaped = recon_video
         
-        video = rearrange(video, "b c t h w -> (b t) c h w").contiguous()
-        recon_video = rearrange(recon_video, "b c t h w -> (b t) c h w").contiguous()
+        # Flatten temporal dimension for loss computation: [B*V*T, C, H, W]
+        video_flat = rearrange(video_reshaped, "b c t h w -> (b t) c h w").contiguous()
+        recon_video_flat = rearrange(recon_video_reshaped, "b c t h w -> (b t) c h w").contiguous()
 
         # reconstruction loss
-        recon_loss = l1(video, recon_video)
+        recon_loss = l1(video_flat, recon_video_flat)
 
         # perceptual loss
-        perceptual_loss = self.perceptual_loss_fn(video, recon_video)
+        perceptual_loss = self.perceptual_loss_fn(video_flat, recon_video_flat)
         
         # nll loss (from reconstruction loss and perceptual loss)
         nll_loss = recon_loss + perceptual_loss * self.perceptual_loss_weight
         nll_loss = nll_loss / torch.exp(self.logvar) + self.logvar
 
-        # Batch Mean
-        nll_loss = batch_mean(nll_loss)
-        recon_loss = batch_mean(recon_loss)
-        numel_elements = video.numel() // video.size(0)
-        perceptual_loss = batch_mean(perceptual_loss) * numel_elements
+        # Compute means properly - average over ALL dimensions
+        # For per-pixel losses, we need to average over all elements, not just batch
+        nll_loss = torch.mean(nll_loss)  # Average over all elements
+        recon_loss = torch.mean(recon_loss)  # Average over all elements
+        # The perceptual loss is already normalized by the LPIPS network
+        perceptual_loss = torch.mean(perceptual_loss)  # Average over all elements
 
         # KL Loss
         if posterior is None:
-            kl_loss = torch.tensor(0.0).to(video.device, video.dtype)
+            kl_loss = torch.tensor(0.0).to(video_flat.device, video_flat.dtype)
         else:
             kl_loss = posterior.kl()
-            kl_loss = batch_mean(kl_loss)
+            kl_loss = torch.mean(kl_loss)  # Average over all elements, not just batch
         weighted_kl_loss = kl_loss * self.kl_weight
 
-        return {
+        # View consistency loss (only for multi-view)
+        view_consistency_loss = torch.tensor(0.0).to(video.device, video.dtype)
+        if is_multiview and self.view_consistency_weight > 0:
+            # Penalize if different views produce similar reconstructions
+            # This encourages the decoder to produce view-specific outputs
+            view_consistency_loss = self._compute_view_consistency_loss(recon_video, video)
+            view_consistency_loss = view_consistency_loss * self.view_consistency_weight
+
+        loss_dict = {
             "nll_loss": nll_loss,
             "kl_loss": weighted_kl_loss,
             "recon_loss": recon_loss,
             "perceptual_loss": perceptual_loss,
         }
+        
+        if is_multiview and self.view_consistency_weight > 0:
+            loss_dict["view_consistency_loss"] = view_consistency_loss
+
+        return loss_dict
+
+    def _compute_view_consistency_loss(self, recon_video, video):
+        """
+        Compute view consistency loss to encourage each view to have unique reconstruction.
+        
+        Args:
+            recon_video: [B, V, C, T, H, W]
+            video: [B, V, C, T, H, W]
+        
+        Returns:
+            Scalar loss value
+        """
+        b, v, c, t, h, w = recon_video.shape
+        if v < 2:
+            return torch.tensor(0.0, device=recon_video.device, dtype=recon_video.dtype)
+        
+        # Compute cross-view reconstruction similarity
+        # For each pair of views, compute L1 distance between their reconstructions
+        # Higher cross-view distance = better (each view has unique features)
+        # We want to MINIMIZE reconstruction similarity across views
+        
+        # Flatten spatial-temporal dims for easier comparison
+        recon_flat = rearrange(recon_video, "b v c t h w -> b v (c t h w)")
+        
+        consistency_loss = 0.0
+        num_pairs = 0
+        
+        # Compare all pairs of views
+        for i in range(v):
+            for j in range(i + 1, v):
+                # L2 distance between view i and view j reconstructions
+                # High distance = less consistent = good
+                # But we want them to be consistent with THEIR OWN inputs, not with each other
+                # So we penalize when reconstruction[i] ≈ reconstruction[j]
+                pair_similarity = torch.nn.functional.cosine_similarity(
+                    recon_flat[:, i:i+1], 
+                    recon_flat[:, j:j+1],
+                    dim=2
+                ).mean()
+                consistency_loss += pair_similarity
+                num_pairs += 1
+        
+        if num_pairs > 0:
+            consistency_loss = consistency_loss / num_pairs
+        
+        return consistency_loss
 
 
 class GeneratorLoss(nn.Module):

@@ -58,6 +58,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+import time
 
 # -----------------------------------------------------------------------------
 # Paths and helpers
@@ -65,34 +66,29 @@ from PIL import Image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_TASKS_JSON = REPO_ROOT / "data/processing/tasks.json"
-DEFAULT_OUTPUT_ROOT = REPO_ROOT / "data/preprocessed_initial_experiments"
-DEFAULT_NERSEMBLE_ROOT = Path("/home/piado/scratch/data/nersemble")
+DEFAULT_LOCAL_OUTPUT = REPO_ROOT / "data/preprocessed_initial_experiments"
+ARRAY_OUTPUT_ROOT = Path("/datasets/lindell-proj/neumayr/nersemble_v2/processed")
 DEFAULT_RVM_CHECKPOINT = REPO_ROOT / "data/rvm_mobilenetv3.pth"
 
+# ---------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------
 
-def center_square_crop_uint8(img: np.ndarray) -> np.ndarray:
+
+def crop_pad_to_square(img: Image.Image, target_size: int) -> Image.Image:
     """
-    Center square crop on HWC uint8 image (no resizing).
+    Crop the largest center square from PIL image and resize to target_size x target_size
+    without skewing.
     """
-    h, w = img.shape[:2]
-    side = min(h, w)
-    top = (h - side) // 2
+    w, h = img.size
+    side = min(w, h)
     left = (w - side) // 2
-    return img[top : top + side, left : left + side]
+    top = (h - side) // 2
+    cropped = img.crop((left, top, left + side, top + side))  # PIL crop
 
-
-def temporal_downsample_indices(n_frames: int, target_frames: int) -> List[int]:
-    """
-    Evenly-spaced indices from [0, n_frames-1] to length target_frames.
-    """
-    if n_frames <= 0:
-        return []
-    target_frames = max(1, target_frames)
-    if n_frames <= target_frames:
-        return list(range(n_frames))
-    idx = np.linspace(0, n_frames - 1, target_frames, dtype=np.int64)
-    return [int(i) for i in idx]
+    if side != target_size:
+        cropped = cropped.resize((target_size, target_size), Image.BILINEAR)
+    return cropped
 
 
 # -----------------------------------------------------------------------------
@@ -197,53 +193,13 @@ def remove_background(
 
 
 # -----------------------------------------------------------------------------
-# NeRSemble data access
+# NeRSemble data
 # -----------------------------------------------------------------------------
 
-
 @dataclass
-class TaskSpec:
+class SequenceInfo:
     participant_id: int
     sequence_name: str
-    tar_paths: Sequence[str]
-
-
-def load_tasks(tasks_json: Path) -> List[TaskSpec]:
-    data = json.loads(tasks_json.read_text())
-    tasks: List[TaskSpec] = []
-    for item in data:
-        tasks.append(
-            TaskSpec(
-                participant_id=int(item["participant_id"]),
-                sequence_name=str(item["sequence_name"]),
-                tar_paths=item.get("tar_paths", []),
-            )
-        )
-    return tasks
-
-
-def select_upper_cameras(
-    nersemble_root: Path,
-    participant_id: int,
-    top_k: int,
-) -> List[str]:
-    """
-    Select top_k cameras by world-space height using camera_params.json.
-    """
-    calib_path = nersemble_root / f"{participant_id:03d}/calibration/camera_params.json"
-    if not calib_path.exists():
-        raise RuntimeError(f"Camera calibration not found: {calib_path}")
-    camera_params = json.loads(calib_path.read_text())
-    world_2_cam = camera_params["world_2_cam"]
-
-    centers = {}
-    for serial, w2c in world_2_cam.items():
-        w2c_mat = np.array(w2c, dtype=np.float32)
-        c2w = np.linalg.inv(w2c_mat)
-        centers[serial] = c2w[:3, 3]  # camera center
-
-    ordered = sorted(centers.keys(), key=lambda s: centers[s][1], reverse=True)
-    return ordered[:top_k]
 
 
 def build_nersemble_managers(nersemble_root: Path):
@@ -273,117 +229,166 @@ def build_nersemble_managers(nersemble_root: Path):
     data_folder = NeRSembleDataManager(str(nersemble_root))
     return data_folder, NeRSembleParticipantDataManager
 
+def select_middle_upper_cameras(nersemble_root: Path, participant_id: int, upper_views: int = 2) -> List[str]:
+    """
+    Select the two middle cameras among the top `upper_views` cameras by height.
+    """
+    calib_path = nersemble_root / f"{participant_id:03d}/calibration/camera_params.json"
+    if not calib_path.exists():
+        raise RuntimeError(f"Camera calibration not found: {calib_path}")
+    
+    import json
+    camera_params = json.loads(calib_path.read_text())
+    centers = {s: np.linalg.inv(np.array(w2c, dtype=np.float32))[:3,3] for s,w2c in camera_params["world_2_cam"].items()}
+    
+    # Sort cameras by height descending (highest first)
+    sorted_serials = sorted(centers.keys(), key=lambda s: centers[s][1], reverse=True)
+    
+    # Take top N upper cameras
+    top_cameras = sorted_serials[:upper_views]
+    
+    # Pick middle two adjacent cameras from top_cameras
+    if len(top_cameras) < 2:
+        return top_cameras
+    mid = len(top_cameras)//2
+    if len(top_cameras) % 2 == 0:
+        return top_cameras[mid-1:mid+1]  # even -> middle two
+    else:
+        # odd -> middle and next one
+        return top_cameras[mid:mid+2] if mid+2 <= len(top_cameras) else top_cameras[mid-1:mid+1]
+
+import cv2
+import numpy as np
+
+def save_video_mp4(
+    input_path: Path,
+    output_path: Path,
+    converter: Converter,
+    image_size: int | None = None,
+    target_fps: float = 24.0,
+    target_frames: int = 13,
+):
+    """
+    Load a video, subsample to target FPS, downsample to target_frames, 
+    run RVM background removal, resize, and save to MP4.
+    """
+    import shutil
+    start_total = time.time()
+
+    # Open video
+    cap = cv2.VideoCapture(str(input_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open video: {input_path}")
+
+    fps_orig = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    subsample_factor = max(1, int(fps_orig // target_fps))
+
+    # Determine which frames to keep for temporal downsampling
+    if total_frames // subsample_factor > target_frames:
+        indices_to_keep = np.linspace(0, total_frames // subsample_factor - 1, target_frames, dtype=int)
+    else:
+        indices_to_keep = np.arange(total_frames // subsample_factor)
+
+    # Prepare video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(
+        str(output_path),
+        fourcc,
+        target_fps,
+        (image_size or width, image_size or height)
+    )
+
+    if not out.isOpened():
+        raise RuntimeError(f"VideoWriter failed to open for {output_path}")
+
+    # Step 1 & 2: Read & subsample frames while loading
+    frames_all: List[Image.Image] = []
+    frame_idx = 0
+    keep_idx = 0
+    t0 = time.time()
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx % subsample_factor == 0:
+            if keep_idx in indices_to_keep:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames_all.append(Image.fromarray(frame_rgb))
+            keep_idx += 1
+        frame_idx += 1
+    cap.release()
+    print(f"[timing] Loaded & subsampled ~{len(frames_all)} frames in {time.time()-t0:.2f}s")
+
+    if len(frames_all) == 0:
+        raise RuntimeError(f"No frames loaded from {input_path}")
+
+    # Step 3: Run RVM background removal
+    t0 = time.time()
+    temp_dir = Path(tempfile.mkdtemp())
+    matted_frames = remove_background(frames_all, converter, temp_dir, tag=input_path.stem)
+    shutil.rmtree(temp_dir)  # cleanup
+    print(f"[timing] Background removal: {len(matted_frames)} frames in {time.time()-t0:.2f}s")
+
+    # Step 4: Resize & write video
+    t0 = time.time()
+    for img in matted_frames:
+        if image_size:
+            #img = img.resize((image_size, image_size), Image.BILINEAR)
+            img = crop_pad_to_square(img, image_size)
+        frame_bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        out.write(frame_bgr)
+    out.release()
+    print(f"[timing] Writing MP4 done in {time.time()-t0:.2f}s, total {time.time()-start_total:.2f}s")
+
 
 def process_sequence(
     nersemble_root: Path,
-    task: TaskSpec,
-    upper_views: int,
-    target_frames: int,
-    image_size: int,
+    participant_id: int,
+    sequence_name: str,
     converter: Converter,
     output_root: Path,
-) -> Path:
+    image_size: int | None = None,
+    upper_views: int | None = None,  # NEW: optional argument
+):
     """
-    Process a single (participant, sequence) into a .pt file.
+    Process a NeRSemble sequence: pick the two middle-upper cameras
+    or all top N if upper_views not specified, and encode as MP4s after background removal.
     """
-    participant_id = task.participant_id
-    sequence_name = task.sequence_name
+    start_seq = time.time()
+    seq_path = nersemble_root / f"{participant_id:03d}/sequences/{sequence_name}/images"
+    if not seq_path.exists():
+        raise FileNotFoundError(f"Sequence images folder not found: {seq_path}")
 
-    data_folder, ParticipantManager = build_nersemble_managers(nersemble_root)
+    # Decide which cameras to process
+    if upper_views == 2:
+        # Use exactly the two middle-upper cameras
+        serials = select_middle_upper_cameras(nersemble_root, participant_id, upper_views=2)
+    else:
+        # Pick all upper cameras (or top `upper_views` if provided)
+        serials = select_middle_upper_cameras(nersemble_root, participant_id, upper_views=upper_views or 1000)
 
-    participants = sorted(data_folder.list_participants())
-    if participant_id not in participants:
-        raise RuntimeError(
-            f"Participant {participant_id} not found under {nersemble_root}. "
-            f"Available: {participants}"
-        )
-
-    pm = ParticipantManager(str(nersemble_root), participant_id)
-    sequences = pm.list_sequences()
-    if sequence_name not in sequences:
-        raise RuntimeError(
-            f"Sequence '{sequence_name}' not found for participant {participant_id}. "
-            f"Available: {sequences}"
-        )
-
-    serials = select_upper_cameras(nersemble_root, participant_id, upper_views)
-
-    # Determine timesteps based on full sequence length
-    n_frames = pm.get_n_timesteps(sequence_name)
-    t_indices = temporal_downsample_indices(n_frames, target_frames)
-
-    # Temporary directory root for RVM (not heavily used, but kept for API parity)
-    tmp_root = output_root / "_rvm_tmp"
-    tmp_root.mkdir(parents=True, exist_ok=True)
-
-    view_tensors: List[torch.Tensor] = []
-
-    for v_idx, serial in enumerate(serials):
-        frames: List[Image.Image] = []
-        for t in t_indices:
-            img = pm.load_image(
-                sequence_name,
-                serial,
-                int(t),
-                as_uint8=False,
-                apply_color_correction=True,
-                downscale_factor=None,
-            )  # numpy HWC in [0,1]
-
-            # Convert to uint8 and center-crop at ORIGINAL resolution
-            img_u8 = np.clip(img * 255.0, 0.0, 255.0).astype(np.uint8)
-            cropped = center_square_crop_uint8(img_u8)
-            frames.append(Image.fromarray(cropped))
-
-        # Background removal on high-res cropped frames, WHITE background
-        temp_dir = Path(
-            tempfile.mkdtemp(
-                prefix=f"rvm_{participant_id:03d}_{sequence_name}_cam{serial}_",
-                dir=str(tmp_root),
-            )
-        )
-        matted_frames = remove_background(
-            frames,
-            converter,
-            temp_dir,
-            f"p{participant_id}_{sequence_name}_cam{serial}",
-        )
-
-        # Resize to final resolution (e.g. 128x128) and convert to tensor [T, C, H, W]
-        resized_tensors: List[torch.Tensor] = []
-        for img_out in matted_frames:
-            img_resized = img_out.resize((image_size, image_size), Image.BILINEAR)
-            arr = np.asarray(img_resized).astype(np.float32) / 255.0  # [0,1]
-            t = torch.from_numpy(arr).permute(2, 0, 1)  # C,H,W
-            resized_tensors.append(t)
-
-        if not resized_tensors:
-            raise RuntimeError(
-                f"No frames produced after background removal for "
-                f"participant {participant_id}, sequence {sequence_name}, serial {serial}"
-            )
-
-        view_tensor = torch.stack(resized_tensors, dim=0)  # [T, C, H, W]
-        view_tensors.append(view_tensor)
-
-    video = torch.stack(view_tensors, dim=0)  # [V, T, C, H, W]
-
-    # Output path
-    safe_seq = sequence_name.replace("/", "_")
-    seq_dir = output_root / f"p{participant_id:02d}_{safe_seq}"
+    #seq_dir = output_root / f"p{participant_id:03d}_{sequence_name}"
+    participant_dir = output_root / f"p{participant_id:03d}"
+    seq_dir = participant_dir / sequence_name
     seq_dir.mkdir(parents=True, exist_ok=True)
-    out_path = seq_dir / f"{participant_id:03d}_{sequence_name}.pt"
 
-    payload = {
-        "video": video,  # [V, T, C, H, W], float32 in [0,1]
-        "participant_id": participant_id,
-        "sequence_name": sequence_name,
-        "serials": serials,
-        "timesteps": t_indices,
-    }
-    torch.save(payload, out_path)
-    return out_path
+    for serial in serials:
+        cam_video_in = seq_path / f"cam_{serial}.mp4"
+        if not cam_video_in.exists():
+            print(f"[preprocess] WARNING: Camera video not found: {cam_video_in}")
+            continue
+        cam_video_out = seq_dir / f"cam_{serial}_processed.mp4"
 
+        print(f"[preprocess] Processing camera {serial} for {sequence_name}")
+        t0 = time.time()
+        save_video_mp4(cam_video_in, cam_video_out, converter, image_size=image_size)
+        print(f"[timing] Camera {serial} processed in {time.time()-t0:.2f}s")
+
+    print(f"[timing] Sequence {sequence_name} done in {time.time()-start_seq:.2f}s")
+    return seq_dir
 
 # -----------------------------------------------------------------------------
 # CLI
@@ -395,22 +400,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Preprocess NeRSemble sequences into .pt tensors for VAE training."
     )
     p.add_argument(
-        "--tasks-json",
-        type=Path,
-        default=DEFAULT_TASKS_JSON,
-        help="Path to tasks.json describing (participant_id, sequence_name, tar_paths).",
-    )
-    p.add_argument(
         "--nersemble-root",
         type=Path,
-        default=DEFAULT_NERSEMBLE_ROOT,
+        default="/home/piado/scratch/data/nersemble",
         help="Root folder of extracted NeRSemble data (per-participant folders).",
-    )
-    p.add_argument(
-        "--output-root",
-        type=Path,
-        default=DEFAULT_OUTPUT_ROOT,
-        help="Output root where .pt files will be stored.",
     )
     p.add_argument(
         "--rvm-checkpoint",
@@ -433,145 +426,65 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--image-size",
         type=int,
-        default=128,
+        default=None,
         help="Final spatial resolution (image_size x image_size).",
     )
     p.add_argument(
-        "--task-index",
+        "--num-participants",
         type=int,
         default=None,
-        help=(
-            "Index into tasks.json to process (0-based). "
-            "If omitted, will use SLURM_ARRAY_TASK_ID if present, otherwise process all tasks."
-        ),
-    )
-    p.add_argument(
-        "--max-tasks",
-        type=int,
-        default=None,
-        help=(
-            "If set and not using task-index/SLURM_ARRAY_TASK_ID, "
-            "limit processing to the first N tasks (useful for single-GPU testing)."
-        ),
-    )
-    p.add_argument(
-        "--max-participants",
-        type=int,
-        default=None,
-        help=(
-            "If set (and not using task-index/SLURM_ARRAY_TASK_ID), "
-            "select tasks for up to this many distinct participant_ids, "
-            "including all sequences for each selected participant."
-        ),
-    )
-    p.add_argument(
-        "--skip-existing",
-        action="store_true",
-        help="Skip tasks whose output .pt already exists.",
     )
     return p
 
 
-def resolve_tasks_to_run(tasks: List[TaskSpec], args: argparse.Namespace) -> List[Tuple[int, TaskSpec]]:
-    """
-    Decide which tasks to run based on CLI args and SLURM environment.
-    Returns list of (global_index, TaskSpec).
-    """
-    if args.task_index is not None:
-        idx = int(args.task_index)
-        if idx < 0 or idx >= len(tasks):
-            raise IndexError(f"--task-index {idx} out of range for {len(tasks)} tasks.")
-        return [(idx, tasks[idx])]
-
-    if "SLURM_ARRAY_TASK_ID" in os.environ:
-        idx = int(os.environ["SLURM_ARRAY_TASK_ID"])
-        if idx < 0 or idx >= len(tasks):
-            raise IndexError(
-                f"SLURM_ARRAY_TASK_ID={idx} out of range for {len(tasks)} tasks."
-            )
-        return [(idx, tasks[idx])]
-
-    # Single-process mode: optionally restrict by participants or by count
-    indices = list(range(len(tasks)))
-
-    if args.max_participants is not None:
-        seen = set()
-        selected_indices: List[int] = []
-        for i, t in enumerate(tasks):
-            if t.participant_id not in seen:
-                if len(seen) >= args.max_participants:
-                    continue
-                seen.add(t.participant_id)
-            if t.participant_id in seen:
-                selected_indices.append(i)
-        indices = selected_indices
-
-    if args.max_tasks is not None:
-        n = max(0, min(args.max_tasks, len(indices)))
-        indices = indices[:n]
-
-    return [(i, tasks[i]) for i in indices]
-
-
-def main() -> None:
+def main():
     args = build_arg_parser().parse_args()
-
-    tasks = load_tasks(args.tasks_json)
-    tasks_to_run = resolve_tasks_to_run(tasks, args)
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[preprocess] Using device: {device}")
-    print(f"[preprocess] NeRSemble root: {args.nersemble_root}")
-    print(f"[preprocess] Tasks file: {args.tasks_json}")
-    print(f"[preprocess] Output root: {args.output_root}")
-    print(f"[preprocess] RVM checkpoint: {args.rvm_checkpoint}")
-    sys.stdout.flush()
-
-    if not args.rvm_checkpoint.exists():
-        raise FileNotFoundError(f"RVM checkpoint not found at {args.rvm_checkpoint}")
+    mode = "array" if "SLURM_ARRAY_TASK_ID" in os.environ else "local"
+    print(f"[preprocess] Mode: {mode}, Device: {device}")
+    output_root = ARRAY_OUTPUT_ROOT if mode=="array" else DEFAULT_LOCAL_OUTPUT
+    folder_name = f"{args.image_size}-res" if args.image_size else "default-res"
+    output_root = output_root / folder_name
+    output_root.mkdir(parents=True, exist_ok=True)
 
     converter = Converter("mobilenetv3", str(args.rvm_checkpoint), device=device)
+    data_folder, ParticipantManager = build_nersemble_managers(args.nersemble_root)
+    participants = sorted(data_folder.list_participants())
+    if args.num_participants:
+        participants = participants[:args.num_participants]
 
-    args.output_root.mkdir(parents=True, exist_ok=True)
+    # Array job splitting
+    if mode=="array":
+        total_gpus = int(os.environ.get("SLURM_ARRAY_TASK_COUNT", "1"))
+        task_id = int(os.environ.get("SLURM_ARRAY_TASK_ID", "0"))
+        chunk_size = (len(participants)+total_gpus-1)//total_gpus
+        start, end = task_id*chunk_size, (task_id+1)*chunk_size
+        participants = participants[start:end]
 
-    total = len(tasks_to_run)
-    for local_idx, (global_idx, task) in enumerate(tasks_to_run, start=1):
-        safe_seq = task.sequence_name.replace("/", "_")
-        seq_dir = args.output_root / f"p{task.participant_id:02d}_{safe_seq}"
-        out_path = seq_dir / f"{task.participant_id:03d}_{task.sequence_name}.pt"
+    total_sequences = sum(len(ParticipantManager(str(args.nersemble_root), pid).list_sequences()) for pid in participants)
+    print(f"[preprocess] Processing {len(participants)} participants, ~{total_sequences} sequences")
 
-        if args.skip_existing and out_path.exists():
-            print(
-                f"[preprocess] Skipping existing ({local_idx}/{total}, global {global_idx}): "
-                f"p{task.participant_id} {task.sequence_name}"
-            )
-            continue
-
-        print(
-            f"[preprocess] Processing ({local_idx}/{total}, global {global_idx}): "
-            f"p{task.participant_id} {task.sequence_name}"
-        )
-        sys.stdout.flush()
-
-        try:
-            out = process_sequence(
-                nersemble_root=args.nersemble_root,
-                task=task,
-                upper_views=args.upper_views,
-                target_frames=args.frames,
-                image_size=args.image_size,
-                converter=converter,
-                output_root=args.output_root,
-            )
-        except Exception as exc:  # keep going for array jobs
-            print(
-                f"[preprocess] ERROR for participant {task.participant_id}, "
-                f"sequence {task.sequence_name}: {exc}"
-            )
-            continue
-
-        print(f"[preprocess] Saved: {out}")
-        sys.stdout.flush()
+    for pid in participants:
+        pm = ParticipantManager(str(args.nersemble_root), pid)
+        pm.nersemble_root = Path(args.nersemble_root)
+        sequences = pm.list_sequences()
+        for seq in sequences:
+            print(f"[preprocess] Processing p{pid:03d} {seq}")
+            try:
+                nersemble_root=args.nersemble_root
+                out_path = process_sequence(
+                    nersemble_root=nersemble_root,
+                    participant_id=pid,
+                    sequence_name=seq,
+                    converter=converter,
+                    output_root=output_root,
+                    image_size=args.image_size,
+                    upper_views=args.upper_views
+                )
+            except Exception as e:
+                print(f"[preprocess] ERROR: p{pid:03d} {seq}: {e}")
+                continue
+            print(f"[preprocess] Saved: {out_path}")
 
 
 if __name__ == "__main__":

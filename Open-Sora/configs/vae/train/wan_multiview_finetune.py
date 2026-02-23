@@ -10,8 +10,9 @@ model = dict(
     type="multiview_wan_video_vae",  # Registered in opensora/models/vae/__init__.py
     z_dim=16,  # Latent dimension for Wan 2.1 VAE
     view_in=2,  # Number of input views (2 upper cameras)
-    view_compression=2,  # Compression ratio: 2 views -> 1 latent
-    use_view_embedding=True,  # Use view positional embeddings
+    view_compression=2,  # Compression ratio: 2 views -> 1 latent (like time dimension)
+    use_view_embedding=True,  # Use STRONG view embeddings to differentiate
+    view_mixing_strategy="embedding",  # Key: embeddings guide what each view should decode to
     from_scratch=False,
     # Load Wan 2.1 VAE checkpoint
     from_pretrained="/home/piado/scratch/Wan2.1_VAE.pth",
@@ -42,7 +43,7 @@ prefetch_factor = 2
 # ============
 optim = dict(
     cls="AdamW",  # Use standard PyTorch AdamW (HybridAdam requires CUDA_HOME)
-    lr=3e-5,#1e-5,  # Lower learning rate for fine-tuning
+    lr=5e-4,  # INCREASED: With proper loss scaling, we can use higher LR
     eps=1e-8,
     weight_decay=0.0,
     betas=(0.9, 0.98),
@@ -84,12 +85,13 @@ update_warmup_steps = False  # No warmup needed
 vae_loss_config = dict(
     perceptual_loss_weight=0.5,
     kl_loss_weight=5e-4,  # Small KL weight for fine-tuning
+    view_consistency_weight=0.01,  # REDUCED: View consistency loss was causing identical reconstructions
 )
 
 # ============
 # Multi-view specific config
 # ============
-view_flatten_in_loss = True  # Flatten views for loss computation
+view_flatten_in_loss = False  # CHANGED: Don't flatten views, preserve view dimension for better loss
 view_flatten_in_disc = True  # Flatten views for discriminator (if used)
 
 # ============
