@@ -16,6 +16,8 @@ model = dict(
     from_scratch=False,
     # Load Wan 2.1 VAE checkpoint
     from_pretrained="/home/piado/scratch/Wan2.1_VAE.pth",
+    freeze_temporal=True,
+    train_spatial=True,
 )
 
 # ============
@@ -23,7 +25,7 @@ model = dict(
 # ============
 dataset = dict(
     type="pt_video",  # Our custom dataset for .pt files
-    data_path="/home/piado/projects/aip-lindell/piado/vae/data/preprocessed_initial_experiments/p17_EXP-1-head/017_EXP-1-head.pt",
+    data_path="/datasets/lindell-proj/neumayr/nersemble_v2/processed/128-res/p018/EXP-1-head/p018_EXP-1-head.pt",
     # Alternative: point to a single .pt file or JSON file
     # data_path="/home/piado/projects/aip-lindell/piado/data/preprocessed_initial_experiments/p17_EXP-1-head/017.pt",
     repeat=1000,  # Repeat the single sample many times for overfitting (1k steps / 1 sample = 1000 repeats)
@@ -91,6 +93,8 @@ vae_loss_config = dict(
 # ============
 # Multi-view specific config
 # ============
+# Wan VAE decoder outputs [-1, 1]; scale dataset [0, 1] -> [-1, 1] so loss and vis are correct
+vae_target_range = "[-1,1]"
 view_flatten_in_loss = False  # CHANGED: Don't flatten views, preserve view dimension for better loss
 view_flatten_in_disc = True  # Flatten views for discriminator (if used)
 
@@ -111,9 +115,13 @@ final_eval = True  # Run final evaluation after training
 final_eval_num_samples = 1  # Only 1 sample
 
 # ============
-# Performance logging
+# Performance logging & bottleneck / shape debugging
 # ============
 log_memory = False  # Set to True to log GPU memory usage (adds small overhead)
+# Print timing breakdown every N steps to find bottleneck (0 = off). Target: ~5 min for 1k steps.
+log_bottleneck_every = 50
+# Print latent shapes [B,V,C,T,H,W] every N steps; also enables VAE-internal shape logs (0 = off).
+log_latent_shapes_every = 100
 
 # ============
 # Training steps (for overfitting)

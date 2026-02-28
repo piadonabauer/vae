@@ -382,6 +382,11 @@ def process_sequence(
             continue
         cam_video_out = seq_dir / f"cam_{serial}_processed.mp4"
 
+        # Skip if already processed
+        if cam_video_out.exists():
+            print(f"[preprocess] Skipping already processed video: {cam_video_out}")
+            continue
+
         print(f"[preprocess] Processing camera {serial} for {sequence_name}")
         t0 = time.time()
         save_video_mp4(cam_video_in, cam_video_out, converter, image_size=image_size)

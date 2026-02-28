@@ -947,185 +947,6 @@ def count_conv3d(model):
             count += 1
     return count
 
-
-class ViewCompressor(nn.Module):
-    """
-    Lightweight view mixing layer to compress or expand the view axis.
-
-    Why: we want a single 4D latent space that captures inter-view redundancy
-    without rewriting the entire 3D VAE stack. This projects the view axis
-    with a 1x1 conv (linear layer) while preserving spatial/temporal structure.
-    
-    IMPROVED: Uses selective/attentive pooling instead of simple averaging to
-    better preserve view-specific features.
-    """
-
-    def __init__(self, in_views, out_views, init="avg", use_learned_weights=True):
-        super().__init__()
-        self.in_views = int(in_views)
-        self.out_views = int(out_views)
-        self.use_learned_weights = use_learned_weights
-        
-        if self.in_views == self.out_views:
-            # No-op path keeps parameters stable when no compression is needed.
-            self.proj = nn.Identity()
-            self.learned_weights = None
-        else:
-            # Conv1d over the view axis: this is the "linear layer" for view mixing.
-            self.proj = nn.Conv1d(self.in_views, self.out_views, kernel_size=1, bias=True)
-            
-            # Optional: learned attention weights for view pooling
-            if use_learned_weights:
-                # Attention weights: [out_views, in_views]
-                # Each output view learns which input views to focus on
-                self.learned_weights = nn.Parameter(torch.ones(self.out_views, self.in_views))
-                nn.init.xavier_uniform_(self.learned_weights)
-            else:
-                self.learned_weights = None
-            
-            if init == "avg":
-                # Start from an average across views to keep recon stable at init.
-                with torch.no_grad():
-                    self.proj.weight.fill_(1.0 / max(1, self.in_views))
-                    nn.init.zeros_(self.proj.bias)
-
-    def forward(self, x):
-        # x: [B, V, C, T, H, W] -> [B, V', C, T, H, W]
-        # We permute so the view axis becomes the Conv1d "channel".
-        if isinstance(self.proj, nn.Identity):
-            return x
-        
-        b, v, c, t, h, w = x.shape
-        x = x.permute(0, 2, 3, 4, 5, 1).contiguous()  # B C T H W V
-        x = x.view(-1, v)  # (B*C*T*H*W) x V
-        
-        if self.use_learned_weights and self.learned_weights is not None:
-            # Apply learned attention-based mixing
-            # weights: [V_out, V_in], x: [N, V_in]
-            weights = torch.softmax(self.learned_weights, dim=1)  # Normalize
-            x = torch.matmul(x, weights.t())  # [N, V_in] @ [V_in, V_out] -> [N, V_out]
-            v_out = weights.shape[0]
-        else:
-            # Standard learned projection
-            x = x.unsqueeze(-1)  # [N, V, 1] for Conv1d
-            x = self.proj(x)  # [N, V_out, 1]
-            x = x.squeeze(-1)  # [N, V_out]
-            v_out = self.out_views
-        
-        x = x.view(b, c, t, h, w, v_out).permute(0, 5, 1, 2, 3, 4).contiguous()
-        return x
-
-
-class ViewConditionalDecoder(nn.Module):
-    """
-    View-conditional decoder wrapper that injects view embeddings throughout decode process.
-    
-    Strategy: Just like the VAE naturally encodes/decodes the time dimension, we condition
-    the decode on which view we're reconstructing by injecting view embeddings at MULTIPLE
-    decoder layers, not just as post-hoc corrections.
-    
-    Why: This guides the entire reconstruction process toward view-specific features, similar
-    to how temporal patterns are naturally handled during decode.
-    
-    Usage: Wrap a base VAE decoder, and for each view, apply view-specific modulation at
-    multiple depths during decoding (not just at the end).
-    """
-    
-    def __init__(self, num_views, base_channels=96):
-        super().__init__()
-        self.num_views = num_views
-        self.base_channels = base_channels
-        
-        # View embeddings: learnable per-view feature vectors
-        # These will be used to modulate features at different decoder depths
-        self.view_embeddings = nn.ParameterList([
-            nn.Parameter(torch.randn(base_channels)) for _ in range(num_views)
-        ])
-        
-        # Learnable projection: embed_dim -> channels for modulation at each layer
-        self.embed_projections = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(base_channels, base_channels),
-                nn.ReLU(),
-                nn.Linear(base_channels, base_channels),
-            )
-            for _ in range(4)  # 4 depths in typical decoder (conv1, middle, 3x upsample blocks)
-        ])
-        
-        # Initialize embeddings to be orthogonal for maximum separation
-        for emb in self.view_embeddings:
-            nn.init.uniform_(emb, -1, 1)
-        
-    def get_view_modulation(self, view_idx, layer_idx):
-        """
-        Get view-specific modulation for a given layer.
-        Returns [scale, shift] to apply: x = x * (1 + scale) + shift
-        """
-        view_emb = self.view_embeddings[view_idx]  # [base_channels]
-        modulation = self.embed_projections[min(layer_idx, len(self.embed_projections)-1)](view_emb)
-        
-        # Split into scale and shift
-        scale = torch.tanh(modulation[:len(modulation)//2]) * 0.5  # [-0.5, 0.5] for stability
-        shift = modulation[len(modulation)//2:] * 0.1  # Small shift
-        
-        return scale, shift
-    
-    def apply_view_modulation(self, x, view_idx, layer_idx):
-        """
-        Apply view-specific modulation to features.
-        x: [B, C, T, H, W]
-        Returns: x with view-specific scale and shift applied
-        """
-        scale, shift = self.get_view_modulation(view_idx, layer_idx)
-        
-        # Reshape for broadcasting: scale/shift are [C], x is [B, C, T, H, W]
-        scale = scale.view(1, -1, 1, 1, 1)
-        shift = shift.view(1, -1, 1, 1, 1)
-        
-        return x * (1.0 + scale) + shift
-
-
-class ViewPositionalEmbedding(nn.Module):
-    """
-    Learnable view embeddings to encode camera perspective into latent space.
-
-    Why: Provides the model a way to distinguish which camera view is being reconstructed.
-    
-    KEY INSIGHT: Embeddings alone can't recover information lost in averaging.
-    They work best when views are NOT compressed/averaged first.
-    
-    Use with view_compression=1 for best results (no compression before embeddings).
-    """
-
-    def __init__(self, num_views, channels, use_multiplicative=True):
-        super().__init__()
-        self.num_views = num_views
-        self.channels = channels
-        self.use_multiplicative = use_multiplicative
-        
-        # Additive embedding: Small learnable shifts per view
-        # Keep magnitude small so we don't corrupt latent space
-        self.embedding_add = nn.Parameter(torch.randn(1, num_views, channels, 1, 1, 1) * 0.05)
-        
-        # Multiplicative embedding: Small learnable scale per view
-        if use_multiplicative:
-            # Initialize near 1.0 so scaling is gentle (0.95 to 1.05 range)
-            mul_init = torch.ones(1, num_views, channels, 1, 1, 1)
-            mul_init = mul_init + torch.randn(1, num_views, channels, 1, 1, 1) * 0.05
-            self.embedding_mul = nn.Parameter(mul_init)
-        else:
-            self.embedding_mul = None
-
-    def forward(self, x):
-        # x: [B, V, C, T, H, W]
-        # Apply per-view modulation: gentle scaling + shifting
-        # Magnitude designed to NOT corrupt the learned latent distribution
-        if self.embedding_mul is not None:
-            return x * self.embedding_mul + self.embedding_add
-        else:
-            return x + self.embedding_add
-
-
 class VideoVAE_(nn.Module):
 
     def __init__(self,
@@ -1231,6 +1052,114 @@ class VideoVAE_(nn.Module):
         self._enc_conv_num = count_conv3d(self.encoder)
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
+
+
+class ViewPositionalEmbedding(nn.Module):
+    """
+    Learnable view embeddings to encode camera perspective into latent space.
+
+    Why: Provides the model a way to distinguish which camera view is being reconstructed.
+    
+    KEY INSIGHT: Embeddings alone can't recover information lost in averaging.
+    They work best when views are NOT compressed/averaged first.
+    
+    Use with view_compression=1 for best results (no compression before embeddings).
+    """
+
+    def __init__(self, num_views, channels, use_multiplicative=True):
+        super().__init__()
+        self.num_views = num_views
+        self.channels = channels
+        self.use_multiplicative = use_multiplicative
+        
+        # Additive embedding: Small learnable shifts per view
+        # Keep magnitude small so we don't corrupt latent space
+        self.embedding_add = nn.Parameter(torch.randn(1, num_views, channels, 1, 1, 1) * 0.05)
+        
+        # Multiplicative embedding: Small learnable scale per view
+        if use_multiplicative:
+            # Initialize near 1.0 so scaling is gentle (0.95 to 1.05 range)
+            mul_init = torch.ones(1, num_views, channels, 1, 1, 1)
+            mul_init = mul_init + torch.randn(1, num_views, channels, 1, 1, 1) * 0.05
+            self.embedding_mul = nn.Parameter(mul_init)
+        else:
+            self.embedding_mul = None
+
+    def forward(self, x):
+        # x: [B, V, C, T, H, W]
+        # Apply per-view modulation: gentle scaling + shifting
+        # Magnitude designed to NOT corrupt the learned latent distribution
+        if self.embedding_mul is not None:
+            return x * self.embedding_mul + self.embedding_add
+        else:
+            return x + self.embedding_add
+
+class ViewCompressor(nn.Module):
+    """
+    Lightweight view mixing layer to compress or expand the view axis.
+
+    Why: we want a single 4D latent space that captures inter-view redundancy
+    without rewriting the entire 3D VAE stack. This projects the view axis
+    with a 1x1 conv (linear layer) while preserving spatial/temporal structure.
+    
+    IMPROVED: Uses selective/attentive pooling instead of simple averaging to
+    better preserve view-specific features.
+    """
+
+    def __init__(self, in_views, out_views, init="avg", use_learned_weights=True):
+        super().__init__()
+        self.in_views = int(in_views)
+        self.out_views = int(out_views)
+        self.use_learned_weights = use_learned_weights
+        
+        if self.in_views == self.out_views:
+            # No-op path keeps parameters stable when no compression is needed.
+            self.proj = nn.Identity()
+            self.learned_weights = None
+        else:
+            # Conv1d over the view axis: this is the "linear layer" for view mixing.
+            self.proj = nn.Conv1d(self.in_views, self.out_views, kernel_size=1, bias=True)
+            
+            # Optional: learned attention weights for view pooling
+            if use_learned_weights:
+                # Attention weights: [out_views, in_views]
+                # Each output view learns which input views to focus on
+                self.learned_weights = nn.Parameter(torch.ones(self.out_views, self.in_views))
+                nn.init.xavier_uniform_(self.learned_weights)
+            else:
+                self.learned_weights = None
+            
+            if init == "avg":
+                # Start from an average across views to keep recon stable at init.
+                with torch.no_grad():
+                    self.proj.weight.fill_(1.0 / max(1, self.in_views))
+                    nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x):
+        # x: [B, V, C, T, H, W] -> [B, V', C, T, H, W]
+        # We permute so the view axis becomes the Conv1d "channel".
+        if isinstance(self.proj, nn.Identity):
+            return x
+        
+        b, v, c, t, h, w = x.shape
+        x = x.permute(0, 2, 3, 4, 5, 1).contiguous()  # B C T H W V
+        x = x.view(-1, v)  # (B*C*T*H*W) x V
+        
+        if self.use_learned_weights and self.learned_weights is not None:
+            # Apply learned attention-based mixing
+            # weights: [V_out, V_in], x: [N, V_in]
+            weights = torch.softmax(self.learned_weights, dim=1)  # Normalize
+            x = torch.matmul(x, weights.t())  # [N, V_in] @ [V_in, V_out] -> [N, V_out]
+            v_out = weights.shape[0]
+        else:
+            # Standard learned projection
+            x = x.unsqueeze(-1)  # [N, V, 1] for Conv1d
+            x = self.proj(x)  # [N, V_out, 1]
+            x = x.squeeze(-1)  # [N, V_out]
+            v_out = self.out_views
+        
+        x = x.view(b, c, t, h, w, v_out).permute(0, 5, 1, 2, 3, 4).contiguous()
+        return x
 
 
 class MultiViewVideoVAE_(nn.Module):
@@ -1558,6 +1487,96 @@ class MultiViewWanVideoVAE(nn.Module):
         if isinstance(hidden_states, (list, tuple)):
             hidden_states = torch.stack(hidden_states)
         return self.single_decode(hidden_states, device)
+    
+    @staticmethod
+    def state_dict_converter():
+        return WanVideoVAEStateDictConverter()
+
+# class MultiViewWanVideoVAE(nn.Module):
+
+#     def __init__(
+#         self,
+#         base_vae,          # pass a normal WanVideoVAE
+#         view_in=2,
+#         freeze_temporal=True,
+#     ):
+#         super().__init__()
+
+#         self.base = base_vae
+#         self.view_in = view_in
+#         self.z_dim = base_vae.z_dim
+
+#         # 🔥 Latent fusion (V → 1)
+#         self.latent_fusion = nn.Conv3d(
+#             in_channels=view_in * self.z_dim,
+#             out_channels=self.z_dim,
+#             kernel_size=1,
+#             bias=False,
+#         )
+
+#         # 🔥 Latent expansion (1 → V)
+#         self.latent_expand = nn.Conv3d(
+#             in_channels=self.z_dim,
+#             out_channels=view_in * self.z_dim,
+#             kernel_size=1,
+#             bias=False,
+#         )
+
+#         # Freeze only temporal modules
+#         if freeze_temporal:
+#             for name, param in self.base.named_parameters():
+#                 if "temporal" in name.lower():
+#                     param.requires_grad = False
+
+#     # -----------------------------------
+#     # ENCODE
+#     # -----------------------------------
+#     def encode(self, x):
+
+#         # x: [B, V, C, T, H, W]
+#         B, V, C, T, H, W = x.shape
+
+#         latents = []
+#         for v in range(V):
+#             z_v = self.base.encode(x[:, v])
+#             latents.append(z_v)
+
+#         # [B, V, Z, T', H', W']
+#         z_stack = torch.stack(latents, dim=1)
+
+#         B, V, Z, T2, H2, W2 = z_stack.shape
+
+#         # channel-fuse
+#         z_stack = z_stack.view(B, V * Z, T2, H2, W2)
+#         z = self.latent_fusion(z_stack)
+
+#         return z
+
+#     # -----------------------------------
+#     # DECODE
+#     # -----------------------------------
+#     def decode(self, z):
+
+#         # expand
+#         z_expand = self.latent_expand(z)
+
+#         B, _, T2, H2, W2 = z_expand.shape
+#         Z = self.z_dim
+
+#         z_expand = z_expand.view(B, self.view_in, Z, T2, H2, W2)
+
+#         recons = []
+#         for v in range(self.view_in):
+#             x_v = self.base.decode(z_expand[:, v])
+#             recons.append(x_v)
+
+#         return torch.stack(recons, dim=1)
+
+#     def forward(self, x):
+#         z = self.encode(x)
+#         x_rec = self.decode(z)
+#         return x_rec
+        
 
 class WanVideoVAEStateDictConverter:
 

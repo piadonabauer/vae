@@ -96,7 +96,7 @@ def build_arg_parser():
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=None,
+        default="/home/piado/scratch/Wan2.1_VAE.pth",
         help="Path to pretrained WanVideoVAE checkpoint (ckpt/pt/safetensors).",
     )
     parser.add_argument(
@@ -117,7 +117,7 @@ def main():
     args = build_arg_parser().parse_args()  # parse CLI args
     workspace_root = args.workspace_root  # repo root
     nersemble_root = args.nersemble_root  # dataset root
-    diffsynth_root = workspace_root / "DiffSynth-Studio"  # DiffSynth code
+    diffsynth_root = workspace_root / "vae/DiffSynth-Studio"  # DiffSynth code
     nersemble_pkg_root = workspace_root / "nersemble-data" / "src"  # data utils
 
     # Local imports for the downloaded dataset.
@@ -128,6 +128,8 @@ def main():
         NeRSembleDataManager,
         NeRSembleParticipantDataManager,
     )
+
+    # nersemble_data path : /home/piado/projects/aip-lindell/piado/vae/DiffSynth-Studio/diffsynth/core/data/nersemble-data/src/nersemble_data/data/nersemble_data.py
 
     data_folder = NeRSembleDataManager(str(nersemble_root))  # scan participants
     participants = sorted(data_folder.list_participants())
@@ -208,22 +210,21 @@ def main():
     vae_module = load_wan_video_vae_module(  # dynamic import
         diffsynth_root / "diffsynth/models/wan_video_vae.py"
     )
-
     WanVideoVAE = getattr(vae_module, "WanVideoVAE", None)
-    MultiViewWanVideoVAE = getattr(vae_module, "MultiViewWanVideoVAE", None)
+    #MultiViewWanVideoVAE = getattr(vae_module, "MultiViewWanVideoVAE", None)
 
     print("WanVideoVAE available:", WanVideoVAE is not None)
-    print("MultiViewWanVideoVAE available:", MultiViewWanVideoVAE is not None)
+    #print("MultiViewWanVideoVAE available:", MultiViewWanVideoVAE is not None)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"  # choose device
 
-    use_multiview = MultiViewWanVideoVAE is not None
-    if use_multiview:
-        vae = MultiViewWanVideoVAE(view_in=len(upper_serials)).to(device)  # multiview
-    else:
-        if WanVideoVAE is None:
-            raise RuntimeError("WanVideoVAE is not available in the module.")
-        vae = WanVideoVAE().to(device)  # single-view
+    #use_multiview = MultiViewWanVideoVAE is not None
+    #if use_multiview:
+    #    vae = MultiViewWanVideoVAE(view_in=len(upper_serials)).to(device)  # multiview
+    #else:
+    if WanVideoVAE is None:
+        raise RuntimeError("WanVideoVAE is not available in the module.")
+    vae = WanVideoVAE().to(device)  # single-view
 
     # Optional: load a checkpoint if you have one.
     checkpoint_path = args.checkpoint
@@ -240,7 +241,8 @@ def main():
 
     vae.eval()  # inference mode
     print("Using device:", device)
-    print("Multi-view mode:", use_multiview)
+    #print("Multi-view mode:", use_multiview)
+    use_multiview = False
 
     # Main VAE operations: encode and decode
     with torch.no_grad():  # no gradients
