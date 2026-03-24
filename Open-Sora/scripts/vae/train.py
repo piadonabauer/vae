@@ -1,3 +1,8 @@
+# START with: python3 scripts/vae/train.py /home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py
+
+# resume training with: python scripts/vae/train.py configs/vae/train/wan_multiview_finetune.py \
+#  --load /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/260228_150719-.../epoch0-global_step200
+
 import gc
 import os
 import random
@@ -57,6 +62,7 @@ except Exception:
 
 import torch
 import torch.distributed as dist
+from torch.utils.data.dataloader import default_collate
 from colossalai.booster import Booster
 from colossalai.utils import set_seed
 from torch.profiler import ProfilerActivity, profile, schedule
@@ -101,6 +107,38 @@ my_schedule = schedule(
 
 
 # Evaluation Metrics and Visualization Functions
+
+
+def downsample_video_tensor(x: torch.Tensor, target_h: int = 64, target_w: int = 64, target_t: int = 9) -> torch.Tensor:
+    """
+    Downsample a batch of videos to fixed spatial and temporal resolution.
+
+    Supports:
+    - [B, V, C, T, H, W] (multi-view)
+    - [B, C, T, H, W] (single-view)
+    Other shapes are returned unchanged.
+    """
+    if x.dim() == 6:
+        b, v, c, t, h, w = x.shape
+        if t != target_t:
+            idx = torch.linspace(0, t - 1, target_t, device=x.device).long()
+            x = x.index_select(3, idx)
+            t = target_t
+        x_flat = x.view(b * v * t, c, h, w)
+        x_flat = F.interpolate(x_flat, size=(target_h, target_w), mode="bilinear", align_corners=False)
+        x = x_flat.view(b, v, c, t, target_h, target_w)
+    elif x.dim() == 5:
+        b, c, t, h, w = x.shape
+        if t != target_t:
+            idx = torch.linspace(0, t - 1, target_t, device=x.device).long()
+            x = x.index_select(2, idx)
+            t = target_t
+        x_perm = x.permute(0, 2, 1, 3, 4)  # [B, T, C, H, W]
+        x_flat = x_perm.reshape(b * t, c, h, w)
+        x_flat = F.interpolate(x_flat, size=(target_h, target_w), mode="bilinear", align_corners=False)
+        x_perm = x_flat.view(b, t, c, target_h, target_w)
+        x = x_perm.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
+    return x
 
 
 def compute_psnr(img1, img2, max_val=1.0):
@@ -211,15 +249,28 @@ def compute_metrics(x_orig, x_rec):
     x_orig = torch.clamp(x_orig, 0, 1)
     x_rec = torch.clamp(x_rec, 0, 1)
     
-    # Handle multi-view case by flattening views for metric computation
-    # We want to compute metrics per-view, not across views
-    if x_orig.dim() == 6:  # Multi-view: [B, V, C, T, H, W]
-        b, v, c, t, h, w = x_orig.shape
-        x_orig_flat = x_orig.view(b * v, c, t, h, w)
-        x_rec_flat = x_rec.view(b * v, c, t, h, w)
-    else:  # Single-view: [B, C, T, H, W]
-        x_orig_flat = x_orig
-        x_rec_flat = x_rec
+    # Ensure temporal dimensions match before flattening; some sequences can be shorter.
+    if x_orig.dim() == 6 and x_rec.dim() == 6:  # Multi-view: [B, V, C, T, H, W]
+        b_o, v_o, c_o, t_o, h_o, w_o = x_orig.shape
+        b_r, v_r, c_r, t_r, h_r, w_r = x_rec.shape
+        # Align along time; assume same B,V,C,H,W, but allow T to differ by truncating to min
+        t = min(t_o, t_r)
+        x_orig_use = x_orig[:, :, :, :t, :, :]
+        x_rec_use = x_rec[:, :, :, :t, :, :]
+        b, v, c, _, h, w = x_orig_use.shape
+        x_orig_flat = x_orig_use.view(b * v, c, t, h, w)
+        x_rec_flat = x_rec_use.view(b * v, c, t, h, w)
+    else:  # Single-view: [B, C, T, H, W] (or already flattened)
+        if x_orig.dim() == 5 and x_rec.dim() == 5:
+            b_o, c_o, t_o, h_o, w_o = x_orig.shape
+            b_r, c_r, t_r, h_r, w_r = x_rec.shape
+            t = min(t_o, t_r)
+            x_orig_flat = x_orig[:, :, :t, :, :]
+            x_rec_flat = x_rec[:, :, :t, :, :]
+        else:
+            # Fallback: assume shapes already match
+            x_orig_flat = x_orig
+            x_rec_flat = x_rec
     
     # Compute metrics per sample in the batch
     batch_size = x_orig_flat.shape[0]
@@ -249,97 +300,360 @@ def compute_metrics(x_orig, x_rec):
     }
 
 
-def create_visualization_grid(x_orig, x_rec, num_samples=4, num_frames=4, value_range="[0,1]"):
+def compute_metrics_per_frame(x_orig, x_rec, max_val=1.0):
     """
-    Create a side-by-side visualization grid of original vs reconstructed videos for ALL views.
-    
+    Compute PSNR, SSIM, and MSE per frame (no temporal averaging).
+
     Args:
         x_orig: Original video tensor, shape [B, C, T, H, W] or [B, V, C, T, H, W]
         x_rec: Reconstructed video tensor, same shape as x_orig
-        num_samples: Number of samples from the batch to visualize
-        num_frames: Number of frames per sample to show
-        value_range: "[0,1]" (default) or "[-1,1]" - range of input values; output is always [0,1] for display
+        max_val: Maximum possible pixel value (1.0 for [0,1] range)
+
     Returns:
-        List of wandb.Image objects for logging
+        Dictionary with lists of per-frame metric values:
+            - psnr_per_frame: list[float] of length T
+            - ssim_per_frame: list[float] of length T
+            - mse_per_frame: list[float] of length T
     """
-    # Handle multi-view: show ALL views
-    is_multiview = False
-    num_views = 1
-    if x_orig.dim() == 6:  # Multi-view: [B, V, C, T, H, W]
-        is_multiview = True
-        num_views = x_orig.shape[1]
-    
-    # Normalize to [0, 1] for display (detach, float32, CPU)
-    x_orig = x_orig.detach().float().cpu()
-    x_rec = x_rec.detach().float().cpu()
-    if value_range == "[-1,1]":
-        x_orig = (x_orig + 1.0) * 0.5
-        x_rec = (x_rec + 1.0) * 0.5
+    # Clamp to valid range for metrics (assume inputs already roughly in [0,1])
     x_orig = torch.clamp(x_orig, 0, 1)
     x_rec = torch.clamp(x_rec, 0, 1)
+
+    # Align temporal dimension and flatten views if present
+    if x_orig.dim() == 6 and x_rec.dim() == 6:  # [B, V, C, T, H, W]
+        b_o, v_o, c_o, t_o, h_o, w_o = x_orig.shape
+        b_r, v_r, c_r, t_r, h_r, w_r = x_rec.shape
+        t = min(t_o, t_r)
+        x_orig_use = x_orig[:, :, :, :t, :, :]
+        x_rec_use = x_rec[:, :, :, :t, :, :]
+        b, v, c, _, h, w = x_orig_use.shape
+        # Flatten batch and view: [B, V, C, T, H, W] -> [B*V, C, T, H, W]
+        x_orig_flat = x_orig_use.view(b * v, c, t, h, w)
+        x_rec_flat = x_rec_use.view(b * v, c, t, h, w)
+    elif x_orig.dim() == 5 and x_rec.dim() == 5:  # [B, C, T, H, W]
+        b_o, c_o, t_o, h_o, w_o = x_orig.shape
+        b_r, c_r, t_r, h_r, w_r = x_rec.shape
+        t = min(t_o, t_r)
+        x_orig_flat = x_orig[:, :, :t, :, :]
+        x_rec_flat = x_rec[:, :, :t, :, :]
+    else:
+        # Fallback: assume shapes already match and treat third dim as time
+        x_orig_flat = x_orig
+        x_rec_flat = x_rec
+        t = x_orig_flat.shape[2]
+
+    # Vectorized MSE and PSNR per frame (average over batch, channels, and spatial dims)
+    diff = x_orig_flat - x_rec_flat  # [B', C, T, H, W]
+    mse_per_frame = torch.mean(diff ** 2, dim=(0, 1, 3, 4))  # [T]
+
+    eps = 1e-10
+    mse_safe = torch.clamp(mse_per_frame, min=eps)
+    psnr_per_frame = 10.0 * torch.log10((max_val ** 2) / mse_safe)  # [T]
+
+    # SSIM per frame: reuse compute_ssim on single-frame "videos"
+    ssim_per_frame = []
+    for frame_idx in range(t):
+        # Shape [B', C, H, W] -> [B', C, 1, H, W] so compute_ssim can treat it as a 1-frame video
+        x_o_frame = x_orig_flat[:, :, frame_idx, :, :].unsqueeze(2)
+        x_r_frame = x_rec_flat[:, :, frame_idx, :, :].unsqueeze(2)
+        ssim_val = compute_ssim(x_o_frame, x_r_frame, max_val=max_val)
+        ssim_per_frame.append(ssim_val)
+
+    return {
+        "psnr_per_frame": psnr_per_frame.detach().cpu().tolist(),
+        "ssim_per_frame": ssim_per_frame,
+        "mse_per_frame": mse_per_frame.detach().cpu().tolist(),
+    }
+
+
+def _draw_label_strip(labels, col_widths, strip_height=28, font_size=14):
+    """Draw a horizontal strip with one label per column. Returns RGB numpy array [strip_height, total_width, 3]."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+    total_width = sum(col_widths)
+    img = Image.new("RGB", (total_width, strip_height), color=(40, 40, 40))
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+    except Exception:
+        font = ImageFont.load_default()
+    x = 0
+    for i, text in enumerate(labels):
+        w = col_widths[i]
+        try:
+            bbox = draw.textbbox((0, 0), text, font=font)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        except Exception:
+            tw, th = 80, strip_height  # fallback: don't center
+        tx = x + max(0, (w - tw) // 2)
+        ty = (strip_height - th) // 2
+        draw.text((tx, ty), text, fill=(220, 220, 220), font=font)
+        x += w
+    return np.array(img)
+
+
+def create_visualization_grid(x_orig, x_rec, num_samples=4, num_frames=None, value_range="[0,1]"):
+    """
+    Create a visualization where:
+    - All (downsampled) temporal frames are laid out horizontally (time left -> right),
+    - An arrow indicates temporal direction,
+    - Rows correspond to:
+        * multi-view:  View 1 input, View 2 input, View 1 recon., View 2 recon.
+        * single-view: Input, Reconstruction
+    - A small metric panel below shows per-frame PSNR/SSIM/MSE curves.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        Image = None
+
+    is_multiview = x_orig.dim() == 6
+    num_views = x_orig.shape[1] if is_multiview else 1
+
+    # Compute per-frame metrics on CPU tensors in [0,1]
+    x_o_metrics = x_orig
+    x_r_metrics = x_rec
+    if value_range == "[-1,1]":
+        x_o_metrics = 0.5 * (x_o_metrics + 1.0)
+        x_r_metrics = 0.5 * (x_r_metrics + 1.0)
+    metrics = compute_metrics_per_frame(x_o_metrics, x_r_metrics, max_val=1.0)
+
+    # Move to numpy for rendering
+    x_orig = x_o_metrics.detach().float().cpu().numpy()
+    x_rec = x_r_metrics.detach().float().cpu().numpy()
+    x_orig = np.clip(x_orig, 0.0, 1.0).astype(np.float32)
+    x_rec = np.clip(x_rec, 0.0, 1.0).astype(np.float32)
+
     if is_multiview:
         b, v, c, t, h, w = x_orig.shape
     else:
         b, c, t, h, w = x_orig.shape
         v = 1
-    
+
     num_samples = min(num_samples, b)
+    # Use all available (downsampled) frames by default
+    if num_frames is None:
+        num_frames = t
     num_frames = min(num_frames, t)
-    
-    # Select evenly spaced frames
-    frame_indices = torch.linspace(0, t - 1, num_frames).long()
-    
+    frame_indices = np.linspace(0, t - 1, num_frames).astype(int)
+
+    # Row labels:
+    if is_multiview and num_views >= 2:
+        row_labels = [
+            "View 1 – input",
+            "View 2 – input",
+            "View 1 – reconstr.",
+            "View 2 – reconstr.",
+        ]
+    else:
+        row_labels = ["Input", "Reconstruction"]
+
     images = []
     for sample_idx in range(num_samples):
-        # For each sample, show all views stacked horizontally, with orig/rec columns
-        all_view_grids = []
-        
-        for view_idx in range(num_views):
-            view_frames = []
-            
-            for frame_idx in frame_indices:
-                if is_multiview:
-                    # Get frame for this view: [C, H, W]
+        # Build row-major grid: rows = views × {input,recon}, cols = time frames
+        rows = []
+        if is_multiview and num_views >= 2:
+            # Inputs per view
+            for view_idx in range(num_views):
+                frames = []
+                for frame_idx in frame_indices:
                     orig_frame = x_orig[sample_idx, view_idx, :, frame_idx, :, :]
+                    orig_frame = (
+                        np.transpose(orig_frame, (1, 2, 0))
+                        if c == 3
+                        else np.repeat(orig_frame[0:1].transpose(1, 2, 0), 3, axis=-1)
+                    )
+                    frames.append(orig_frame)
+                rows.append(np.concatenate(frames, axis=1))
+            # Reconstructions per view
+            for view_idx in range(num_views):
+                frames = []
+                for frame_idx in frame_indices:
                     rec_frame = x_rec[sample_idx, view_idx, :, frame_idx, :, :]
-                else:
-                    # Single view: [C, H, W]
-                    orig_frame = x_orig[sample_idx, :, frame_idx, :, :]
-                    rec_frame = x_rec[sample_idx, :, frame_idx, :, :]
-                
-                # Convert to [H, W, C] for visualization (assuming RGB)
-                if c == 3:
-                    orig_frame = orig_frame.permute(1, 2, 0)  # [H, W, 3]
-                    rec_frame = rec_frame.permute(1, 2, 0)
-                else:
-                    # Grayscale: repeat channel dimension
-                    orig_frame = orig_frame[0].unsqueeze(-1).repeat(1, 1, 3)  # [H, W, 3]
-                    rec_frame = rec_frame[0].unsqueeze(-1).repeat(1, 1, 3)
-                
-                # Convert to numpy and ensure [0, 1] range
-                orig_frame = orig_frame.numpy()
-                rec_frame = rec_frame.numpy()
-                
-                # Stack orig and rec side-by-side for this frame
-                # [H, 2*W, 3]
-                frame_pair = np.concatenate([orig_frame, rec_frame], axis=1)
-                view_frames.append(frame_pair)
-            
-            # Stack all frames for this view vertically: [num_frames*H, 2*W, 3]
-            view_grid = np.concatenate(view_frames, axis=0)
-            all_view_grids.append(view_grid)
-        
-        # Now concatenate all views horizontally: [num_frames*H, num_views*2*W, 3]
-        combined_grid = np.concatenate(all_view_grids, axis=1)
-        
-        # Add text labels on top
-        # Create the image and add caption showing view information
-        caption = f"Sample {sample_idx} | View comparison: Left=Original, Right=Reconstructed"
-        if is_multiview:
-            caption = f"Sample {sample_idx} | Views 0-{num_views-1} | Left=Original, Right=Reconstructed"
-        
+                    rec_frame = (
+                        np.transpose(rec_frame, (1, 2, 0))
+                        if c == 3
+                        else np.repeat(rec_frame[0:1].transpose(1, 2, 0), 3, axis=-1)
+                    )
+                    frames.append(rec_frame)
+                rows.append(np.concatenate(frames, axis=1))
+        else:
+            # Single-view: two rows (input, recon)
+            frames_orig = []
+            frames_rec = []
+            for frame_idx in frame_indices:
+                o = x_orig[sample_idx, :, frame_idx, :, :]
+                r = x_rec[sample_idx, :, frame_idx, :, :]
+                o = (
+                    np.transpose(o, (1, 2, 0))
+                    if c == 3
+                    else np.repeat(o[0:1].transpose(1, 2, 0), 3, axis=-1)
+                )
+                r = (
+                    np.transpose(r, (1, 2, 0))
+                    if c == 3
+                    else np.repeat(r[0:1].transpose(1, 2, 0), 3, axis=-1)
+                )
+                frames_orig.append(o)
+                frames_rec.append(r)
+            rows.append(np.concatenate(frames_orig, axis=1))
+            rows.append(np.concatenate(frames_rec, axis=1))
+
+        # Convert to RGB uint8 image
+        grid = np.clip(np.concatenate(rows, axis=0), 0.0, 1.0)
+        grid = (grid * 255.0).astype(np.uint8)
+
+        # Convert to PIL for annotations if available
+        if Image is not None:
+            #img = Image.fromarray(grid)
+            #draw = ImageDraw.Draw(img)
+            base_img = Image.fromarray(grid)
+            try:
+                font = ImageFont.truetype(
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14
+                )
+            except Exception:
+                font = ImageFont.load_default()
+
+            H, W = grid.shape[0], grid.shape[1]
+            row_h = H // len(row_labels)
+
+            """
+            # Left-side row labels
+            for i, label in enumerate(row_labels):
+                y_center = i * row_h + row_h // 2
+                draw.text(
+                    (5, y_center - 7),
+                    label,
+                    fill=(255, 255, 255),
+                    font=font,
+                )
+
+            # Temporal arrow on top
+            arrow_y = 5
+            start_x = 80
+            end_x = W - 10
+            draw.line((start_x, arrow_y, end_x, arrow_y), fill=(255, 255, 0), width=2)
+            draw.polygon(
+            """
+            # --- Top band with time arrow (white background, black text) ---
+            top_h = 30
+            top = Image.new("RGB", (W, top_h), color=(255, 255, 255))
+            tdraw = ImageDraw.Draw(top)
+            arrow_y = top_h // 2
+            start_x = 60
+            end_x = W - 20
+            tdraw.line((start_x, arrow_y, end_x, arrow_y), fill=(0, 0, 0), width=2)
+            tdraw.polygon(
+                [
+                    (end_x, arrow_y),
+                    (end_x - 8, arrow_y - 4),
+                    (end_x - 8, arrow_y + 4),
+                ],
+                #fill=(255, 255, 0),
+                fill=(0, 0, 0),
+            )
+            #draw.text(
+            #    (start_x, arrow_y + 4),
+            tdraw.text(
+                (10, arrow_y - 7),
+                "time ",
+                #fill=(255, 255, 0),
+                fill=(0, 0, 0),
+                font=font,
+            )
+
+            # Metric panel below: simple line plots of per-frame PSNR/SSIM/MSE
+                        # --- Left band with row labels (white background, black text) ---
+            left_w = 160
+            left = Image.new("RGB", (left_w, H), color=(255, 255, 255))
+            ldraw = ImageDraw.Draw(left)
+            for i, label in enumerate(row_labels):
+                y_center = i * row_h + row_h // 2
+                ldraw.text(
+                    (10, y_center - 7),
+                    label,
+                    fill=(0, 0, 0),
+                    font=font,
+                )
+
+            # --- Metric panel below (white background, numeric per-frame values) ---
+            psnr = np.array(metrics["psnr_per_frame"], dtype=np.float32)
+            ssim = np.array(metrics["ssim_per_frame"], dtype=np.float32)
+            mse = np.array(metrics["mse_per_frame"], dtype=np.float32)
+
+            num_t = len(psnr)
+            panel_h = 50
+            panel = Image.new("RGB", (W + left_w, panel_h), color=(255, 255, 255))
+            pdraw = ImageDraw.Draw(panel)
+
+            # Per-frame metrics stacked under each temporal frame (small font)
+            try:
+                small_font = ImageFont.truetype(
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10
+                )
+            except Exception:
+                small_font = font
+
+            # Width of a single temporal frame on the grid
+            frame_w = max(1, W // max(1, num_frames))
+            for i in range(num_t):
+                x_center = left_w + int((i + 0.5) * frame_w)
+                y0 = 4
+                txts = [
+                    f"P={psnr[i]:.1f}",
+                    f"S={ssim[i]:.3f}",
+                    f"M={mse[i]:.4f}",
+                ]
+                for j, txt in enumerate(txts):
+                    try:
+                        bbox = pdraw.textbbox((0, 0), txt, font=small_font)
+                        w_txt = bbox[2] - bbox[0]
+                        h_txt = bbox[3] - bbox[1]
+                    except Exception:
+                        w_txt, h_txt = 40, 10
+                    pdraw.text(
+                        (x_center - w_txt // 2, y0 + j * (h_txt + 1)),
+                        txt,
+                        fill=(0, 0, 0),
+                        font=small_font,
+                    )
+
+
+            # _plot_curve(psnr, (0, 200, 0))
+            # _plot_curve(ssim, (0, 150, 255))
+            # _plot_curve(mse, (255, 80, 80))
+
+            # --- Compose final image ---
+            main = Image.new("RGB", (W + left_w, H), color=(255, 255, 255))
+            main.paste(left, (0, 0))
+            main.paste(base_img, (left_w, 0))
+
+
+            # pdraw.text((10, 2), "PSNR", fill=(0, 200, 0), font=font)
+            # pdraw.text((70, 2), "SSIM", fill=(0, 150, 255), font=font)
+            # pdraw.text((130, 2), "MSE", fill=(255, 80, 80), font=font)
+
+            combined = Image.new(
+                "RGB", (W + left_w, top_h + H + panel_h), color=(255, 255, 255)
+            )
+            combined.paste(top, (0, 0))
+            combined.paste(main, (0, top_h))
+            combined.paste(panel, (0, top_h + H))
+
+
+            # Combine main grid and metric panel
+            # combined = Image.new("RGB", (W, H + panel_h), color=(0, 0, 0))
+            # combined.paste(img, (0, 0))
+            # combined.paste(panel, (0, H))
+            combined_grid = np.array(combined)
+        else:
+            combined_grid = grid
+
+        caption = f"Sample {sample_idx + 1}"
         images.append(wandb.Image(combined_grid, caption=caption))
-    
     return images
 
 
@@ -430,6 +744,86 @@ def evaluate_model(model, dataloader, device, dtype, num_eval_samples=32,
     }
 
 
+def evaluate_fixed_sequence_per_frame(model, dataset, index, device, dtype, vae_target_range=None):
+    """
+    Evaluate a single fixed sequence and compute per-frame metrics.
+
+    This mirrors the pattern in `evaluate_model`: we switch the (possibly
+    booster-wrapped) model into eval mode, run a no-grad forward, then
+    restore the original training state.
+
+    Args:
+        model: VAE model (may be Booster-wrapped)
+        dataset: PTVideoDataset (or similar) providing dicts with "video" and "path"
+        index: Integer index into dataset.pt_files for the fixed sequence
+        device: torch.device
+        dtype: torch.dtype to run the model in
+        vae_target_range: "[0,1]" or "[-1,1]" (controls input/output scaling)
+
+    Returns:
+        metrics: dict with per-frame lists for PSNR, SSIM, and MSE
+    """
+    # Remember original training state
+    if hasattr(model, "module"):
+        was_training = model.module.training
+        model.module.eval()
+    else:
+        was_training = model.training
+        model.eval()
+
+    # Load single sequence from dataset (no batching in dataset itself)
+    sample = dataset[index]
+    x = sample["video"]  # [V, C, T, H, W] or [C, T, H, W]
+
+    # Add batch dimension: [1, V, C, T, H, W] or [1, C, T, H, W]
+    if x.dim() == 5:
+        x = x.unsqueeze(0)
+    elif x.dim() == 4:
+        x = x.unsqueeze(0)
+    else:
+        raise ValueError(f"Unexpected video shape for fixed-sequence eval: {x.shape}")
+
+    x = x.to(device, dtype)
+    is_multiview = x.dim() == 6
+
+    # Prepare input for model according to training range
+    x_input = x
+    if is_multiview or vae_target_range == "[-1,1]":
+        x_input = 2.0 * x - 1.0
+
+    with torch.no_grad():
+        # IMPORTANT: call the (possibly booster-wrapped) model exactly as in training
+        x_rec, _, _ = model(x_input)
+
+    # Map reconstructed output back to [0,1] for human-interpretable metrics
+    if is_multiview or vae_target_range == "[-1,1]":
+        x_rec_metrics = 0.5 * (x_rec + 1.0)
+    else:
+        x_rec_metrics = x_rec
+
+    x_orig_metrics = x  # already in [0,1]
+
+    metrics = compute_metrics_per_frame(x_orig_metrics, x_rec_metrics, max_val=1.0)
+
+    # Attach original sample path if available so we can persist metrics alongside it.
+    if "path" in sample:
+        metrics["sample_path"] = sample["path"]
+
+    # Restore original training/eval state
+    if hasattr(model, "module"):
+        if was_training:
+            model.module.train()
+        else:
+            model.module.eval()
+    else:
+        if was_training:
+            model.train()
+        else:
+            model.eval()
+
+    return metrics
+
+
 def main():
     # ======================================================
     # 1. configs & runtime variables
@@ -486,6 +880,56 @@ def main():
     # == build dataset ==
     dataset = build_module(cfg.dataset, DATASETS)
     logger.info("Dataset contains %s samples.", len(dataset))
+    # == optional val/held-out dataset for evaluation and reconstruction plots ==
+    val_dataset = None
+    if cfg.get("val_dataset") is not None:
+        val_dataset = build_module(cfg.val_dataset, DATASETS)
+        logger.info("Val (held-out) dataset contains %s samples.", len(val_dataset))
+
+    # == pick fixed train/test sequences for per-frame metrics ==
+    # We choose one sequence name that exists in both train and val (if possible),
+    # and then fix one sample index for train and one for val with that name.
+    fixed_train_index = None
+    fixed_val_index = None
+    fixed_seq_name = None
+
+    def _seq_name_from_path(path):
+        # path: .../pXXX/<sequence_name>/something.pt
+        return os.path.basename(os.path.dirname(path))
+
+    if hasattr(dataset, "pt_files"):
+        train_seq_names = [_seq_name_from_path(p) for p in dataset.pt_files]
+    else:
+        train_seq_names = []
+
+    if val_dataset is not None and hasattr(val_dataset, "pt_files"):
+        val_seq_names = [_seq_name_from_path(p) for p in val_dataset.pt_files]
+    else:
+        val_seq_names = []
+
+    if train_seq_names and val_seq_names:
+        common_names = sorted(set(train_seq_names) & set(val_seq_names))
+        if common_names:
+            fixed_seq_name = common_names[0]
+            fixed_train_index = train_seq_names.index(fixed_seq_name)
+            fixed_val_index = val_seq_names.index(fixed_seq_name)
+        else:
+            # Fallback: use first sample from each split independently
+            fixed_train_index = 0
+            fixed_val_index = 0 if val_seq_names else None
+            fixed_seq_name = train_seq_names[0]
+    elif train_seq_names:
+        fixed_train_index = 0
+        fixed_val_index = None
+        fixed_seq_name = train_seq_names[0]
+
+    if fixed_seq_name is not None:
+        logger.info(
+            "Fixed per-frame eval sequence name: %s (train idx=%s, val idx=%s)",
+            fixed_seq_name,
+            fixed_train_index,
+            fixed_val_index,
+        )
 
     # == build dataloader ==
     cache_pin_memory = pin_memory_cache_pre_alloc_numels is not None
@@ -641,8 +1085,10 @@ def main():
     logger.info("Training for %s epochs with %s steps per epoch", cfg_epochs, num_steps_per_epoch)
 
     # == resume ==
+    # To resume training, run with: --load /path/to/epochX-global_stepY
+    # (path to a checkpoint subdir that contains running_states.json and model/)
     if cfg.get("load", None) is not None:
-        logger.info("Loading checkpoint from %s", cfg.load)
+        logger.info("Resuming: loading checkpoint from %s", cfg.load)
         start_epoch = cfg.get("start_epoch", None)
         start_step = cfg.get("start_step", None)
         ret = checkpoint_io.load(
@@ -739,6 +1185,24 @@ def main():
             config=cfg.to_dict(),
             dir=exp_dir,
         )
+        # Use epochs as the x-axis in W&B charts.
+        # We still keep `step=...` in `wandb.log` for monotonic ordering, but define all
+        # training/eval metrics to use `epoch_float` as their step metric.
+        wandb.define_metric("epoch_float")
+        for pattern in (
+            "loss/*",
+            "metrics/*",
+            "time/*",
+            "memory/*",
+            "lr",
+            "global_grad_norm",
+            "reconstructions",
+            "val_reconstructions",
+            "fixed_seq/*",
+            "eval/*",
+            "final_eval/*",
+        ):
+            wandb.define_metric(pattern, step_metric="epoch_float")
         logger.info("Wandb initialized successfully. Training will begin shortly...")
     
 
@@ -811,6 +1275,9 @@ def main():
                     actual_update_step = (global_step + 1) // accumulation_steps
                     log_step += 1
                     acc_step += 1
+                    # Epoch coordinate for plotting in W&B.
+                    # global_step is 0-indexed; +1 makes the first update land at ~1/steps_per_epoch.
+                    epoch_float = (global_step + 1) / max(1, num_steps_per_epoch)
 
                     # == mixed strategy ==
                     x = batch["video"]
@@ -867,21 +1334,21 @@ def main():
                         with torch.no_grad():
                             x_min, x_max = x.min().item(), x.max().item()
                             r_min, r_max = x_rec.min().item(), x_rec.max().item()
-                        print(f"[step 0] input  x   range: [{x_min:.3f}, {x_max:.3f}] (expect ~[-1, 1])")
-                        print(f"[step 0] output x_rec range: [{r_min:.3f}, {r_max:.3f}] (expect ~[-1, 1]; if constant -> white vis)")
+                        #print(f"[step 0] input  x   range: [{x_min:.3f}, {x_max:.3f}] (expect ~[-1, 1])")
+                        #print(f"[step 0] output x_rec range: [{r_min:.3f}, {r_max:.3f}] (expect ~[-1, 1]; if constant -> white vis)")
                         if abs(r_max - r_min) < 0.01:
                             print("[step 0] WARNING: x_rec is nearly constant -> white output. Check: checkpoint loaded? expansion init?")
 
                     # High-level shape summary every N steps (0 = off)
-                    if coordinator.is_master() and log_latent_shapes_every and step % log_latent_shapes_every == 0:
-                        sh = x.shape
-                        if is_multiview:
-                            print(f"[step {step}] input  [B,V,C,T,H,W] = {list(sh)}")
-                        else:
-                            print(f"[step {step}] input  [B,C,T,H,W] = {list(sh)}")
-                        if z is not None:
-                            print(f"[step {step}] latent z [B,Z,T',H',W'] = {list(z.shape)}")
-                        print(f"[step {step}] output [B,V,C,T,H,W] = {list(x_rec.shape)}")
+                    # if coordinator.is_master() and log_latent_shapes_every and step % log_latent_shapes_every == 0:
+                    #     sh = x.shape
+                    #     if is_multiview:
+                    #         print(f"[step {step}] input  [B,V,C,T,H,W] = {list(sh)}")
+                    #     else:
+                    #         print(f"[step {step}] input  [B,C,T,H,W] = {list(sh)}")
+                    #     if z is not None:
+                    #         print(f"[step {step}] latent z [B,Z,T',H',W'] = {list(z.shape)}")
+                    #     print(f"[step {step}] output [B,V,C,T,H,W] = {list(x_rec.shape)}")
                     
                     # Log memory usage if enabled (can help identify OOM issues or memory leaks)
                     if log_memory and coordinator.is_master() and step % 10 == 0:
@@ -1070,33 +1537,76 @@ def main():
                             log_loss("gen_w", generator_loss, loss_dict, use_video)
                             log_loss("gen", g_loss, loss_dict, use_video)
                         
-                        # -- compute reconstruction metrics on current batch --
-                        # We compute metrics periodically to monitor reconstruction quality
-                        # without the overhead of a full evaluation pass. This gives us
-                        # real-time feedback on how well the model is learning to reconstruct.
-                        eval_every = cfg.get("eval_every", 0)  # 0 means disabled
+                        # -- compute reconstruction metrics on current batch (every eval_every) --
+                        eval_every = cfg.get("eval_every", 0)
                         compute_batch_metrics = (
-                            eval_every > 0 
+                            eval_every > 0
                             and (global_step + 1) % accumulation_steps == 0
                             and actual_update_step % eval_every == 0
                             and coordinator.is_master()
-                            and use_video == 1  # Only for video, not images
+                            and use_video == 1
                         )
-                        
                         if compute_batch_metrics:
-                            # Compute metrics on the current batch (before view flattening for loss)
-                            # We use the original x and x_rec shapes for accurate metric computation
                             batch_metrics = compute_metrics(x, x_rec)
-                            
-                            # Store metrics in loss_dict for logging
                             loss_dict["psnr"] = batch_metrics["psnr"]
                             loss_dict["ssim"] = batch_metrics["ssim"]
                             loss_dict["mse"] = batch_metrics["mse"]
-                            
-                            # Create visualizations for this batch (use same range as input for display)
+
+                        # -- plot train reconstruction every log_every steps (fixed train samples: 1 or 3 people) --
+                        log_every_steps = cfg.get("log_every", 10)
+                        plot_reconstruction = (
+                            (global_step + 1) % accumulation_steps == 0
+                            and actual_update_step % log_every_steps == 0
+                            and coordinator.is_master()
+                            and use_video == 1
+                        )
+                        if plot_reconstruction:
                             vis_range = "[-1,1]" if (vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview)) else "[0,1]"
-                            vis_images = create_visualization_grid(x, x_rec, num_samples=min(4, x.shape[0]), value_range=vis_range)
+                            dataset = dataloader.dataset
+                            participants_cfg = getattr(dataset, "participants", None)
+                            # 1 sample if single person, 3 samples from 3 people if multi-person
+                            num_vis = 3 if (participants_cfg is not None and len(participants_cfg) > 1) else 1
+                            num_vis = min(num_vis, len(dataset))
+                            vis_items = []
+                            if participants_cfg is not None and len(participants_cfg) > 1 and num_vis > 1:
+                                seen_pids = set()
+                                for idx in range(len(dataset)):
+                                    sample = dataset[idx]
+                                    pt_path = sample.get("path", "")
+                                    pid = None
+                                    for part in os.path.normpath(pt_path).split(os.sep):
+                                        if len(part) == 4 and part[0] == "p" and part[1:].isdigit():
+                                            pid = part
+                                            break
+                                    if pid is None or pid in seen_pids:
+                                        continue
+                                    seen_pids.add(pid)
+                                    vis_items.append(sample)
+                                    if len(vis_items) >= num_vis:
+                                        break
+                            if len(vis_items) < num_vis:
+                                vis_items = [dataset[i] for i in range(num_vis)]
+                            n_vis = len(vis_items)
+                            vis_batch = default_collate(vis_items[:n_vis])
+                            x_vis = vis_batch["video"].to(device, dtype)
+                            if vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview):
+                                x_vis = x_vis * 2.0 - 1.0
+                            with torch.no_grad():
+                                x_rec_vis, _, _ = model(x_vis)
+                            vis_images = create_visualization_grid(x_vis, x_rec_vis, num_samples=n_vis, value_range=vis_range)
                             loss_dict["reconstruction_samples"] = vis_images
+                            # Also plot val/test reconstructions every log_every when val_dataset exists
+                            if val_dataset is not None and len(val_dataset) > 0:
+                                n_val = min(3, len(val_dataset))
+                                val_items = [val_dataset[i] for i in range(n_val)]
+                                val_batch = default_collate(val_items)
+                                x_val = val_batch["video"].to(device, dtype)
+                                if vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview):
+                                    x_val = x_val * 2.0 - 1.0
+                                with torch.no_grad():
+                                    x_rec_val, _, _ = model(x_val)
+                                val_vis_images = create_visualization_grid(x_val, x_rec_val, num_samples=n_val, value_range=vis_range)
+                                loss_dict["val_reconstruction_samples"] = val_vis_images
 
                     # == loss: discriminator adversarial ==
                     if use_discriminator:
@@ -1187,6 +1697,7 @@ def main():
                                 wandb_log_dict = {
                                         "iter": global_step,
                                         "epoch": epoch,
+                                        "epoch_float": epoch_float,
                                         "lr": optimizer.param_groups[0]["lr"],
                                         # Average losses over log_every steps
                                         "loss/total": avg_loss["all"],
@@ -1194,12 +1705,6 @@ def main():
                                         "loss/nll_rec": avg_loss.get("nll_rec", 0.0),
                                         "loss/nll_per": avg_loss.get("nll_per", 0.0),
                                         "loss/kl": avg_loss.get("kl", 0.0),
-                                        # Current step losses
-                                        "loss_step/total": loss_dict.get("all", 0.0),
-                                        "loss_step/nll": loss_dict.get("nll", 0.0),
-                                        "loss_step/nll_rec": loss_dict.get("nll_rec", 0.0),
-                                        "loss_step/nll_per": loss_dict.get("nll_per", 0.0),
-                                        "loss_step/kl": loss_dict.get("kl", 0.0),
                                         "global_grad_norm": optimizer.get_grad_norm(),
                                     }
                                 
@@ -1223,9 +1728,11 @@ def main():
                                     wandb_log_dict["metrics/ssim"] = loss_dict["ssim"]
                                     wandb_log_dict["metrics/mse"] = loss_dict["mse"]
                                 
-                                # Add visualizations if available
+                                # Add visualizations if available (train + val so both appear in Media)
                                 if "reconstruction_samples" in loss_dict:
                                     wandb_log_dict["reconstructions"] = loss_dict["reconstruction_samples"]
+                                if "val_reconstruction_samples" in loss_dict:
+                                    wandb_log_dict["val_reconstructions"] = loss_dict["val_reconstruction_samples"]
                                 
                                 wandb.log(wandb_log_dict, step=actual_update_step)
 
@@ -1240,9 +1747,6 @@ def main():
 
                         # == checkpoint saving ==
                         ckpt_every = cfg.get("ckpt_every", 0)
-                        if ckpt_every > 0 and actual_update_step % ckpt_every == 0 and coordinator.is_master():
-                            subprocess.run("sudo drop_cache", shell=True)
-
                         if ckpt_every > 0 and actual_update_step % ckpt_every == 0:
                             # mannually garbage collection
                             gc.collect()
@@ -1268,9 +1772,6 @@ def main():
                                 ema_shape_dict=ema_shape_dict,
                                 async_io=use_async_io,
                             )
-
-                            if is_log_process(plugin_type, plugin_config):
-                                os.system(f"chgrp -R share {save_dir}")
 
                             if use_discriminator:
                                 booster.save_model(discriminator, os.path.join(save_dir, "discriminator"), shard=True)
@@ -1310,34 +1811,26 @@ def main():
                                 and actual_update_step % full_eval_every == 0
                                 and coordinator.is_master()
                             ):
-                                logger.info("Running full evaluation at step %s...", actual_update_step)
+                                # Evaluate on held-out val data when present, else on train dataset
+                                eval_ds = val_dataset if val_dataset is not None else dataset
+                                eval_ds_label = "val" if val_dataset is not None else "train"
+                                logger.info("Running full evaluation at step %s (%s)...", actual_update_step, eval_ds_label)
                                 
-                                # Use EMA model if available, otherwise use regular model
-                                # EMA models are typically unwrapped, so we use them directly
-                                # For booster-wrapped models, unwrap for evaluation to avoid any wrapper overhead
-                                if ema is not None and cfg.get("eval_use_ema", True):
-                                    eval_model = ema
-                                else:
-                                    # Unwrap the booster-wrapped model for evaluation
-                                    eval_model = model.unwrap() if hasattr(model, "unwrap") else model
-                                
-                                # Create a temporary evaluation dataloader (shuffled, different seed)
-                                # We'll use the same dataset but with a fresh iterator
+                                eval_model = model
                                 eval_dataloader, _ = prepare_dataloader(
                                     bucket_config=cfg.get("bucket_config", None),
                                     num_bucket_build_workers=cfg.get("num_bucket_build_workers", 1),
-                                    dataset=dataset,
+                                    dataset=eval_ds,
                                     batch_size=cfg.get("eval_batch_size", cfg.get("batch_size", 4)),
                                     num_workers=cfg.get("num_workers", 4),
-                                    seed=cfg.get("seed", 1024) + 9999,  # Different seed for eval
-                                    shuffle=True,  # Shuffle for diversity
+                                    seed=cfg.get("seed", 1024) + 9999,
+                                    shuffle=True,
                                     drop_last=False,
                                     pin_memory=True,
                                     process_group=get_data_parallel_group(),
                                     prefetch_factor=cfg.get("prefetch_factor", None),
-                                    cache_pin_memory=False,  # Don't cache for eval
+                                    cache_pin_memory=False,
                                 )
-                                
                                 eval_val_range = cfg.get("vae_target_range") or ("[-1,1]" if cfg.model.get("type") == "multiview_wan_video_vae" else "[0,1]")
                                 eval_results = evaluate_model(
                                     eval_model,
@@ -1349,11 +1842,10 @@ def main():
                                     use_ema=(ema is not None and cfg.get("eval_use_ema", True)),
                                     value_range=eval_val_range,
                                 )
-                                
-                                # Log evaluation metrics
                                 eval_metrics = eval_results["metrics"]
                                 logger.info(
-                                    "Evaluation metrics - PSNR: %.2f ± %.2f, SSIM: %.4f ± %.4f, MSE: %.6f ± %.6f",
+                                    "Evaluation (%s) - PSNR: %.2f ± %.2f, SSIM: %.4f ± %.4f, MSE: %.6f ± %.6f",
+                                    eval_ds_label,
                                     eval_metrics["psnr_mean"],
                                     eval_metrics["psnr_std"],
                                     eval_metrics["ssim_mean"],
@@ -1361,21 +1853,21 @@ def main():
                                     eval_metrics["mse_mean"],
                                     eval_metrics["mse_std"],
                                 )
-                                
-                                # Log to wandb
                                 if cfg.get("wandb", False):
-                                    wandb.log(
-                                        {
-                                            "eval/psnr_mean": eval_metrics["psnr_mean"],
-                                            "eval/psnr_std": eval_metrics["psnr_std"],
-                                            "eval/ssim_mean": eval_metrics["ssim_mean"],
-                                            "eval/ssim_std": eval_metrics["ssim_std"],
-                                            "eval/mse_mean": eval_metrics["mse_mean"],
-                                            "eval/mse_std": eval_metrics["mse_std"],
-                                            "eval/reconstructions": eval_results["visualizations"],
-                                        },
-                                        step=actual_update_step,
-                                    )
+                                    prefix = f"eval/{eval_ds_label}"
+                                    log_dict = {
+                                        "epoch_float": epoch_float,
+                                        f"{prefix}/psnr_mean": eval_metrics["psnr_mean"],
+                                        f"{prefix}/psnr_std": eval_metrics["psnr_std"],
+                                        f"{prefix}/ssim_mean": eval_metrics["ssim_mean"],
+                                        f"{prefix}/ssim_std": eval_metrics["ssim_std"],
+                                        f"{prefix}/mse_mean": eval_metrics["mse_mean"],
+                                        f"{prefix}/mse_std": eval_metrics["mse_std"],
+                                        f"{prefix}/reconstructions": eval_results["visualizations"],
+                                    }
+                                    if eval_ds_label == "val":
+                                        log_dict["val_reconstructions"] = eval_results["visualizations"]
+                                    wandb.log(log_dict, step=actual_update_step)
 
             if cfg.get("profile", False):
                 profiler_ctxt.export_chrome_trace("./log/profile/trace.json")
@@ -1384,6 +1876,76 @@ def main():
         if sampler is not None and hasattr(sampler, 'reset'):
             sampler.reset()
         start_step = 0
+        
+        # =======================================================
+        # Per-frame metrics on fixed train/val sequences every N epochs
+        # =======================================================
+        fixed_epoch_interval = int(cfg.get("fixed_seq_eval_every_epochs", 10))
+        if (
+            fixed_epoch_interval > 0
+            and ((epoch + 1) % fixed_epoch_interval == 0)
+            and coordinator.is_master()
+            and cfg.get("wandb", False)
+            and fixed_train_index is not None
+        ):
+            logger.info(
+                "Running fixed per-frame evaluation at epoch %s (sequence name: %s)...",
+                epoch + 1,
+                fixed_seq_name,
+            )
+            vae_target_range = cfg.get("vae_target_range", None)
+
+            # Fixed train sequence
+            train_metrics_pf = evaluate_fixed_sequence_per_frame(
+                model,
+                dataset,
+                fixed_train_index,
+                device,
+                dtype,
+                vae_target_range=vae_target_range,
+            )
+
+            wandb_log_pf = {
+                "fixed_seq/name": fixed_seq_name,
+                "fixed_seq/epoch": epoch + 1,
+                "epoch_float": float(epoch + 1),
+            }
+
+            for i, val in enumerate(train_metrics_pf["psnr_per_frame"]):
+                wandb_log_pf[f"fixed_seq/train/psnr_frame_{i}"] = val
+            for i, val in enumerate(train_metrics_pf["ssim_per_frame"]):
+                wandb_log_pf[f"fixed_seq/train/ssim_frame_{i}"] = val
+            for i, val in enumerate(train_metrics_pf["mse_per_frame"]):
+                wandb_log_pf[f"fixed_seq/train/mse_frame_{i}"] = val
+
+            # Fixed val/test sequence (same sequence name where possible)
+            if fixed_val_index is not None and val_dataset is not None:
+                val_metrics_pf = evaluate_fixed_sequence_per_frame(
+                    model,
+                    val_dataset,
+                    fixed_val_index,
+                    device,
+                    dtype,
+                    vae_target_range=vae_target_range,
+                )
+                for i, val in enumerate(val_metrics_pf["psnr_per_frame"]):
+                    wandb_log_pf[f"fixed_seq/val/psnr_frame_{i}"] = val
+                for i, val in enumerate(val_metrics_pf["ssim_per_frame"]):
+                    wandb_log_pf[f"fixed_seq/val/ssim_frame_{i}"] = val
+                for i, val in enumerate(val_metrics_pf["mse_per_frame"]):
+                    wandb_log_pf[f"fixed_seq/val/mse_frame_{i}"] = val
+
+            table = wandb.Table(columns=["frame", "psnr", "ssim", "mse"])
+
+            for i in range(len(train_metrics_pf["psnr_per_frame"])):
+                table.add_data(
+                    i,
+                    train_metrics_pf["psnr_per_frame"][i],
+                    train_metrics_pf["ssim_per_frame"][i],
+                    train_metrics_pf["mse_per_frame"][i],
+                )
+
+            wandb.log({"fixed_seq/train_metrics": table, "epoch_float": float(epoch + 1)}, step=actual_update_step)
     
     # =======================================================
     # 6. Final evaluation after training
@@ -1395,69 +1957,61 @@ def main():
         final_eval_enabled = cfg.get("final_eval", True)
         if final_eval_enabled:
             logger.info("Training complete. Running final evaluation...")
-            
-            # Use EMA model if available (typically better quality)
-            # EMA models are typically unwrapped, so we use them directly
-            # For booster-wrapped models, unwrap for evaluation to avoid any wrapper overhead
-            if ema is not None and cfg.get("eval_use_ema", True):
-                final_eval_model = ema
-            else:
-                # Unwrap the booster-wrapped model for evaluation
-                final_eval_model = model.unwrap() if hasattr(model, "unwrap") else model
-            
-            # Create evaluation dataloader
-            final_eval_dataloader, _ = prepare_dataloader(
-                bucket_config=cfg.get("bucket_config", None),
-                num_bucket_build_workers=cfg.get("num_bucket_build_workers", 1),
-                dataset=dataset,
-                batch_size=cfg.get("eval_batch_size", cfg.get("batch_size", 4)),
-                num_workers=cfg.get("num_workers", 4),
-                seed=cfg.get("seed", 1024) + 8888,  # Different seed for final eval
-                shuffle=True,
-                drop_last=False,
-                pin_memory=True,
-                process_group=get_data_parallel_group(),
-                prefetch_factor=cfg.get("prefetch_factor", None),
-                cache_pin_memory=False,
-            )
-            
+            final_eval_model = model
             final_val_range = cfg.get("vae_target_range") or ("[-1,1]" if cfg.model.get("type") == "multiview_wan_video_vae" else "[0,1]")
-            final_eval_results = evaluate_model(
-                final_eval_model,
-                final_eval_dataloader,
-                device,
-                dtype,
-                num_eval_samples=cfg.get("final_eval_num_samples", 100),  # More samples for final eval
-                view_flatten_in_loss=view_flatten_in_loss,
-                use_ema=(ema is not None and cfg.get("eval_use_ema", True)),
-                value_range=final_val_range,
-            )
-            
-            # Log final metrics
-            final_metrics = final_eval_results["metrics"]
-            logger.info("=" * 80)
-            logger.info("FINAL EVALUATION RESULTS")
-            logger.info("=" * 80)
-            logger.info("PSNR: %.2f ± %.2f dB", final_metrics["psnr_mean"], final_metrics["psnr_std"])
-            logger.info("SSIM: %.4f ± %.4f", final_metrics["ssim_mean"], final_metrics["ssim_std"])
-            logger.info("MSE:  %.6f ± %.6f", final_metrics["mse_mean"], final_metrics["mse_std"])
-            logger.info("=" * 80)
-            
-            # Log to wandb
-            if cfg.get("wandb", False):
-                wandb.log(
-                    {
-                        "final_eval/psnr_mean": final_metrics["psnr_mean"],
-                        "final_eval/psnr_std": final_metrics["psnr_std"],
-                        "final_eval/ssim_mean": final_metrics["ssim_mean"],
-                        "final_eval/ssim_std": final_metrics["ssim_std"],
-                        "final_eval/mse_mean": final_metrics["mse_mean"],
-                        "final_eval/mse_std": final_metrics["mse_std"],
-                        "final_eval/reconstructions": final_eval_results["visualizations"],
-                    },
-                    step=actual_update_step,
+            num_final = cfg.get("final_eval_num_samples", 100)
+            # Always run final eval on train data (reconstructions always plotted)
+            eval_sets = [("train", dataset)]
+            if val_dataset is not None:
+                eval_sets.append(("val", val_dataset))
+            for label, ds in eval_sets:
+                final_eval_dataloader, _ = prepare_dataloader(
+                    bucket_config=cfg.get("bucket_config", None),
+                    num_bucket_build_workers=cfg.get("num_bucket_build_workers", 1),
+                    dataset=ds,
+                    batch_size=cfg.get("eval_batch_size", cfg.get("batch_size", 4)),
+                    num_workers=cfg.get("num_workers", 4),
+                    seed=cfg.get("seed", 1024) + 8888,
+                    shuffle=True,
+                    drop_last=False,
+                    pin_memory=True,
+                    process_group=get_data_parallel_group(),
+                    prefetch_factor=cfg.get("prefetch_factor", None),
+                    cache_pin_memory=False,
                 )
-            
+                final_eval_results = evaluate_model(
+                    final_eval_model,
+                    final_eval_dataloader,
+                    device,
+                    dtype,
+                    num_eval_samples=num_final,
+                    view_flatten_in_loss=view_flatten_in_loss,
+                    use_ema=(ema is not None and cfg.get("eval_use_ema", True)),
+                    value_range=final_val_range,
+                )
+                final_metrics = final_eval_results["metrics"]
+                logger.info("=" * 80)
+                logger.info("FINAL EVALUATION (%s)", label.upper())
+                logger.info("=" * 80)
+                logger.info("PSNR: %.2f ± %.2f dB", final_metrics["psnr_mean"], final_metrics["psnr_std"])
+                logger.info("SSIM: %.4f ± %.4f", final_metrics["ssim_mean"], final_metrics["ssim_std"])
+                logger.info("MSE:  %.6f ± %.6f", final_metrics["mse_mean"], final_metrics["mse_std"])
+                logger.info("=" * 80)
+                if cfg.get("wandb", False):
+                    prefix = f"final_eval/{label}"
+                    final_log = {
+                        "epoch_float": float(epoch + 1),
+                        f"{prefix}/psnr_mean": final_metrics["psnr_mean"],
+                        f"{prefix}/psnr_std": final_metrics["psnr_std"],
+                        f"{prefix}/ssim_mean": final_metrics["ssim_mean"],
+                        f"{prefix}/ssim_std": final_metrics["ssim_std"],
+                        f"{prefix}/mse_mean": final_metrics["mse_mean"],
+                        f"{prefix}/mse_std": final_metrics["mse_std"],
+                        f"{prefix}/reconstructions": final_eval_results["visualizations"],
+                    }
+                    if label == "val":
+                        final_log["val_reconstructions"] = final_eval_results["visualizations"]
+                    wandb.log(final_log, step=actual_update_step)
             logger.info("Final evaluation complete.")
     
     # =======================================================
@@ -1484,10 +2038,7 @@ def main():
             ema_shape_dict=ema_shape_dict,
             async_io=use_async_io,
         )
-        
-        if is_log_process(plugin_type, plugin_config):
-            os.system(f"chgrp -R share {final_save_dir}")
-        
+
         if use_discriminator:
             booster.save_model(discriminator, os.path.join(final_save_dir, "discriminator"), shard=True)
             booster.save_optimizer(

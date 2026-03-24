@@ -24,13 +24,15 @@ The notebook debugging-bg-remove.ipynb imports:
 This module provides that API as well.
 
 
-RUN on single GPU
+RUN on single GPU (processes all participants; use --num-participants N to limit):
 
-python data/processing/preprocess_nersemble.py \
-  --nersemble-root /home/piado/scratch/data/nersemble \
-  --output-root /home/piado/projects/aip-lindell/piado/data/preprocessed_initial_experiments \
-  --max-tasks 10 \
-  --skip-existing
+  python data/processing/preprocess_nersemble.py \\
+    --nersemble-root /path/to/nersemble \\
+    --output-root /path/to/processed \\
+    --image-size 128 \\
+    --skip-existing
+
+  With --skip-existing, sequences that already have all camera MP4s or a .pt file are skipped.
 
 Array job:
 
@@ -352,6 +354,7 @@ def process_sequence(
     output_root: Path,
     image_size: int | None = None,
     upper_views: int | None = None,  # NEW: optional argument
+    skip_existing: bool = False,
 ):
     """
     Process a NeRSemble sequence: pick the two middle-upper cameras
@@ -370,9 +373,22 @@ def process_sequence(
         # Pick all upper cameras (or top `upper_views` if provided)
         serials = select_middle_upper_cameras(nersemble_root, participant_id, upper_views=upper_views or 1000)
 
-    #seq_dir = output_root / f"p{participant_id:03d}_{sequence_name}"
     participant_dir = output_root / f"p{participant_id:03d}"
+    print(f"participant_dir: {participant_dir}")
     seq_dir = participant_dir / sequence_name
+
+    # Skip entire sequence if already processed
+    if skip_existing and seq_dir.exists():
+        # Consider done if any .pt exists (downstream bundle) or all camera MP4s exist
+        existing_pt = list(seq_dir.glob("*.pt"))
+        if existing_pt:
+            print(f"[preprocess] Skipping (already has .pt): p{participant_id:03d} {sequence_name}")
+            return seq_dir
+        expected_mp4s = [seq_dir / f"cam_{serial}_processed.mp4" for serial in serials]
+        if all(p.exists() for p in expected_mp4s):
+            print(f"[preprocess] Skipping (all camera MP4s exist): p{participant_id:03d} {sequence_name}")
+            return seq_dir
+
     seq_dir.mkdir(parents=True, exist_ok=True)
 
     for serial in serials:
@@ -407,7 +423,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--nersemble-root",
         type=Path,
-        default="/home/piado/scratch/data/nersemble",
+        default="/datasets/lindell-proj/neumayr/nersemble_v2/extracted",
         help="Root folder of extracted NeRSemble data (per-participant folders).",
     )
     p.add_argument(
@@ -438,6 +454,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--num-participants",
         type=int,
         default=None,
+        help="Limit to first N participants (default: all).",
+    )
+    p.add_argument(
+        "--output-root",
+        type=Path,
+        default=None,
+        help="Override output root (default: dataset path when array, else repo data/preprocessed_initial_experiments).",
+    )
+    p.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip sequences that are already processed (all camera MP4s or a .pt file present).",
     )
     return p
 
@@ -447,10 +475,16 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mode = "array" if "SLURM_ARRAY_TASK_ID" in os.environ else "local"
     print(f"[preprocess] Mode: {mode}, Device: {device}")
-    output_root = ARRAY_OUTPUT_ROOT if mode=="array" else DEFAULT_LOCAL_OUTPUT
+    if args.output_root is not None:
+        output_root = Path(args.output_root)
+    else:
+        output_root = ARRAY_OUTPUT_ROOT if mode == "array" else DEFAULT_LOCAL_OUTPUT
     folder_name = f"{args.image_size}-res" if args.image_size else "default-res"
     output_root = output_root / folder_name
     output_root.mkdir(parents=True, exist_ok=True)
+    print(f"[preprocess] Output root: {output_root}")
+    if args.skip_existing:
+        print("[preprocess] Skip-existing: on (skipping sequences that already have all MP4s or a .pt)")
 
     converter = Converter("mobilenetv3", str(args.rvm_checkpoint), device=device)
     data_folder, ParticipantManager = build_nersemble_managers(args.nersemble_root)
@@ -484,7 +518,8 @@ def main():
                     converter=converter,
                     output_root=output_root,
                     image_size=args.image_size,
-                    upper_views=args.upper_views
+                    upper_views=args.upper_views,
+                    skip_existing=args.skip_existing,
                 )
             except Exception as e:
                 print(f"[preprocess] ERROR: p{pid:03d} {seq}: {e}")

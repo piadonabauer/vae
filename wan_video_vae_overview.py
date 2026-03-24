@@ -1,6 +1,5 @@
 from einops import rearrange, repeat
 
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,16 +8,11 @@ from tqdm import tqdm
 CACHE_T = 2
 
 
-def check_is_instance(model, module_class):
-    if isinstance(model, module_class):
-        return True
-    if hasattr(model, "module") and isinstance(model.module, module_class):
-        return True
-    return False
-
 
 def block_causal_mask(x, block_size):
-    # params
+    # from size x, make zero mask
+    # then based on block_size, mask the top left block_size x block_size
+
     b, n, s, _, device = *x.size(), x.device
     assert s % block_size == 0
     num_blocks = s // block_size
@@ -34,6 +28,7 @@ def block_causal_mask(x, block_size):
 class CausalConv3d(nn.Conv3d):
     """
     Causal 3d convolusion.
+    concat cache_x to the left of x
     """
 
     def __init__(self, *args, **kwargs):
@@ -172,7 +167,7 @@ class Resample(nn.Module):
                         torch.cat([feat_cache[idx][:, :, -1:, :, :], x], 2))
                     feat_cache[idx] = cache_x
                     feat_idx[0] += 1
-        return x
+        return x, feat_cache, feat_idx
 
     def init_weight(self, conv):
         conv_weight = conv.weight
@@ -299,7 +294,7 @@ class ResidualBlock(nn.Module):
                 feat_idx[0] += 1
             else:
                 x = layer(x)
-        return x + h
+        return x + h, feat_cache, feat_idx
 
 
 class AttentionBlock(nn.Module):
@@ -470,9 +465,9 @@ class Down_ResidualBlock(nn.Module):
     def forward(self, x, feat_cache=None, feat_idx=[0]):
         x_copy = x.clone()
         for module in self.downsamples:
-            x = module(x, feat_cache, feat_idx)
+            x, feat_cache, feat_idx = module(x, feat_cache, feat_idx)
 
-        return x + self.avg_shortcut(x_copy)
+        return x + self.avg_shortcut(x_copy), feat_cache, feat_idx
 
 
 class Up_ResidualBlock(nn.Module):
@@ -507,12 +502,12 @@ class Up_ResidualBlock(nn.Module):
     def forward(self, x, feat_cache=None, feat_idx=[0], first_chunk=False):
         x_main = x.clone()
         for module in self.upsamples:
-            x_main = module(x_main, feat_cache, feat_idx)
+            x_main, feat_cache, feat_idx = module(x_main, feat_cache, feat_idx)
         if self.avg_shortcut is not None:
             x_shortcut = self.avg_shortcut(x, first_chunk)
-            return x_main + x_shortcut
+            return x_main + x_shortcut, feat_cache, feat_idx
         else:
-            return x_main
+            return x_main, feat_cache, feat_idx
 
 
 class Encoder3d(nn.Module):
@@ -567,20 +562,7 @@ class Encoder3d(nn.Module):
         self.head = nn.Sequential(RMS_norm(out_dim, images=False), nn.SiLU(),
                                   CausalConv3d(out_dim, z_dim, 3, padding=1))
 
-    def forward(self, x, feat_cache=None, feat_idx=[0], debug_shapes: bool = False, stage_name: str = "Encoder3d"):
-        def _dbg(tag, tensor):
-            if not debug_shapes:
-                return
-            if tensor is None:
-                print(f"[{stage_name}] {tag}: None")
-                return
-            if tensor.dim() == 5:
-                b, c, t, h, w = tensor.shape
-                print(f"[{stage_name}] {tag}: B={b}, C={c}, T={t}, H={h}, W={w} | shape={tuple(tensor.shape)}")
-            else:
-                print(f"[{stage_name}] {tag}: shape={tuple(tensor.shape)}")
-
-        _dbg("input", x)
+    def forward(self, x, feat_cache=None, feat_idx=[0]):
         if feat_cache is not None:
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
@@ -596,33 +578,20 @@ class Encoder3d(nn.Module):
             feat_idx[0] += 1
         else:
             x = self.conv1(x)
-        _dbg("after initial CausalConv3d conv1", x)
 
         ## downsamples
-        block_idx = 0
         for layer in self.downsamples:
             if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx)
             else:
                 x = layer(x)
-            if isinstance(layer, ResidualBlock):
-                block_idx += 1
-                _dbg(f"after ResidualBlock #{block_idx}", x)
-            elif isinstance(layer, AttentionBlock):
-                _dbg("after AttentionBlock (self-attn)", x)
-            elif isinstance(layer, Resample):
-                _dbg("after Downsample block (Resample)", x)
 
         ## middle
         for layer in self.middle:
             if check_is_instance(layer, ResidualBlock) and feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx)
             else:
                 x = layer(x)
-            if isinstance(layer, ResidualBlock):
-                _dbg("middle ResidualBlock", x)
-            elif isinstance(layer, AttentionBlock):
-                _dbg("middle AttentionBlock (bottleneck attn)", x)
 
         ## head
         for layer in self.head:
@@ -641,9 +610,7 @@ class Encoder3d(nn.Module):
                 feat_idx[0] += 1
             else:
                 x = layer(x)
-            if isinstance(layer, CausalConv3d):
-                _dbg("after final CausalConv3d head", x)
-        return x
+        return x, feat_cache, feat_idx
 
 
 class Encoder3d_38(nn.Module):
@@ -727,14 +694,14 @@ class Encoder3d_38(nn.Module):
         ## downsamples
         for layer in self.downsamples:
             if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx)
             else:
                 x = layer(x)
 
         ## middle
         for layer in self.middle:
             if isinstance(layer, ResidualBlock) and feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx)
             else:
                 x = layer(x)
 
@@ -759,7 +726,7 @@ class Encoder3d_38(nn.Module):
             else:
                 x = layer(x)
 
-        return x
+        return x, feat_cache, feat_idx
 
 
 class Decoder3d(nn.Module):
@@ -815,20 +782,7 @@ class Decoder3d(nn.Module):
         self.head = nn.Sequential(RMS_norm(out_dim, images=False), nn.SiLU(),
                                   CausalConv3d(out_dim, 3, 3, padding=1))
 
-    def forward(self, x, feat_cache=None, feat_idx=[0], debug_shapes: bool = False, stage_name: str = "Decoder3d"):
-        def _dbg(tag, tensor):
-            if not debug_shapes:
-                return
-            if tensor is None:
-                print(f"[{stage_name}] {tag}: None")
-                return
-            if tensor.dim() == 5:
-                b, c, t, h, w = tensor.shape
-                print(f"[{stage_name}] {tag}: B={b}, C={c}, T={t}, H={h}, W={w} | shape={tuple(tensor.shape)}")
-            else:
-                print(f"[{stage_name}] {tag}: shape={tuple(tensor.shape)}")
-
-        _dbg("input_z", x)
+    def forward(self, x, feat_cache=None, feat_idx=[0]):
         ## conv1
         if feat_cache is not None:
             idx = feat_idx[0]
@@ -845,33 +799,20 @@ class Decoder3d(nn.Module):
             feat_idx[0] += 1
         else:
             x = self.conv1(x)
-        _dbg("after initial CausalConv3d conv1", x)
 
         ## middle
         for layer in self.middle:
             if check_is_instance(layer, ResidualBlock) and feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx)
             else:
                 x = layer(x)
-            if isinstance(layer, ResidualBlock):
-                _dbg("middle ResidualBlock", x)
-            elif isinstance(layer, AttentionBlock):
-                _dbg("middle AttentionBlock (bottleneck attn)", x)
 
         ## upsamples
-        block_idx = 0
         for layer in self.upsamples:
             if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx)
             else:
                 x = layer(x)
-            if isinstance(layer, ResidualBlock):
-                block_idx += 1
-                _dbg(f"after Upsample ResidualBlock #{block_idx}", x)
-            elif isinstance(layer, AttentionBlock):
-                _dbg("after Upsample AttentionBlock", x)
-            elif isinstance(layer, Resample):
-                _dbg("after Upsample block (Resample)", x)
 
         ## head
         for layer in self.head:
@@ -882,17 +823,15 @@ class Decoder3d(nn.Module):
                     # cache last frame of last two chunk
                     cache_x = torch.cat([
                         feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                        cache_x.device), cache_x
-                ],
+                            cache_x.device), cache_x
+                    ],
                                         dim=2)
                 x = layer(x, feat_cache[idx])
                 feat_cache[idx] = cache_x
                 feat_idx[0] += 1
             else:
                 x = layer(x)
-            if isinstance(layer, CausalConv3d):
-                _dbg("after final CausalConv3d head", x)
-        return x
+        return x, feat_cache, feat_idx
 
 
 
@@ -963,14 +902,14 @@ class Decoder3d_38(nn.Module):
 
         for layer in self.middle:
             if check_is_instance(layer, ResidualBlock) and feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx)
             else:
                 x = layer(x)
 
         ## upsamples
         for layer in self.upsamples:
             if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx, first_chunk)
+                x, feat_cache, feat_idx = layer(x, feat_cache, feat_idx, first_chunk)
             else:
                 x = layer(x)
 
@@ -994,7 +933,7 @@ class Decoder3d_38(nn.Module):
                 feat_idx[0] += 1
             else:
                 x = layer(x)
-        return x
+        return x, feat_cache, feat_idx
 
 
 def count_conv3d(model):
@@ -1004,18 +943,17 @@ def count_conv3d(model):
             count += 1
     return count
 
+
 class VideoVAE_(nn.Module):
 
-    def __init__(
-        self,
-        dim=96,
-        z_dim=16,
-        dim_mult=[1, 2, 4, 4],
-        num_res_blocks=2,
-        attn_scales=[],
-        temperal_downsample=[False, True, True],
-        dropout=0.0,
-    ):
+    def __init__(self,
+                 dim=96,
+                 z_dim=16,
+                 dim_mult=[1, 2, 4, 4],
+                 num_res_blocks=2,
+                 attn_scales=[],
+                 temperal_downsample=[False, True, True],
+                 dropout=0.0):
         super().__init__()
         self.dim = dim
         self.z_dim = z_dim
@@ -1025,161 +963,70 @@ class VideoVAE_(nn.Module):
         self.temperal_downsample = temperal_downsample
         self.temperal_upsample = temperal_downsample[::-1]
 
-        # Debug flag: when True, print step-by-step tensor shapes in encode/decode.
-        self.debug_shapes = False
-
         # modules
-        self.encoder = Encoder3d(
-            dim, z_dim * 2, dim_mult, num_res_blocks, attn_scales, self.temperal_downsample, dropout
-        )
+        self.encoder = Encoder3d(dim, z_dim * 2, dim_mult, num_res_blocks,
+                                 attn_scales, self.temperal_downsample, dropout)
         self.conv1 = CausalConv3d(z_dim * 2, z_dim * 2, 1)
         self.conv2 = CausalConv3d(z_dim, z_dim, 1)
-        self.decoder = Decoder3d(
-            dim, z_dim, dim_mult, num_res_blocks, attn_scales, self.temperal_upsample, dropout
-        )
+        self.decoder = Decoder3d(dim, z_dim, dim_mult, num_res_blocks,
+                                 attn_scales, self.temperal_upsample, dropout)
 
-    def _print_shape(self, tag, x):
-        if not self.debug_shapes:
-            return
-        if x is None:
-            print(f"[VideoVAE_] {tag}: None")
-            return
-        if x.dim() == 5:
-            b, c, t, h, w = x.shape
-            print(f"[VideoVAE_] {tag}: B={b}, C={c}, T={t}, H={h}, W={w} | shape={tuple(x.shape)}")
-        else:
-            print(f"[VideoVAE_] {tag}: shape={tuple(x.shape)}")
-
-    def forward(self, x, debug_shapes: bool | None = None):
-        """
-        Forward pass with optional shape debugging.
-
-        Args:
-            x: input video [B, C, T, H, W]
-            debug_shapes: if True, prints shapes after each major step.
-                          If None, uses self.debug_shapes.
-        """
-        if debug_shapes is not None:
-            self.debug_shapes = debug_shapes
-
-        #self._print_shape("input (x)", x)
-        mu, log_var = self.encode(x, self.scale if hasattr(self, "scale") else [0.0, 1.0])
-        #self._print_shape("latent mu", mu)
-        #self._print_shape("latent log_var", log_var)
-
+    def forward(self, x):
+        mu, log_var = self.encode(x)
         z = self.reparameterize(mu, log_var)
-        #self._print_shape("sampled z", z)
-
-        x_recon = self.decode(z, self.scale if hasattr(self, "scale") else [0.0, 1.0])
-        #self._print_shape("reconstruction (x_recon)", x_recon)
-
+        x_recon = self.decode(z)
         return x_recon, mu, log_var
 
-    def _encode_with_stats(self, x, scale):
+    def encode(self, x, scale):
         self.clear_cache()
-        #self._print_shape("encode/input", x)
-
-        # Time chunking for long sequences
+        ## cache
         t = x.shape[2]
         iter_ = 1 + (t - 1) // 4
 
-        out = None
         for i in range(iter_):
             self._enc_conv_idx = [0]
             if i == 0:
-                x_chunk = x[:, :, :1, :, :]
-                #self._print_shape(f"encode/chunk_{i}_input", x_chunk)
-                out = self.encoder(
-                    x_chunk,
-                    feat_cache=self._enc_feat_map,
-                    feat_idx=self._enc_conv_idx,
-                    debug_shapes=self.debug_shapes,
-                    stage_name="Encoder3d",
-                )
-                #self._print_shape(f"encode/chunk_{i}_output_after_encoder", out)
+                out, self._enc_feat_map, self._enc_conv_idx = self.encoder(x[:, :, :1, :, :],
+                                   feat_cache=self._enc_feat_map,
+                                   feat_idx=self._enc_conv_idx)
             else:
-                x_chunk = x[:, :, 1 + 4 * (i - 1) : 1 + 4 * i, :, :]
-                #self._print_shape(f"encode/chunk_{i}_input", x_chunk)
-                out_ = self.encoder(
-                    x_chunk,
-                    feat_cache=self._enc_feat_map,
-                    feat_idx=self._enc_conv_idx,
-                    debug_shapes=self.debug_shapes,
-                    stage_name="Encoder3d",
-                )
-                #self._print_shape(f"encode/chunk_{i}_output_after_encoder", out_)
+                out_, self._enc_feat_map, self._enc_conv_idx = self.encoder(x[:, :, 1 + 4 * (i - 1):1 + 4 * i, :, :],
+                                    feat_cache=self._enc_feat_map,
+                                    feat_idx=self._enc_conv_idx)
                 out = torch.cat([out, out_], 2)
-                #self._print_shape(f"encode/concat_after_chunk_{i}", out)
-
-        out_conv = self.conv1(out)
-        #self._print_shape("encode/after_conv1", out_conv)
-        mu, log_var = out_conv.chunk(2, dim=1)
-        #self._print_shape("encode/mu_raw", mu)
-        #self._print_shape("encode/log_var_raw", log_var)
-
+        mu, log_var = self.conv1(out).chunk(2, dim=1)
         if isinstance(scale[0], torch.Tensor):
             scale = [s.to(dtype=mu.dtype, device=mu.device) for s in scale]
             mu = (mu - scale[0].view(1, self.z_dim, 1, 1, 1)) * scale[1].view(
-                1, self.z_dim, 1, 1, 1
-            )
+                1, self.z_dim, 1, 1, 1)
         else:
             scale = scale.to(dtype=mu.dtype, device=mu.device)
             mu = (mu - scale[0]) * scale[1]
-        #self._print_shape("encode/mu_scaled", mu)
-        return mu, log_var
-
-    def encode(self, x, scale):
-        """
-        Public encode API used by Wan wrappers.
-        Returns only the latent mu tensor for compatibility.
-        """
-        mu, _ = self._encode_with_stats(x, scale)
         return mu
 
     def decode(self, z, scale):
         self.clear_cache()
-        #self._print_shape("decode/input_z", z)
-
-        # z: [B, C, T, H, W]
+        # z: [b,c,t,h,w]
         if isinstance(scale[0], torch.Tensor):
             scale = [s.to(dtype=z.dtype, device=z.device) for s in scale]
             z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
-                1, self.z_dim, 1, 1, 1
-            )
+                1, self.z_dim, 1, 1, 1)
         else:
             scale = scale.to(dtype=z.dtype, device=z.device)
             z = z / scale[1] + scale[0]
-        #self._print_shape("decode/z_rescaled", z)
-
         iter_ = z.shape[2]
         x = self.conv2(z)
-        #self._print_shape("decode/after_conv2", x)
-
-        out = None
         for i in range(iter_):
             self._conv_idx = [0]
-            x_chunk = x[:, :, i : i + 1, :, :]
-            #self._print_shape(f"decode/chunk_{i}_input", x_chunk)
             if i == 0:
-                out = self.decoder(
-                    x_chunk,
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx,
-                    debug_shapes=self.debug_shapes,
-                    stage_name="Decoder3d",
-                )
-                #self._print_shape(f"decode/chunk_{i}_output_after_decoder", out)
+                out, self._feat_map, self._conv_idx = self.decoder(x[:, :, i:i + 1, :, :],
+                                   feat_cache=self._feat_map,
+                                   feat_idx=self._conv_idx)
             else:
-                out_ = self.decoder(
-                    x_chunk,
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx,
-                    debug_shapes=self.debug_shapes,
-                    stage_name="Decoder3d",
-                )
-                #self._print_shape(f"decode/chunk_{i}_output_after_decoder", out_)
-                out = torch.cat([out, out_], 2)  # may add tensor offload
-                #self._print_shape(f"decode/concat_after_chunk_{i}", out)
+                out_, self._feat_map, self._conv_idx = self.decoder(x[:, :, i:i + 1, :, :],
+                                    feat_cache=self._feat_map,
+                                    feat_idx=self._conv_idx)
+                out = torch.cat([out, out_], 2) # may add tensor offload
         return out
 
     def reparameterize(self, mu, log_var):
@@ -1188,7 +1035,7 @@ class VideoVAE_(nn.Module):
         return eps * std + mu
 
     def sample(self, imgs, deterministic=False):
-        mu, log_var = self._encode_with_stats(imgs, self.scale if hasattr(self, "scale") else [0.0, 1.0])
+        mu, log_var = self.encode(imgs)
         if deterministic:
             return mu
         std = torch.exp(0.5 * log_var.clamp(-30.0, 20.0))
@@ -1202,720 +1049,6 @@ class VideoVAE_(nn.Module):
         self._enc_conv_num = count_conv3d(self.encoder)
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
-
-
-class ViewPositionalEmbedding(nn.Module):
-    """
-    Learnable view embeddings to encode camera perspective into latent space.
-
-    Why: Provides the model a way to distinguish which camera view is being reconstructed.
-    
-    KEY INSIGHT: Embeddings alone can't recover information lost in averaging.
-    They work best when views are NOT compressed/averaged first.
-    
-    Use with view_compression=1 for best results (no compression before embeddings).
-    """
-
-    def __init__(self, num_views, channels, use_multiplicative=True):
-        super().__init__()
-        self.num_views = num_views
-        self.channels = channels
-        self.use_multiplicative = use_multiplicative
-        
-        # Additive embedding: Small learnable shifts per view
-        # Keep magnitude small so we don't corrupt latent space
-        self.embedding_add = nn.Parameter(torch.randn(1, num_views, channels, 1, 1, 1) * 0.05)
-        
-        # Multiplicative embedding: Small learnable scale per view
-        if use_multiplicative:
-            # Initialize near 1.0 so scaling is gentle (0.95 to 1.05 range)
-            mul_init = torch.ones(1, num_views, channels, 1, 1, 1)
-            mul_init = mul_init + torch.randn(1, num_views, channels, 1, 1, 1) * 0.05
-            self.embedding_mul = nn.Parameter(mul_init)
-        else:
-            self.embedding_mul = None
-
-    def forward(self, x):
-        # x: [B, V, C, T, H, W]
-        # Apply per-view modulation: gentle scaling + shifting
-        # Magnitude designed to NOT corrupt the learned latent distribution
-        if self.embedding_mul is not None:
-            return x * self.embedding_mul + self.embedding_add
-        else:
-            return x + self.embedding_add
-
-class ViewCompressor(nn.Module):
-    """
-    Lightweight view mixing layer to compress or expand the view axis.
-
-    Why: we want a single 4D latent space that captures inter-view redundancy
-    without rewriting the entire 3D VAE stack. This projects the view axis
-    with a 1x1 conv (linear layer) while preserving spatial/temporal structure.
-    
-    IMPROVED: Uses selective/attentive pooling instead of simple averaging to
-    better preserve view-specific features.
-    """
-
-    def __init__(self, in_views, out_views, init="avg", use_learned_weights=True):
-        super().__init__()
-        self.in_views = int(in_views)
-        self.out_views = int(out_views)
-        self.use_learned_weights = use_learned_weights
-        
-        if self.in_views == self.out_views:
-            # No-op path keeps parameters stable when no compression is needed.
-            self.proj = nn.Identity()
-            self.learned_weights = None
-        else:
-            # Conv1d over the view axis: this is the "linear layer" for view mixing.
-            self.proj = nn.Conv1d(self.in_views, self.out_views, kernel_size=1, bias=True)
-            
-            # Optional: learned attention weights for view pooling
-            if use_learned_weights:
-                # Attention weights: [out_views, in_views]
-                # Each output view learns which input views to focus on
-                self.learned_weights = nn.Parameter(torch.ones(self.out_views, self.in_views))
-                nn.init.xavier_uniform_(self.learned_weights)
-            else:
-                self.learned_weights = None
-            
-            if init == "avg":
-                # Start from an average across views to keep recon stable at init.
-                with torch.no_grad():
-                    self.proj.weight.fill_(1.0 / max(1, self.in_views))
-                    nn.init.zeros_(self.proj.bias)
-
-    def forward(self, x):
-        # x: [B, V, C, T, H, W] -> [B, V', C, T, H, W]
-        # We permute so the view axis becomes the Conv1d "channel".
-        if isinstance(self.proj, nn.Identity):
-            return x
-        
-        b, v, c, t, h, w = x.shape
-        x = x.permute(0, 2, 3, 4, 5, 1).contiguous()  # B C T H W V
-        x = x.view(-1, v)  # (B*C*T*H*W) x V
-        
-        if self.use_learned_weights and self.learned_weights is not None:
-            # Apply learned attention-based mixing
-            # weights: [V_out, V_in], x: [N, V_in]
-            weights = torch.softmax(self.learned_weights, dim=1)  # Normalize
-            x = torch.matmul(x, weights.t())  # [N, V_in] @ [V_in, V_out] -> [N, V_out]
-            v_out = weights.shape[0]
-        else:
-            # Standard learned projection
-            x = x.unsqueeze(-1)  # [N, V, 1] for Conv1d
-            x = self.proj(x)  # [N, V_out, 1]
-            x = x.squeeze(-1)  # [N, V_out]
-            v_out = self.out_views
-        
-        x = x.view(b, c, t, h, w, v_out).permute(0, 5, 1, 2, 3, 4).contiguous()
-        return x
-
-
-class MultiViewVideoVAE_(nn.Module):
-    """
-    Multi-view wrapper over the Wan 3D VAE.
-
-    What: encodes each view with the shared 3D VAE, then mixes/compresses the
-    view axis in latent space. Decoding expands back to per-view latents.
-    Why: minimal architectural change while enabling a 4D latent (time+view).
-    """
-
-    def __init__(
-        self,
-        dim=96,
-        z_dim=16,
-        dim_mult=[1, 2, 4, 4],
-        num_res_blocks=2,
-        attn_scales=[],
-        temperal_downsample=[False, True, True],
-        dropout=0.0,
-        view_in=8,
-        view_out=2,
-        use_view_embedding=True,
-        view_init="avg",
-    ):
-        super().__init__()
-        self.view_in = int(view_in)
-        self.view_out = int(view_out)
-        self.base = VideoVAE_(
-            dim=dim,
-            z_dim=z_dim,
-            dim_mult=dim_mult,
-            num_res_blocks=num_res_blocks,
-            attn_scales=attn_scales,
-            temperal_downsample=temperal_downsample,
-            dropout=dropout,
-        )
-        self.view_embed = (
-            ViewPositionalEmbedding(self.view_in, z_dim) if use_view_embedding else nn.Identity()
-        )
-        self.view_compress = ViewCompressor(self.view_in, self.view_out, init=view_init)
-        self.view_expand = ViewCompressor(self.view_out, self.view_in, init=view_init)
-
-    def encode(self, x, scale):
-        # x: [B, V, C, T, H, W] -> z: [B, Vc, Cz, T', H', W']
-        # Keep the base 3D VAE intact; view mixing happens after encoding.
-        b, v, c, t, h, w = x.shape
-        if v != self.view_in:
-            raise ValueError(f"Expected {self.view_in} views, got {v}")
-        x = x.view(b * v, c, t, h, w)
-        z = self.base.encode(x, scale)
-        z = z.view(b, v, self.base.z_dim, z.shape[2], z.shape[3], z.shape[4])
-        z = self.view_embed(z)
-        z = self.view_compress(z)
-        return z
-
-    def decode(self, z, scale):
-        # z: [B, Vc, Cz, T', H', W'] -> x: [B, V, 3, T, H, W]
-        # Expand view axis before decoding per-view frames.
-        z = self.view_expand(z)
-        b, v, c, t, h, w = z.shape
-        z = z.view(b * v, c, t, h, w)
-        x = self.base.decode(z, scale)
-        x = x.view(b, v, 3, x.shape[2], x.shape[3], x.shape[4])
-        return x
-
-
-
-# NEW
-class CrossViewAttention(nn.Module):
-    """
-    Bidirectional cross-attention over flattened spatial-temporal tokens.
-
-    Expects inputs of shape [B, N_tokens, C] with C=embed_dim.
-    """
-
-    def __init__(self, embed_dim=384, num_heads=8):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.norm = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(
-            embed_dim=embed_dim, num_heads=num_heads, batch_first=True
-        )
-
-    def forward(self, x0, x1):
-        # x0, x1: [B, N, C]
-        x0_orig, x1_orig = x0, x1
-        x0_n = self.norm(x0)
-        x1_n = self.norm(x1)
-        attn_0, _ = self.attn(x0_n, x1_n, x1_n, need_weights=False)
-        attn_1, _ = self.attn(x1_n, x0_n, x0_n, need_weights=False)
-        x0_enriched = x0_orig + attn_0
-        x1_enriched = x1_orig + attn_1
-        return x0_enriched, x1_enriched
-
-
-class SelfViewAttention(nn.Module):
-    """
-    Self-attention over the view dimension (V), per latent token.
-
-    Input shape: [B, V, N_tokens, C]
-    Output shape: [B, V, N_tokens, C]
-    """
-
-    def __init__(self, embed_dim=384, num_heads=8):
-        super().__init__()
-        self.norm = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(
-            embed_dim=embed_dim, num_heads=num_heads, batch_first=True
-        )
-
-    def forward(self, x):
-        # x: [B, V, N, C] -> [B*N, V, C], self-attn on V
-        b, v, n, c = x.shape
-        x_perm = x.permute(0, 2, 1, 3).contiguous().view(b * n, v, c)
-        x_norm = self.norm(x_perm)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm, need_weights=False)
-        out = x_perm + attn_out
-        out = out.view(b, n, v, c).permute(0, 2, 1, 3).contiguous()
-        return out
-
-
-class JointViewAttention(nn.Module):
-    """
-    Self-attention over all spatial-temporal tokens from all views in one sequence.
-
-    Concatenates view tokens to length V*N, runs MHA, splits back (same layout as two-view cross path).
-    """
-
-    def __init__(self, embed_dim=384, num_heads=8):
-        super().__init__()
-        self.norm = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(
-            embed_dim=embed_dim, num_heads=num_heads, batch_first=True
-        )
-
-    def forward(self, tokens_0, tokens_1):
-        # tokens_*: [B, N, C]
-        x = torch.cat([tokens_0, tokens_1], dim=1)
-        x_norm = self.norm(x)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm, need_weights=False)
-        x = x + attn_out
-        tokens_0_out, tokens_1_out = x.chunk(2, dim=1)
-        return tokens_0_out, tokens_1_out
-
-
-class LoRAConv3d(nn.Module):
-    """
-    LoRA adapter for 3D convolutions using 1x1x1 low-rank updates.
-
-    The base convolution is kept frozen; only the low-rank path is trainable.
-    """
-
-    def __init__(self, base_conv: CausalConv3d | nn.Conv3d, rank: int = 16, alpha: float = 1.0):
-        super().__init__()
-        assert isinstance(base_conv, (CausalConv3d, nn.Conv3d))
-        self.base_conv = base_conv
-        for p in self.base_conv.parameters():
-            p.requires_grad = False
-
-        in_channels = base_conv.in_channels
-        out_channels = base_conv.out_channels
-        self.rank = rank
-        self.alpha = alpha
-
-        # Low-rank 1x1x1 convs
-        self.lora_down = nn.Conv3d(in_channels, rank, kernel_size=1, bias=False)
-        self.lora_up = nn.Conv3d(rank, out_channels, kernel_size=1, bias=False)
-
-        nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_up.weight)
-
-    def forward(self, x, *args, **kwargs):
-        # Preserve any extra args (e.g. cache) for CausalConv3d
-        base_out = self.base_conv(x, *args, **kwargs) if isinstance(
-            self.base_conv, CausalConv3d
-        ) else self.base_conv(x)
-        lora_out = self.lora_up(self.lora_down(x)) * self.alpha
-        return base_out + lora_out
-
-
-class LoRAAttentionBlock(nn.Module):
-    """
-    AttentionBlock with LoRA adapters on Q, K, V and output projections.
-
-    Copies weights from a pre-initialized AttentionBlock instance.
-    """
-
-    def __init__(self, base_attn: AttentionBlock, rank: int = 16, alpha: float = 1.0):
-        super().__init__()
-        assert isinstance(base_attn, AttentionBlock)
-        dim = base_attn.dim
-        self.dim = dim
-
-        # Copy RMSNorm
-        self.norm = base_attn.norm
-
-        # Freeze base convs
-        self.to_qkv = base_attn.to_qkv
-        self.proj = base_attn.proj
-        for p in self.to_qkv.parameters():
-            p.requires_grad = False
-        for p in self.proj.parameters():
-            p.requires_grad = False
-
-        # LoRA for qkv and proj (implemented as additional 1x1 convs on channels)
-        self.rank = rank
-        self.alpha = alpha
-
-        # qkv: Conv2d(dim, 3*dim, 1)
-        self.lora_qkv_down = nn.Conv2d(dim, rank, kernel_size=1, bias=False)
-        self.lora_qkv_up = nn.Conv2d(rank, 3 * dim, kernel_size=1, bias=False)
-
-        # proj: Conv2d(dim, dim, 1)
-        self.lora_proj_down = nn.Conv2d(dim, rank, kernel_size=1, bias=False)
-        self.lora_proj_up = nn.Conv2d(rank, dim, kernel_size=1, bias=False)
-
-        nn.init.kaiming_uniform_(self.lora_qkv_down.weight, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_qkv_up.weight)
-        nn.init.kaiming_uniform_(self.lora_proj_down.weight, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_proj_up.weight)
-
-    def forward(self, x):
-        identity = x
-        b, c, t, h, w = x.size()
-        x = rearrange(x, "b c t h w -> (b t) c h w")
-        x = self.norm(x)
-
-        # Base qkv
-        base_qkv = self.to_qkv(x)
-        # LoRA qkv
-        lora_qkv = self.lora_qkv_up(self.lora_qkv_down(x)) * self.alpha
-        qkv = base_qkv + lora_qkv
-
-        q, k, v = (
-            qkv.reshape(b * t, 1, c * 3, -1)
-            .permute(0, 1, 3, 2)
-            .contiguous()
-            .chunk(3, dim=-1)
-        )
-
-        x = F.scaled_dot_product_attention(q, k, v)
-        x = x.squeeze(1).permute(0, 2, 1).reshape(b * t, c, h, w)
-
-        base_proj = self.proj(x)
-        lora_proj = self.lora_proj_up(self.lora_proj_down(x)) * self.alpha
-        x = base_proj + lora_proj
-
-        x = rearrange(x, "(b t) c h w-> b c t h w", t=t)
-        return x + identity
-
-
-class FusionResidualBlock3d(nn.Module):
-    """
-    Same layout as ResidualBlock (norm → SiLU → conv → …) but with symmetric nn.Conv3d
-    (non-causal) for view-fusion stacks where full temporal context is desired.
-    """
-
-    def __init__(self, in_dim, out_dim, dropout=0.0):
-        super().__init__()
-        self.in_dim = in_dim
-        self.out_dim = out_dim
-        self.residual = nn.Sequential(
-            RMS_norm(in_dim, images=False),
-            nn.SiLU(),
-            nn.Conv3d(in_dim, out_dim, 3, padding=1),
-            RMS_norm(out_dim, images=False),
-            nn.SiLU(),
-            nn.Dropout(dropout),
-            nn.Conv3d(out_dim, out_dim, 3, padding=1),
-        )
-        self.shortcut = nn.Conv3d(in_dim, out_dim, 1) if in_dim != out_dim else nn.Identity()
-
-    def forward(self, x, feat_cache=None, feat_idx=None):
-        del feat_cache, feat_idx
-        h = self.shortcut(x)
-        for layer in self.residual:
-            x = layer(x)
-        return x + h
-
-
-class AttentionMultiViewVideoVan(nn.Module):
-    """
-    Two-view 3D VAE with encoder-side cross-view fusion and optional LoRA.
-
-    - Input:  [B, 2, 3, T, H, W]
-    - Output: fused latent [B, z_dim, T', H', W'] (same as VideoVAE_)
-    """
-
-    def __init__(
-        self,
-        dim=96,
-        z_dim=16,
-        dim_mult=[1, 2, 4, 4],
-        num_res_blocks=2,
-        attn_scales=[],
-        temperal_downsample=[False, True, True],
-        dropout=0.0,
-        use_lora: bool = True,
-        lora_rank: int = 16,
-        fusion_mode: str = "cross_attention",
-        use_lora_before: bool = False,
-        use_lora_after: bool = True,
-        use_viewwise_decoder_lora: bool = False,
-        use_non_causal_fusion_conv3d: bool = True,
-    ):
-        super().__init__()
-        self.dim = dim
-        self.z_dim = z_dim
-        self.dim_mult = dim_mult
-        self.num_res_blocks = num_res_blocks
-        self.attn_scales = attn_scales
-        self.temperal_downsample = temperal_downsample
-        self.temperal_upsample = temperal_downsample[::-1]
-        self.use_lora = use_lora
-        self.lora_rank = lora_rank
-        self.fusion_mode = fusion_mode
-        self.use_lora_before = use_lora_before
-        self.use_lora_after = use_lora_after
-        self.use_viewwise_decoder_lora = use_viewwise_decoder_lora
-        self.use_non_causal_fusion_conv3d = use_non_causal_fusion_conv3d
-
-        # Reuse the standard encoder/decoder stacks
-        self.encoder = Encoder3d(
-            dim, z_dim * 2, dim_mult, num_res_blocks, attn_scales, self.temperal_downsample, dropout
-        )
-        self.conv1 = CausalConv3d(z_dim * 2, z_dim * 2, 1)
-        self.conv2 = CausalConv3d(z_dim, z_dim, 1)
-        self.decoder = Decoder3d(
-            dim, z_dim, dim_mult, num_res_blocks, attn_scales, self.temperal_upsample, dropout
-        )
-
-        # Learnable per-view embeddings for view-conditioned decoding
-        # We currently support exactly 2 views: indices {0, 1}.
-        self.view_embed = nn.Embedding(2, z_dim)
-
-        bottleneck_channels = dim * dim_mult[-1]
-        fused_channels = bottleneck_channels * 2  # concatenated along channels (2 views)
-
-        # Fusion modules at feature level (after downsamples, before bottleneck middle/head).
-        self.cross_attn = None
-        self.self_view_attn = None
-        self.joint_attn = None
-        self.view_conv_fuse = None
-        self.view_conv_norm = None
-        self.view_conv_act = None
-        self.fusion_resblock1 = None
-        self.fusion_resblock2 = None
-
-        if fusion_mode == "cross_attention":
-            self.cross_attn = CrossViewAttention(embed_dim=bottleneck_channels, num_heads=8)
-            self.fusion_resblock1 = ResidualBlock(fused_channels, bottleneck_channels, dropout)
-            self.fusion_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
-        elif fusion_mode == "joint_attention":
-            self.joint_attn = JointViewAttention(embed_dim=bottleneck_channels, num_heads=8)
-            self.fusion_resblock1 = ResidualBlock(fused_channels, bottleneck_channels, dropout)
-            self.fusion_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
-        elif fusion_mode == "self_attention":
-            self.self_view_attn = SelfViewAttention(embed_dim=bottleneck_channels, num_heads=8)
-            # After self-attn we aggregate V -> 1 with mean, then lightly refine.
-            self.fusion_resblock1 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
-            self.fusion_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
-        elif fusion_mode == "conv3d":
-            # View fusion stack (non-causal option): 1×1×1 Conv3d → GroupNorm + SiLU → two 3×3×3 Res blocks.
-            # Causal variant uses CausalConv3d + ResidualBlock (same as encoder internals).
-            conv_fuse_cls = nn.Conv3d if use_non_causal_fusion_conv3d else CausalConv3d
-            resblock_cls = FusionResidualBlock3d if use_non_causal_fusion_conv3d else ResidualBlock
-            self.view_conv_fuse = conv_fuse_cls(fused_channels, bottleneck_channels, kernel_size=1)
-            gn_groups = 32 if bottleneck_channels % 32 == 0 else 16
-            self.view_conv_norm = nn.GroupNorm(gn_groups, bottleneck_channels)
-            self.view_conv_act = nn.SiLU()
-            self.fusion_resblock1 = resblock_cls(bottleneck_channels, bottleneck_channels, dropout)
-            self.fusion_resblock2 = resblock_cls(bottleneck_channels, bottleneck_channels, dropout)
-        else:
-            raise ValueError(
-                f"Unsupported fusion_mode={fusion_mode}. "
-                "Use one of: cross_attention, joint_attention, self_attention, conv3d."
-            )
-
-        # Optional per-view latent LoRA adapters for decoding.
-        # These replace additive view embeddings when enabled.
-        if self.use_viewwise_decoder_lora:
-            self.view_lora_down = nn.ModuleList(
-                [nn.Conv3d(z_dim, lora_rank, kernel_size=1, bias=False) for _ in range(2)]
-            )
-            self.view_lora_up = nn.ModuleList(
-                [nn.Conv3d(lora_rank, z_dim, kernel_size=1, bias=False) for _ in range(2)]
-            )
-            for i in range(2):
-                nn.init.kaiming_uniform_(self.view_lora_down[i].weight, a=math.sqrt(5))
-                nn.init.zeros_(self.view_lora_up[i].weight)
-        else:
-            self.view_lora_down = None
-            self.view_lora_up = None
-
-        # Optional: wrap middle + decoder with LoRA
-        if self.use_lora:
-            self._enable_lora()
-
-    def _enable_lora(self):
-        # Helpers to recursively wrap conv and attention modules with LoRA
-        def wrap_conv3d_with_lora(module: nn.Module):
-            for name, child in list(module.named_children()):
-                if isinstance(child, (CausalConv3d, nn.Conv3d)):
-                    setattr(
-                        module,
-                        name,
-                        LoRAConv3d(child, rank=self.lora_rank, alpha=1.0),
-                    )
-                else:
-                    wrap_conv3d_with_lora(child)
-
-        def wrap_attn_with_lora(module: nn.Module):
-            for name, child in list(module.named_children()):
-                if isinstance(child, AttentionBlock):
-                    setattr(
-                        module,
-                        name,
-                        LoRAAttentionBlock(child, rank=self.lora_rank, alpha=1.0),
-                    )
-                else:
-                    wrap_attn_with_lora(child)
-
-        # "Before" LoRA: newly introduced fusion modules.
-        if self.use_lora_before:
-            if self.cross_attn is not None and hasattr(self.cross_attn, "attn"):
-                # Wrap cross-view MHA projections via LoRA on qkv/proj path is non-trivial here;
-                # we keep cross_attn as-is and LoRA the downstream fusion ResBlocks.
-                pass
-            if self.self_view_attn is not None and hasattr(self.self_view_attn, "attn"):
-                pass
-            if self.joint_attn is not None and hasattr(self.joint_attn, "attn"):
-                pass
-            if self.view_conv_fuse is not None:
-                self.view_conv_fuse = LoRAConv3d(
-                    self.view_conv_fuse, rank=self.lora_rank, alpha=1.0
-                )
-            if self.fusion_resblock1 is not None:
-                wrap_conv3d_with_lora(self.fusion_resblock1)
-            if self.fusion_resblock2 is not None:
-                wrap_conv3d_with_lora(self.fusion_resblock2)
-
-        # "After" LoRA: bottleneck middle/head and full decoder.
-        if self.use_lora_after:
-            wrap_attn_with_lora(self.encoder.middle)
-            wrap_conv3d_with_lora(self.encoder.middle)
-            wrap_conv3d_with_lora(self.encoder.head)
-            wrap_conv3d_with_lora(self.decoder)
-            wrap_attn_with_lora(self.decoder)
-
-    def encode(self, x, scale):
-        """
-        x: [B, 2, 3, T, H, W]
-        Returns: mu [B, z_dim, T', H', W']
-        """
-        b, v, c, t, h, w = x.shape
-        assert v == 2, f"MultiViewVideoVan expects exactly 2 views, got {v}"
-
-        # Split views
-        x0 = x[:, 0]
-        x1 = x[:, 1]
-
-        # We do not use encoder.forward; manually unroll conv1 + downsamples
-        def run_down_path(x_in):
-            # initial conv
-            x_out = self.encoder.conv1(x_in)
-            # downsamples
-            for layer in self.encoder.downsamples:
-                x_out = layer(x_out)
-            return x_out
-
-        feat_0 = run_down_path(x0)  # [B, C=384, T'=1, H'=16, W'=16]
-        feat_1 = run_down_path(x1)
-
-        # Flatten to tokens: [B, 256, 384]
-        def flatten_feat(feat):
-            b, c, t2, h2, w2 = feat.shape
-            tokens = rearrange(feat, "b c t h w -> b (t h w) c")
-            return tokens
-
-        tokens_0 = flatten_feat(feat_0)
-        tokens_1 = flatten_feat(feat_1)
-
-        # Back to [B, C, T', H', W']
-        def unflatten_tokens(tokens):
-            b, n, c = tokens.shape
-            # Recover grid from feat_0 shape instead of hardcoding
-            _, _, t2, h2, w2 = feat_0.shape
-            assert n == t2 * h2 * w2, "Token count mismatch when unflattening"
-            return rearrange(tokens, "b (t h w) c -> b c t h w", t=t2, h=h2, w=w2)
-
-        if self.fusion_mode == "cross_attention":
-            tokens_0_enriched, tokens_1_enriched = self.cross_attn(tokens_0, tokens_1)
-            feat_0_enriched = unflatten_tokens(tokens_0_enriched)
-            feat_1_enriched = unflatten_tokens(tokens_1_enriched)
-            # [B, 2C, T', H', W'] -> [B, C, T', H', W']
-            fused = torch.cat([feat_0_enriched, feat_1_enriched], dim=1)
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
-        elif self.fusion_mode == "joint_attention":
-            tokens_0_enriched, tokens_1_enriched = self.joint_attn(tokens_0, tokens_1)
-            feat_0_enriched = unflatten_tokens(tokens_0_enriched)
-            feat_1_enriched = unflatten_tokens(tokens_1_enriched)
-            fused = torch.cat([feat_0_enriched, feat_1_enriched], dim=1)
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
-        elif self.fusion_mode == "self_attention":
-            # Stack per-view tokens, self-attend on view axis, then aggregate V->1.
-            stacked = torch.stack([tokens_0, tokens_1], dim=1)  # [B,2,N,C]
-            stacked = self.self_view_attn(stacked)  # [B,2,N,C]
-            fused_tokens = stacked.mean(dim=1)  # [B,N,C]
-            fused = unflatten_tokens(fused_tokens)  # [B,C,T',H',W']
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
-        else:
-            # conv3d fusion
-            fused = torch.cat([feat_0, feat_1], dim=1)  # [B,2C,T',H',W']
-            fused = self.view_conv_fuse(fused)
-            # GroupNorm expects 4D; apply per-time slice.
-            b2, c2, t2, h2, w2 = fused.shape
-            fused_2d = fused.permute(0, 2, 1, 3, 4).reshape(b2 * t2, c2, h2, w2)
-            fused_2d = self.view_conv_norm(fused_2d)
-            fused_2d = self.view_conv_act(fused_2d)
-            fused = fused_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
-
-        # Continue through the encoder middle and head (original code)
-        x_mid = fused
-        for layer in self.encoder.middle:
-            x_mid = layer(x_mid)
-
-        x_head = x_mid
-        for layer in self.encoder.head:
-            x_head = layer(x_head)
-
-        # Now mimic VideoVAE_._encode_with_stats from here
-        out_conv = self.conv1(x_head)
-        mu, log_var = out_conv.chunk(2, dim=1)
-
-        if isinstance(scale[0], torch.Tensor):
-            scale = [s.to(dtype=mu.dtype, device=mu.device) for s in scale]
-            mu = (mu - scale[0].view(1, self.z_dim, 1, 1, 1)) * scale[1].view(
-                1, self.z_dim, 1, 1, 1
-            )
-        else:
-            scale = scale.to(dtype=mu.dtype, device=mu.device)
-            mu = (mu - scale[0]) * scale[1]
-        return mu, log_var
-
-    def reparameterize(self, mu, log_var):
-        std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        return eps * std + mu
-
-    def decode(self, z, scale, view_idx: int = 0):
-        """
-        z: [B, z_dim, T', H', W']
-        Returns: reconstruction [B, 3, T, H, W]
-        """
-        if self.use_viewwise_decoder_lora:
-            # Apply view-specific low-rank latent modulation instead of embeddings.
-            lora_delta = self.view_lora_up[view_idx](self.view_lora_down[view_idx](z))
-            z = z + lora_delta
-        else:
-            # View conditioning: add a small learned embedding per view.
-            view_idx_tensor = torch.tensor(view_idx, device=z.device, dtype=torch.long)
-            emb = self.view_embed(view_idx_tensor).view(1, self.z_dim, 1, 1, 1)
-            z = z + emb
-
-        if isinstance(scale[0], torch.Tensor):
-            scale = [s.to(dtype=z.dtype, device=z.device) for s in scale]
-            z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
-                1, self.z_dim, 1, 1, 1
-            )
-        else:
-            scale = scale.to(dtype=z.dtype, device=z.device)
-            z = z / scale[1] + scale[0]
-
-        iter_ = z.shape[2]
-        x = self.conv2(z)
-
-        out = None
-        for i in range(iter_):
-            x_chunk = x[:, :, i : i + 1, :, :]
-            if i == 0:
-                out = self.decoder(x_chunk)
-            else:
-                out_ = self.decoder(x_chunk)
-                out = torch.cat([out, out_], 2)
-        return out
-
-
-    def forward(self, x, scale):
-        """
-        Full VAE forward.
-
-        Args:
-            x: [B, 2, 3, T, H, W]
-            scale: (mean, inv_std) as in WanVideoVAE.
-        """
-        mu, log_var = self.encode(x, scale)
-        z = self.reparameterize(mu, log_var)
-        x_recon = self.decode(z, scale)
-        return x_recon, mu, log_var
 
 
 class WanVideoVAE(nn.Module):
@@ -2114,160 +1247,6 @@ class WanVideoVAE(nn.Module):
     def state_dict_converter():
         return WanVideoVAEStateDictConverter()
 
-class MultiViewWanVideoVAE(nn.Module):
-    """
-    Multi-view Wan VAE with view-aware latent compression.
-
-    This mirrors WanVideoVAE's public interface but expects videos shaped
-    [B, V, C, T, H, W]. Tiling is intentionally not supported yet because
-    stitching across both spatial and view dimensions needs extra bookkeeping.
-    """
-
-    def __init__(self, z_dim=16, view_in=8, view_compression=4, use_view_embedding=True):
-        super().__init__()
-        mean = [
-            -0.7571, -0.7089, -0.9113, 0.1075, -0.1745, 0.9653, -0.1517, 1.5508,
-            0.4134, -0.0715, 0.5517, -0.3632, -0.1922, -0.9497, 0.2503, -0.2921
-        ]
-        std = [
-            2.8184, 1.4541, 2.3275, 2.6558, 1.2196, 1.7708, 2.6052, 2.0743,
-            3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160
-        ]
-        self.mean = torch.tensor(mean)
-        self.std = torch.tensor(std)
-        self.scale = [self.mean, 1.0 / self.std]
-
-        # Convert a compression factor into an integer view count (e.g. 2->1).
-        view_out = max(1, int(view_in) // max(1, int(view_compression)))
-        self.model = MultiViewVideoVAE_(
-            z_dim=z_dim,
-            view_in=view_in,
-            view_out=view_out,
-            use_view_embedding=use_view_embedding,
-        ).eval().requires_grad_(False)
-        self.upsampling_factor = 8
-        self.z_dim = z_dim
-        self.view_in = int(view_in)
-        self.view_out = int(view_out)
-
-    def single_encode(self, video, device):
-        video = video.to(device)
-        return self.model.encode(video, self.scale)
-
-    def single_decode(self, hidden_state, device):
-        hidden_state = hidden_state.to(device)
-        return self.model.decode(hidden_state, self.scale).clamp_(-1, 1)
-
-    def encode(self, videos, device, tiled=False, tile_size=(34, 34), tile_stride=(18, 16)):
-        if tiled:
-            raise NotImplementedError(
-            # Allow single-view inputs by inserting a view dimension.
-                "Multi-view tiling is not supported yet; use tiled=False for now."
-            )
-        if isinstance(videos, (list, tuple)):
-            videos = torch.stack(videos)
-        if videos.dim() == 5:
-            videos = videos.unsqueeze(1)
-        return self.single_encode(videos, device)
-
-    def decode(self, hidden_states, device, tiled=False, tile_size=(34, 34), tile_stride=(18, 16)):
-        if tiled:
-            raise NotImplementedError(
-                "Multi-view tiling is not supported yet; use tiled=False for now."
-            )
-        if isinstance(hidden_states, (list, tuple)):
-            hidden_states = torch.stack(hidden_states)
-        return self.single_decode(hidden_states, device)
-    
-    @staticmethod
-    def state_dict_converter():
-        return WanVideoVAEStateDictConverter()
-
-# class MultiViewWanVideoVAE(nn.Module):
-
-#     def __init__(
-#         self,
-#         base_vae,          # pass a normal WanVideoVAE
-#         view_in=2,
-#         freeze_temporal=True,
-#     ):
-#         super().__init__()
-
-#         self.base = base_vae
-#         self.view_in = view_in
-#         self.z_dim = base_vae.z_dim
-
-#         # 🔥 Latent fusion (V → 1)
-#         self.latent_fusion = nn.Conv3d(
-#             in_channels=view_in * self.z_dim,
-#             out_channels=self.z_dim,
-#             kernel_size=1,
-#             bias=False,
-#         )
-
-#         # 🔥 Latent expansion (1 → V)
-#         self.latent_expand = nn.Conv3d(
-#             in_channels=self.z_dim,
-#             out_channels=view_in * self.z_dim,
-#             kernel_size=1,
-#             bias=False,
-#         )
-
-#         # Freeze only temporal modules
-#         if freeze_temporal:
-#             for name, param in self.base.named_parameters():
-#                 if "temporal" in name.lower():
-#                     param.requires_grad = False
-
-#     # -----------------------------------
-#     # ENCODE
-#     # -----------------------------------
-#     def encode(self, x):
-
-#         # x: [B, V, C, T, H, W]
-#         B, V, C, T, H, W = x.shape
-
-#         latents = []
-#         for v in range(V):
-#             z_v = self.base.encode(x[:, v])
-#             latents.append(z_v)
-
-#         # [B, V, Z, T', H', W']
-#         z_stack = torch.stack(latents, dim=1)
-
-#         B, V, Z, T2, H2, W2 = z_stack.shape
-
-#         # channel-fuse
-#         z_stack = z_stack.view(B, V * Z, T2, H2, W2)
-#         z = self.latent_fusion(z_stack)
-
-#         return z
-
-#     # -----------------------------------
-#     # DECODE
-#     # -----------------------------------
-#     def decode(self, z):
-
-#         # expand
-#         z_expand = self.latent_expand(z)
-
-#         B, _, T2, H2, W2 = z_expand.shape
-#         Z = self.z_dim
-
-#         z_expand = z_expand.view(B, self.view_in, Z, T2, H2, W2)
-
-#         recons = []
-#         for v in range(self.view_in):
-#             x_v = self.base.decode(z_expand[:, v])
-#             recons.append(x_v)
-
-#         return torch.stack(recons, dim=1)
-
-#     def forward(self, x):
-#         z = self.encode(x)
-#         x_rec = self.decode(z)
-#         return x_rec
-        
 
 class WanVideoVAEStateDictConverter:
 
@@ -2320,11 +1299,11 @@ class VideoVAE38_(VideoVAE_):
         for i in range(iter_):
             self._enc_conv_idx = [0]
             if i == 0:
-                out = self.encoder(x[:, :, :1, :, :],
+                out, self._enc_feat_map, self._enc_conv_idx = self.encoder(x[:, :, :1, :, :],
                                    feat_cache=self._enc_feat_map,
                                    feat_idx=self._enc_conv_idx)
             else:
-                out_ = self.encoder(x[:, :, 1 + 4 * (i - 1):1 + 4 * i, :, :],
+                out_, self._enc_feat_map, self._enc_conv_idx = self.encoder(x[:, :, 1 + 4 * (i - 1):1 + 4 * i, :, :],
                                     feat_cache=self._enc_feat_map,
                                     feat_idx=self._enc_conv_idx)
                 out = torch.cat([out, out_], 2)
@@ -2354,12 +1333,12 @@ class VideoVAE38_(VideoVAE_):
         for i in range(iter_):
             self._conv_idx = [0]
             if i == 0:
-                out = self.decoder(x[:, :, i:i + 1, :, :],
+                out, self._feat_map, self._conv_idx = self.decoder(x[:, :, i:i + 1, :, :],
                                    feat_cache=self._feat_map,
                                    feat_idx=self._conv_idx,
                                    first_chunk=True)
             else:
-                out_ = self.decoder(x[:, :, i:i + 1, :, :],
+                out_, self._feat_map, self._conv_idx = self.decoder(x[:, :, i:i + 1, :, :],
                                     feat_cache=self._feat_map,
                                     feat_idx=self._conv_idx)
                 out = torch.cat([out, out_], 2)

@@ -9,6 +9,7 @@ import types
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+import imageio.v2 as imageio
 
 
 def pick_upper_cameras(
@@ -82,7 +83,14 @@ def build_arg_parser():
     parser.add_argument(
         "--nersemble-root",
         type=Path,
-        default=Path("/scratch/piado/data/nersemble"),
+        default=Path("/datasets/lindell-proj/neumayr/nersemble_v2/processed/128-res"),
+        # /datasets/lindell-proj/neumayr/nersemble_v2/processed/128-res
+    )
+    parser.add_argument(
+        "--video",
+        type=Path,
+        default=None,
+        help="Optional path to a single MP4 video. If set, NeRSemble dataset loading is skipped.",
     )
     parser.add_argument("--participant", type=int, default=17)
     parser.add_argument("--sequence", type=str, default="")
@@ -115,97 +123,167 @@ def build_arg_parser():
 
 def main():
     args = build_arg_parser().parse_args()  # parse CLI args
-    workspace_root = args.workspace_root  # repo root
+    # Treat the repo root as the directory *above* this script, so it works
+    # both on the local workstation and on the cluster.
+    # Example: /.../piado/vae/nersemble_vae_demo.py -> workspace_root = /.../piado
+    #args.workspace_root can still override this if needed in future.
+    workspace_root = Path(__file__).resolve().parent.parent
     nersemble_root = args.nersemble_root  # dataset root
-    diffsynth_root = workspace_root / "vae/DiffSynth-Studio"  # DiffSynth code
-    nersemble_pkg_root = workspace_root / "nersemble-data" / "src"  # data utils
+    # DiffSynth code lives at <workspace_root>/vae/DiffSynth-Studio in this repo.
+    diffsynth_root = workspace_root / "vae" / "DiffSynth-Studio"
 
-    # Local imports for the downloaded dataset.
+    # NeRSemble data helper package is vendored inside DiffSynth-Studio:
+    # <workspace_root>/vae/DiffSynth-Studio/diffsynth/core/data/nersemble-data/src
+    nersemble_pkg_root = (
+        diffsynth_root / "diffsynth" / "core" / "data" / "nersemble-data" / "src"
+    )
     sys.path.insert(0, str(nersemble_pkg_root))  # import local nersemble_data
     sys.path.insert(0, str(diffsynth_root))  # import local DiffSynth
 
-    from nersemble_data.data.nersemble_data import (
-        NeRSembleDataManager,
-        NeRSembleParticipantDataManager,
-    )
-
-    # nersemble_data path : /home/piado/projects/aip-lindell/piado/vae/DiffSynth-Studio/diffsynth/core/data/nersemble-data/src/nersemble_data/data/nersemble_data.py
-
-    data_folder = NeRSembleDataManager(str(nersemble_root))  # scan participants
-    participants = sorted(data_folder.list_participants())
-    if not participants:
-        raise RuntimeError("No participants found in the NeRSemble folder.")
-
-    # Take given participant if available, otherwise use the first
-    participant_id = args.participant if args.participant in participants else participants[0]  # pick subject
-    data_manager = NeRSembleParticipantDataManager(str(nersemble_root), participant_id)
-
-    sequences = data_manager.list_sequences()  # list sequences
-
-    # Prefer given sequence, otherwise use the first non-background
-    if args.sequence and args.sequence in sequences:
-        sequence_name = args.sequence
-    else:
-        sequence_name = next((s for s in sequences if s != "BACKGROUND"), sequences[0])
-
-    print("Participant:", participant_id)
-    print("Sequence:", sequence_name)
-    print("Available sequences:", sequences)
-
-    # Load camera calibration via the data manager
-    camera_calibration = data_manager.load_camera_calibration()  # intrinsics/extrinsics
-    world_2_cam_poses = camera_calibration.world_2_cam
-    intrinsics = camera_calibration.intrinsics
-
-    print("Intrinsics:\n", intrinsics)
-    print("Number of cameras in calibration:", len(world_2_cam_poses))
-
-    upper_serials, _camera_centers = pick_upper_cameras(
-        nersemble_root,
-        participant_id,
-        sequence_name,
-        data_manager,
-        top_k=8,
-        axis=1,
-    )
-
-    print("Upper-view cameras (8):", upper_serials)
-
     timestep = args.timestep  # frame index
     downscale_factor = None if args.downscale == 0 else args.downscale  # speed/quality
-    apply_color_correction = not args.no_color_correction  # dataset correction
+
+    if args.video is not None:
+        # Direct MP4 mode: skip NeRSemble dataset helpers and use a single video.
+        video_path = args.video
+        if not video_path.exists():
+            raise FileNotFoundError(f"Video not found: {video_path}")
+
+        print("Using direct video:", video_path)
+
+        # Load frames from the video. If timestep > 0, start there; otherwise from 0.
+        reader = imageio.get_reader(str(video_path))
+        frames = []
+        try:
+            start_idx = max(timestep, 0)
+            for idx, frame in enumerate(reader):
+                if idx < start_idx:
+                    continue
+                frames.append(frame.astype(np.float32) / 255.0)  # [0,1] HWC
+        finally:
+            reader.close()
+
+        if not frames:
+            raise RuntimeError(f"No frames read from video {video_path}")
+
+        # Stack into [T, H, W, C] then convert to [C, T, H, W].
+        video_np = np.stack(frames, axis=0)
+        video_tensor = (
+            torch.from_numpy(video_np)
+            .to(torch.float32)
+            .permute(3, 0, 1, 2)  # THWC -> CTHW
+        )
+
+        # For plotting, keep just the first frame as an "image".
+        img = frames[0]
+
+        participant_id = 0
+        sequence_name = video_path.stem
+        upper_serials = ["cam"]
+        images = [img]
+    else:
+        from nersemble_data.data.nersemble_data import (
+            NeRSembleDataManager,
+            NeRSembleParticipantDataManager,
+        )
+
+        # nersemble_data path : /home/piado/projects/aip-lindell/piado/vae/DiffSynth-Studio/diffsynth/core/data/nersemble-data/src/nersemble_data/data/nersemble_data.py
+
+        data_folder = NeRSembleDataManager(str(nersemble_root))  # scan participants
+        participants = sorted(data_folder.list_participants())
+        if not participants:
+            raise RuntimeError("No participants found in the NeRSemble folder.")
+
+        # Take given participant if available, otherwise use the first
+        participant_id = (
+            args.participant if args.participant in participants else participants[0]
+        )  # pick subject
+        data_manager = NeRSembleParticipantDataManager(
+            str(nersemble_root), participant_id
+        )
+
+        sequences = data_manager.list_sequences()  # list sequences
+
+        # Prefer given sequence, otherwise use the first non-background
+        if args.sequence and args.sequence in sequences:
+            sequence_name = args.sequence
+        else:
+            sequence_name = next(
+                (s for s in sequences if s != "BACKGROUND"), sequences[0]
+            )
+
+        print("Participant:", participant_id)
+        print("Sequence:", sequence_name)
+        print("Available sequences:", sequences)
+
+        # Load camera calibration via the data manager
+        camera_calibration = data_manager.load_camera_calibration()  # intrinsics/extrinsics
+        world_2_cam_poses = camera_calibration.world_2_cam
+        intrinsics = camera_calibration.intrinsics
+
+        print("Intrinsics:\n", intrinsics)
+        print("Number of cameras in calibration:", len(world_2_cam_poses))
+
+        upper_serials, _camera_centers = pick_upper_cameras(
+            nersemble_root,
+            participant_id,
+            sequence_name,
+            data_manager,
+            top_k=8,
+            axis=1,
+        )
+
+        print("Upper-view cameras (8):", upper_serials)
+
+        apply_color_correction = not args.no_color_correction  # dataset correction
+
+        images = []
+        for serial in upper_serials:
+            img = data_manager.load_image(  # read frame
+                sequence_name,
+                serial,
+                timestep,
+                apply_color_correction=apply_color_correction,
+                downscale_factor=downscale_factor,
+            )
+            images.append(img)
 
     output_dir = args.output_dir or (workspace_root / "outputs")  # output folder
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    images = []
-    for serial in upper_serials:
-        img = data_manager.load_image(  # read frame
-            sequence_name,
-            serial,
-            timestep,
-            apply_color_correction=apply_color_correction,
-            downscale_factor=downscale_factor,
-        )
-        images.append(img)
-
-    fig, axes = plt.subplots(2, 4, figsize=(12, 6))  # 8-view grid
-    for ax, serial, img in zip(axes.flat, upper_serials, images):
-        ax.imshow(img)
-        ax.set_title(f"cam {serial}")
+    # Visualization of original views.
+    if len(upper_serials) == 1:
+        fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+        ax.imshow(images[0])
+        ax.set_title("Original frame")
         ax.axis("off")
+    else:
+        fig, axes = plt.subplots(2, 4, figsize=(12, 6))  # 8-view grid
+        for ax, serial, img in zip(axes.flat, upper_serials, images):
+            ax.imshow(img)
+            ax.set_title(f"cam {serial}")
+            ax.axis("off")
     plt.tight_layout()
     originals_path = output_dir / f"nersemble_{participant_id:03d}_{sequence_name}_upper8.png"  # save path
     fig.savefig(originals_path, dpi=150)
     plt.close(fig)
     print("Saved original grid to:", originals_path)
 
-    videos = [image_to_video_tensor(img) for img in images]  # to model input
+    # Build input videos for the VAE.
+    if args.video is not None:
+        # Direct video mode: we already built a full [C,T,H,W] tensor.
+        videos = [video_tensor]
+    else:
+        # NeRSemble mode: each "image" is a single frame; wrap as T=1.
+        videos = [image_to_video_tensor(img) for img in images]  # to model input
+
     print("Single-view tensor shape:", videos[0].shape)
 
 
 
     # Load the VAE implementation from DiffSynth-Studio
+    print(f"diffsynth_root: {diffsynth_root}")
+    print("Loading WanVideoVAE from:", diffsynth_root / "diffsynth/models/wan_video_vae.py")
 
     vae_module = load_wan_video_vae_module(  # dynamic import
         diffsynth_root / "diffsynth/models/wan_video_vae.py"
@@ -244,6 +322,11 @@ def main():
     #print("Multi-view mode:", use_multiview)
     use_multiview = False
 
+    # Enable detailed shape logging for single-view WanVideoVAE (DiffSynth implementation).
+    if not use_multiview and hasattr(vae, "model") and hasattr(vae.model, "debug_shapes"):
+        vae.model.debug_shapes = True
+        print("Enabled debug_shapes on inner VideoVAE_ model.")
+
     # Main VAE operations: encode and decode
     with torch.no_grad():  # no gradients
         if use_multiview:
@@ -264,17 +347,28 @@ def main():
     print("Latent shape:", latents.shape)
     print("Recon tensor shape:", recon_videos.shape)
 
-    fig, axes = plt.subplots(  # original vs recon
-        len(upper_serials), 2, figsize=(8, 3 * len(upper_serials))
-    )
-    for i, serial in enumerate(upper_serials):
-        axes[i, 0].imshow(images[i])
-        axes[i, 0].set_title(f"Original cam {serial}")
-        axes[i, 0].axis("off")
+    # Reconstruction visualization.
+    if len(upper_serials) == 1:
+        fig, (ax_orig, ax_recon) = plt.subplots(1, 2, figsize=(8, 4))
+        ax_orig.imshow(images[0])
+        ax_orig.set_title("Original")
+        ax_orig.axis("off")
 
-        axes[i, 1].imshow(recon_images[i])
-        axes[i, 1].set_title(f"Reconstruction cam {serial}")
-        axes[i, 1].axis("off")
+        ax_recon.imshow(recon_images[0])
+        ax_recon.set_title("Reconstruction")
+        ax_recon.axis("off")
+    else:
+        fig, axes = plt.subplots(  # original vs recon grid
+            len(upper_serials), 2, figsize=(8, 3 * len(upper_serials))
+        )
+        for i, serial in enumerate(upper_serials):
+            axes[i, 0].imshow(images[i])
+            axes[i, 0].set_title(f"Original cam {serial}")
+            axes[i, 0].axis("off")
+
+            axes[i, 1].imshow(recon_images[i])
+            axes[i, 1].set_title(f"Reconstruction cam {serial}")
+            axes[i, 1].axis("off")
 
     plt.tight_layout()
     recon_path = output_dir / f"nersemble_{participant_id:03d}_{sequence_name}_upper8_recon.png"  # save path

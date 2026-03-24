@@ -431,8 +431,9 @@ class CheckpointIO:
                 os.makedirs(os.path.join(save_dir, "lora"), exist_ok=True)
                 booster.save_lora_as_pretrained(model, os.path.join(save_dir, "lora"))
         if optimizer is not None:
+            # Use non-sharded optimizer saving to avoid Zero2 shard state_dict issues
             booster.save_optimizer(
-                optimizer, os.path.join(save_dir, "optimizer"), shard=True, size_per_shard=4096, use_async=async_io
+                optimizer, os.path.join(save_dir, "optimizer"), shard=False, size_per_shard=4096, use_async=async_io
             )
             if include_master_weights:
                 self._prepare_master_pinned_state_dict(model, optimizer)
@@ -458,8 +459,8 @@ class CheckpointIO:
                 else:
                     torch.save(ema.state_dict(), os.path.join(save_dir, "ema.pt"))
 
-            if sampler is not None:
-                # only for VariableVideoBatchSampler
+            if sampler is not None and hasattr(sampler, "state_dict") and callable(getattr(sampler, "state_dict")):
+                # VariableVideoBatchSampler / StatefulDistributedSampler have state_dict(step); DistributedSampler does not
                 torch.save(sampler.state_dict(step), os.path.join(save_dir, "sampler"))
 
             if optimizer is not None and include_master_weights:
@@ -526,7 +527,7 @@ class CheckpointIO:
                 load_master_weights(model, optimizer, master_state_dict)
         if lr_scheduler is not None:
             booster.load_lr_scheduler(lr_scheduler, os.path.join(load_dir, "lr_scheduler"))
-        if sampler is not None:
+        if sampler is not None and hasattr(sampler, "load_state_dict") and os.path.exists(os.path.join(load_dir, "sampler")):
             sampler.load_state_dict(torch.load(os.path.join(load_dir, "sampler")))
 
         dist.barrier()

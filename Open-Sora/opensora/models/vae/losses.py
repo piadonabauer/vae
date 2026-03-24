@@ -131,6 +131,15 @@ class VAELoss(nn.Module):
             # Multi-view: [B, V, C, T, H, W] - preserve view dimension initially
             is_multiview = True
             b, v, c, t, h, w = video.shape
+            # Some sequences can be shorter/longer in T than others (e.g. 9 vs 10/13 frames).
+            # Align reconstruction and target along the temporal dimension before reshaping
+            # to avoid invalid .view() calls when T differs.
+            _, _, _, t_rec, _, _ = recon_video.shape
+            if t_rec != t:
+                new_t = min(t, t_rec)
+                video = video[:, :, :, :new_t, :, :].contiguous()
+                recon_video = recon_video[:, :, :, :new_t, :, :].contiguous()
+                t = new_t
             # Reshape for temporal batching: [B*V, C, T, H, W]
             video_reshaped = video.view(b * v, c, t, h, w)
             recon_video_reshaped = recon_video.view(b * v, c, t, h, w)
