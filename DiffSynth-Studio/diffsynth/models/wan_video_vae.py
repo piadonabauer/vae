@@ -1407,32 +1407,6 @@ class CrossViewAttention(nn.Module):
         return x0_enriched, x1_enriched
 
 
-class SelfViewAttention(nn.Module):
-    """
-    Self-attention over the view dimension (V), per latent token.
-
-    Input shape: [B, V, N_tokens, C]
-    Output shape: [B, V, N_tokens, C]
-    """
-
-    def __init__(self, embed_dim=384, num_heads=8):
-        super().__init__()
-        self.norm = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(
-            embed_dim=embed_dim, num_heads=num_heads, batch_first=True
-        )
-
-    def forward(self, x):
-        # x: [B, V, N, C] -> [B*N, V, C], self-attn on V
-        b, v, n, c = x.shape
-        x_perm = x.permute(0, 2, 1, 3).contiguous().view(b * n, v, c)
-        x_norm = self.norm(x_perm)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm, need_weights=False)
-        out = x_perm + attn_out
-        out = out.view(b, n, v, c).permute(0, 2, 1, 3).contiguous()
-        return out
-
-
 class JointViewAttention(nn.Module):
     """
     Self-attention over all spatial-temporal tokens from all views in one sequence.
@@ -1615,9 +1589,11 @@ class AttentionMultiViewVideoVan(nn.Module):
         use_lora_before: bool = False,
         use_lora_after: bool = True,
         use_viewwise_decoder_lora: bool = False,
-        use_non_causal_fusion_conv3d: bool = True,
     ):
         super().__init__()
+        # Back-compat: old name "joint_attention" is the same as "self_attention".
+        if fusion_mode == "joint_attention":
+            fusion_mode = "self_attention"
         self.dim = dim
         self.z_dim = z_dim
         self.dim_mult = dim_mult
@@ -1631,7 +1607,6 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.use_lora_before = use_lora_before
         self.use_lora_after = use_lora_after
         self.use_viewwise_decoder_lora = use_viewwise_decoder_lora
-        self.use_non_causal_fusion_conv3d = use_non_causal_fusion_conv3d
 
         # Reuse the standard encoder/decoder stacks
         self.encoder = Encoder3d(
@@ -1652,7 +1627,6 @@ class AttentionMultiViewVideoVan(nn.Module):
 
         # Fusion modules at feature level (after downsamples, before bottleneck middle/head).
         self.cross_attn = None
-        self.self_view_attn = None
         self.joint_attn = None
         self.view_conv_fuse = None
         self.view_conv_norm = None
@@ -1664,30 +1638,23 @@ class AttentionMultiViewVideoVan(nn.Module):
             self.cross_attn = CrossViewAttention(embed_dim=bottleneck_channels, num_heads=8)
             self.fusion_resblock1 = ResidualBlock(fused_channels, bottleneck_channels, dropout)
             self.fusion_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
-        elif fusion_mode == "joint_attention":
+        elif fusion_mode == "self_attention":
+            # Full-sequence self-attention over both views' tokens (JointViewAttention), then concat + ResBlocks.
             self.joint_attn = JointViewAttention(embed_dim=bottleneck_channels, num_heads=8)
             self.fusion_resblock1 = ResidualBlock(fused_channels, bottleneck_channels, dropout)
             self.fusion_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
-        elif fusion_mode == "self_attention":
-            self.self_view_attn = SelfViewAttention(embed_dim=bottleneck_channels, num_heads=8)
-            # After self-attn we aggregate V -> 1 with mean, then lightly refine.
-            self.fusion_resblock1 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
-            self.fusion_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
         elif fusion_mode == "conv3d":
-            # View fusion stack (non-causal option): 1×1×1 Conv3d → GroupNorm + SiLU → two 3×3×3 Res blocks.
-            # Causal variant uses CausalConv3d + ResidualBlock (same as encoder internals).
-            conv_fuse_cls = nn.Conv3d if use_non_causal_fusion_conv3d else CausalConv3d
-            resblock_cls = FusionResidualBlock3d if use_non_causal_fusion_conv3d else ResidualBlock
-            self.view_conv_fuse = conv_fuse_cls(fused_channels, bottleneck_channels, kernel_size=1)
+            # 1×1×1 Conv3d → GroupNorm + SiLU → two FusionResidualBlock3d (symmetric Conv3d).
+            self.view_conv_fuse = nn.Conv3d(fused_channels, bottleneck_channels, kernel_size=1)
             gn_groups = 32 if bottleneck_channels % 32 == 0 else 16
             self.view_conv_norm = nn.GroupNorm(gn_groups, bottleneck_channels)
             self.view_conv_act = nn.SiLU()
-            self.fusion_resblock1 = resblock_cls(bottleneck_channels, bottleneck_channels, dropout)
-            self.fusion_resblock2 = resblock_cls(bottleneck_channels, bottleneck_channels, dropout)
+            self.fusion_resblock1 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
+            self.fusion_resblock2 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
         else:
             raise ValueError(
                 f"Unsupported fusion_mode={fusion_mode}. "
-                "Use one of: cross_attention, joint_attention, self_attention, conv3d."
+                "Use one of: cross_attention, self_attention, conv3d."
             )
 
         # Optional per-view latent LoRA adapters for decoding.
@@ -1739,8 +1706,6 @@ class AttentionMultiViewVideoVan(nn.Module):
             if self.cross_attn is not None and hasattr(self.cross_attn, "attn"):
                 # Wrap cross-view MHA projections via LoRA on qkv/proj path is non-trivial here;
                 # we keep cross_attn as-is and LoRA the downstream fusion ResBlocks.
-                pass
-            if self.self_view_attn is not None and hasattr(self.self_view_attn, "attn"):
                 pass
             if self.joint_attn is not None and hasattr(self.joint_attn, "attn"):
                 pass
@@ -1810,19 +1775,11 @@ class AttentionMultiViewVideoVan(nn.Module):
             fused = torch.cat([feat_0_enriched, feat_1_enriched], dim=1)
             fused = self.fusion_resblock1(fused)
             fused = self.fusion_resblock2(fused)
-        elif self.fusion_mode == "joint_attention":
+        elif self.fusion_mode == "self_attention":
             tokens_0_enriched, tokens_1_enriched = self.joint_attn(tokens_0, tokens_1)
             feat_0_enriched = unflatten_tokens(tokens_0_enriched)
             feat_1_enriched = unflatten_tokens(tokens_1_enriched)
             fused = torch.cat([feat_0_enriched, feat_1_enriched], dim=1)
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
-        elif self.fusion_mode == "self_attention":
-            # Stack per-view tokens, self-attend on view axis, then aggregate V->1.
-            stacked = torch.stack([tokens_0, tokens_1], dim=1)  # [B,2,N,C]
-            stacked = self.self_view_attn(stacked)  # [B,2,N,C]
-            fused_tokens = stacked.mean(dim=1)  # [B,N,C]
-            fused = unflatten_tokens(fused_tokens)  # [B,C,T',H',W']
             fused = self.fusion_resblock1(fused)
             fused = self.fusion_resblock2(fused)
         else:

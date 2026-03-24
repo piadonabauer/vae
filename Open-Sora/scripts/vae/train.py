@@ -6,6 +6,7 @@
 import gc
 import os
 import random
+import shutil
 import subprocess
 import time
 import warnings
@@ -139,6 +140,19 @@ def downsample_video_tensor(x: torch.Tensor, target_h: int = 64, target_w: int =
         x_perm = x_flat.view(b, t, c, target_h, target_w)
         x = x_perm.permute(0, 2, 1, 3, 4)  # [B, C, T, H, W]
     return x
+
+
+def apply_train_bucket_spatiotemporal(x: torch.Tensor, cfg) -> torch.Tensor:
+    """If ``train_target_hw`` / ``train_target_frames`` are set (Nersemble bucket), match spatial/temporal."""
+    th = cfg.get("train_target_hw")
+    tt = cfg.get("train_target_frames")
+    if th is None or tt is None:
+        return x
+    if not isinstance(th, (list, tuple)) or len(th) < 2:
+        return x
+    return downsample_video_tensor(
+        x, target_h=int(th[0]), target_w=int(th[1]), target_t=int(tt)
+    )
 
 
 def compute_psnr(img1, img2, max_val=1.0):
@@ -657,8 +671,18 @@ def create_visualization_grid(x_orig, x_rec, num_samples=4, num_frames=None, val
     return images
 
 
-def evaluate_model(model, dataloader, device, dtype, num_eval_samples=32, 
-                   view_flatten_in_loss=True, use_ema=False, value_range="[0,1]"):
+def evaluate_model(
+    model,
+    dataloader,
+    device,
+    dtype,
+    num_eval_samples=32,
+    view_flatten_in_loss=True,
+    use_ema=False,
+    value_range="[0,1]",
+    train_target_hw=None,
+    train_target_frames=None,
+):
     """
     Run a full evaluation pass over the dataset (or a subset).
     
@@ -696,6 +720,13 @@ def evaluate_model(model, dataloader, device, dtype, num_eval_samples=32,
                 break
             
             x = batch["video"].to(device, dtype)
+            if train_target_hw is not None and train_target_frames is not None:
+                x = downsample_video_tensor(
+                    x,
+                    target_h=int(train_target_hw[0]),
+                    target_w=int(train_target_hw[1]),
+                    target_t=int(train_target_frames),
+                )
             is_multiview = x.dim() == 6
             if value_range == "[-1,1]":
                 x = 2.0 * x - 1.0
@@ -744,7 +775,9 @@ def evaluate_model(model, dataloader, device, dtype, num_eval_samples=32,
     }
 
 
-def evaluate_fixed_sequence_per_frame(model, dataset, index, device, dtype, vae_target_range=None):
+def evaluate_fixed_sequence_per_frame(
+    model, dataset, index, device, dtype, vae_target_range=None, train_target_hw=None, train_target_frames=None
+):
     """
     Evaluate a single fixed sequence and compute per-frame metrics.
 
@@ -784,6 +817,13 @@ def evaluate_fixed_sequence_per_frame(model, dataset, index, device, dtype, vae_
         raise ValueError(f"Unexpected video shape for fixed-sequence eval: {x.shape}")
 
     x = x.to(device, dtype)
+    if train_target_hw is not None and train_target_frames is not None:
+        x = downsample_video_tensor(
+            x,
+            target_h=int(train_target_hw[0]),
+            target_w=int(train_target_hw[1]),
+            target_t=int(train_target_frames),
+        )
     is_multiview = x.dim() == 6
 
     # Prepare input for model according to training range
@@ -860,6 +900,7 @@ def main():
         cfg.get("outputs", "./outputs"),
         model_name=config_to_name(cfg),
         config=cfg.to_dict(),
+        exp_name=cfg.get("experiment_name"),
     )
     if is_log_process(plugin_type, plugin_config):
         print(f"changing {exp_dir} to share")
@@ -1157,75 +1198,101 @@ def main():
 
     # model.module.requires_grad_(False)
     # =======================================================
-    # 5. Initialize wandb (after all setup is complete to avoid empty runs during debugging)
+    # 5. Wandb: initialized lazily after wandb_min_steps_before_init (default 10) so short
+    #    smoke runs do not create empty online runs. Charts use optimizer step (wandb.log step=...).
     # =======================================================
-    if coordinator.is_master() and cfg.get("wandb", False):
-        # Auto-generate wandb name if not explicitly set
-        # Format: {model_name}_{dataset_name}_{timestamp} or use exp_name
-        wandb_name = cfg.get("wandb_expr_name", None)
-        if wandb_name is None:
-            # Try to create a descriptive name from config
-            model_name = cfg.model.get("model_name", "model")
-            dataset_path = cfg.dataset.get("data_path", "dataset")
-            # Extract meaningful part from dataset path (e.g., "p17_EXP-1-head")
-            if isinstance(dataset_path, str):
-                dataset_name = os.path.basename(dataset_path.rstrip("/"))
-                if not dataset_name or dataset_name == "dataset":
-                    dataset_name = os.path.basename(os.path.dirname(dataset_path))
-            else:
-                dataset_name = "data"
-            # Use timestamp prefix from exp_name (first part before underscore)
-            timestamp = exp_name.split("_")[0] if "_" in exp_name else exp_name[:8]
-            wandb_name = f"{model_name}_{dataset_name}_{timestamp}"
-        
-        logger.info(f"Initializing wandb with run name: {wandb_name}")
+    def _build_wandb_run_name():
+        explicit = cfg.get("wandb_expr_name")
+        if explicit:
+            return explicit
+        m = cfg.model
+        ds = cfg.dataset
+        bucket_key = next(iter(cfg.get("bucket_config") or {}), "")
+        parts = [
+            m.get("fusion_mode", "fusion"),
+            f"lora_r{m.get('lora_rank', 16)}",
+            "after" if m.get("use_lora_after", True) else "noafter",
+            cfg.get("data_preset", "") or "data",
+            bucket_key.replace(":", "").replace("/", ""),
+            f"{m.get('view_in', 2)}v",
+        ]
+        name = "_".join(str(p) for p in parts if str(p))
+        ts = exp_name.split("_")[0] if "_" in exp_name else exp_name[:8]
+        return f"{name}_{ts}"[:256]
+
+    def maybe_init_wandb(actual_update_step):
+        if not coordinator.is_master() or not cfg.get("wandb", False):
+            return
+        if wandb.run is not None:
+            return
+        min_w = int(cfg.get("wandb_min_steps_before_init", 10))
+        if actual_update_step <= min_w:
+            return
+        wandb_name = _build_wandb_run_name()
+        logger.info(
+            "Initializing wandb after step %s (threshold %s) with run name: %s",
+            actual_update_step,
+            min_w,
+            wandb_name,
+        )
         wandb.init(
             project=cfg.get("wandb_project", "vae"),
             name=wandb_name,
             config=cfg.to_dict(),
             dir=exp_dir,
         )
-        # Use epochs as the x-axis in W&B charts.
-        # We still keep `step=...` in `wandb.log` for monotonic ordering, but define all
-        # training/eval metrics to use `epoch_float` as their step metric.
-        wandb.define_metric("epoch_float")
-        for pattern in (
-            "loss/*",
-            "metrics/*",
-            "time/*",
-            "memory/*",
-            "lr",
-            "global_grad_norm",
-            "reconstructions",
-            "val_reconstructions",
-            "fixed_seq/*",
-            "eval/*",
-            "final_eval/*",
-        ):
-            wandb.define_metric(pattern, step_metric="epoch_float")
-        logger.info("Wandb initialized successfully. Training will begin shortly...")
-    
+        run_id = wandb.run.id
+        run_url = getattr(wandb.run, "url", None) or ""
+        out_abs = os.path.abspath(exp_dir)
+        with open(os.path.join(exp_dir, "wandb_run_id.txt"), "w", encoding="utf-8") as f:
+            f.write(run_id + "\n")
+        with open(os.path.join(exp_dir, "wandb_run_url.txt"), "w", encoding="utf-8") as f:
+            f.write(run_url + "\n")
+        with open(os.path.join(exp_dir, "server_output_dir.txt"), "w", encoding="utf-8") as f:
+            f.write(out_abs + "\n")
+        cfg_path = getattr(cfg, "config_path", None)
+        if cfg_path and os.path.isfile(cfg_path):
+            snap = os.path.join(exp_dir, "training_config_snapshot.py")
+            shutil.copy2(cfg_path, snap)
+            wandb.save(snap)
+        wandb.config.update(
+            {
+                "experiment_folder": out_abs,
+                "wandb_run_id": run_id,
+                "wandb_run_url": run_url,
+                "config_path": cfg_path or "",
+                "sweep_config": cfg.get("sweep_config", cfg_path or ""),
+            },
+            allow_val_change=True,
+        )
+        logger.info("Wandb run URL: %s", run_url)
 
     # =======================================================
     # 6. training loop
     # =======================================================
     dist.barrier()
     accumulation_steps = int(cfg.get("accumulation_steps", 1))
+    actual_update_step = 0
+    # One-time average wall time over first 10 steps; set log_step_time False to disable.
+    _log_step_time_once = cfg.get("log_step_time", True)
+    _step_time_bench_done = False
+    _step_time_bench_samples = []
     for epoch in range(start_epoch, cfg_epochs):
         # == set dataloader to new epoch ==
         sampler.set_epoch(epoch)
         dataiter = iter(dataloader)
-        logger.info("Beginning epoch %s...", epoch)
         random.seed(1024 + dist.get_rank())  # load vid/img for each rank
 
         # == training loop in an epoch ==
         with tqdm(
             enumerate(dataiter, start=start_step),
-            desc=f"Epoch {epoch}",
+            desc="train",
             disable=not coordinator.is_master(),
             total=num_steps_per_epoch,
             initial=start_step,
         ) as pbar:
+            if coordinator.is_master():
+                pbar.set_postfix(epoch=epoch)
             pbar_iter = iter(pbar)
 
             def fetch_data():
@@ -1275,12 +1342,15 @@ def main():
                     actual_update_step = (global_step + 1) // accumulation_steps
                     log_step += 1
                     acc_step += 1
-                    # Epoch coordinate for plotting in W&B.
+                    # Epoch coordinate for plotting in W&B (logged as a metric; charts use optimizer step).
                     # global_step is 0-indexed; +1 makes the first update land at ~1/steps_per_epoch.
                     epoch_float = (global_step + 1) / max(1, num_steps_per_epoch)
 
+                    maybe_init_wandb(actual_update_step)
+
                     # == mixed strategy ==
                     x = batch["video"]
+                    x = apply_train_bucket_spatiotemporal(x, cfg)
                     # Multi-view videos are shaped [B, V, C, T, H, W]. Single-view stays [B, C, T, H, W].
                     is_multiview = x.dim() == 6
                     time_dim = 3 if is_multiview else 2
@@ -1522,10 +1592,6 @@ def main():
                                     )
                         optimizer_time = time.time() - optimizer_start
                         timing_stats["optimizer"].append(optimizer_time)
-                        
-                        # Track total step time (helps identify if we're missing something)
-                        step_time = time.time() - step_start_time
-                        timing_stats["total_step"].append(step_time)
 
                         # -- logging --
                         log_loss("all", vae_loss, loss_dict, use_video)
@@ -1589,6 +1655,7 @@ def main():
                             n_vis = len(vis_items)
                             vis_batch = default_collate(vis_items[:n_vis])
                             x_vis = vis_batch["video"].to(device, dtype)
+                            x_vis = apply_train_bucket_spatiotemporal(x_vis, cfg)
                             if vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview):
                                 x_vis = x_vis * 2.0 - 1.0
                             with torch.no_grad():
@@ -1601,6 +1668,7 @@ def main():
                                 val_items = [val_dataset[i] for i in range(n_val)]
                                 val_batch = default_collate(val_items)
                                 x_val = val_batch["video"].to(device, dtype)
+                                x_val = apply_train_bucket_spatiotemporal(x_val, cfg)
                                 if vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview):
                                     x_val = x_val * 2.0 - 1.0
                                 with torch.no_grad():
@@ -1642,6 +1710,25 @@ def main():
 
                         # log
                         log_loss("disc", disc_loss, loss_dict, use_video)
+
+                    # Wall-clock for full training iteration (generator ± discriminator paths)
+                    step_time = time.time() - step_start_time
+                    timing_stats["total_step"].append(step_time)
+                    if (
+                        _log_step_time_once
+                        and not _step_time_bench_done
+                        and coordinator.is_master()
+                    ):
+                        _step_time_bench_samples.append(step_time)
+                        if len(_step_time_bench_samples) >= 10:
+                            avg_step = sum(_step_time_bench_samples) / 10.0
+                            _bench_msg = (
+                                f"[step_time] Average wall time over first 10 training steps: {avg_step:.4f} s"
+                            )
+                            logger.info(_bench_msg)
+                            # tqdm.write avoids clobbering the progress bar (plain print often hides this line)
+                            tqdm.write(_bench_msg)
+                            _step_time_bench_done = True
 
                     # == logging ==
                     # We log periodically to avoid overwhelming the logs, but include timing stats
@@ -1692,10 +1779,11 @@ def main():
                                 }
                             )
                             
-                            # wandb
-                            if cfg.get("wandb", False):
+                            # wandb (lazy init: see maybe_init_wandb)
+                            if cfg.get("wandb", False) and wandb.run is not None:
                                 wandb_log_dict = {
                                         "iter": global_step,
+                                        "global_step": actual_update_step,
                                         "epoch": epoch,
                                         "epoch_float": epoch_float,
                                         "lr": optimizer.param_groups[0]["lr"],
@@ -1707,7 +1795,7 @@ def main():
                                         "loss/kl": avg_loss.get("kl", 0.0),
                                         "global_grad_norm": optimizer.get_grad_norm(),
                                     }
-                                
+
                                 # Add timing stats to wandb - super useful for bottleneck analysis!
                                 # You can plot these in wandb to see which operation takes the most time
                                 wandb_log_dict.update(avg_timing)
@@ -1841,6 +1929,8 @@ def main():
                                     view_flatten_in_loss=view_flatten_in_loss,
                                     use_ema=(ema is not None and cfg.get("eval_use_ema", True)),
                                     value_range=eval_val_range,
+                                    train_target_hw=cfg.get("train_target_hw"),
+                                    train_target_frames=cfg.get("train_target_frames"),
                                 )
                                 eval_metrics = eval_results["metrics"]
                                 logger.info(
@@ -1853,9 +1943,10 @@ def main():
                                     eval_metrics["mse_mean"],
                                     eval_metrics["mse_std"],
                                 )
-                                if cfg.get("wandb", False):
+                                if cfg.get("wandb", False) and wandb.run is not None:
                                     prefix = f"eval/{eval_ds_label}"
                                     log_dict = {
+                                        "global_step": actual_update_step,
                                         "epoch_float": epoch_float,
                                         f"{prefix}/psnr_mean": eval_metrics["psnr_mean"],
                                         f"{prefix}/psnr_std": eval_metrics["psnr_std"],
@@ -1881,11 +1972,13 @@ def main():
         # Per-frame metrics on fixed train/val sequences every N epochs
         # =======================================================
         fixed_epoch_interval = int(cfg.get("fixed_seq_eval_every_epochs", 10))
+        maybe_init_wandb(actual_update_step)
         if (
             fixed_epoch_interval > 0
             and ((epoch + 1) % fixed_epoch_interval == 0)
             and coordinator.is_master()
             and cfg.get("wandb", False)
+            and wandb.run is not None
             and fixed_train_index is not None
         ):
             logger.info(
@@ -1903,12 +1996,15 @@ def main():
                 device,
                 dtype,
                 vae_target_range=vae_target_range,
+                train_target_hw=cfg.get("train_target_hw"),
+                train_target_frames=cfg.get("train_target_frames"),
             )
 
             wandb_log_pf = {
                 "fixed_seq/name": fixed_seq_name,
                 "fixed_seq/epoch": epoch + 1,
                 "epoch_float": float(epoch + 1),
+                "global_step": actual_update_step,
             }
 
             for i, val in enumerate(train_metrics_pf["psnr_per_frame"]):
@@ -1927,6 +2023,8 @@ def main():
                     device,
                     dtype,
                     vae_target_range=vae_target_range,
+                    train_target_hw=cfg.get("train_target_hw"),
+                    train_target_frames=cfg.get("train_target_frames"),
                 )
                 for i, val in enumerate(val_metrics_pf["psnr_per_frame"]):
                     wandb_log_pf[f"fixed_seq/val/psnr_frame_{i}"] = val
@@ -1945,7 +2043,8 @@ def main():
                     train_metrics_pf["mse_per_frame"][i],
                 )
 
-            wandb.log({"fixed_seq/train_metrics": table, "epoch_float": float(epoch + 1)}, step=actual_update_step)
+            wandb_log_pf["fixed_seq/train_metrics"] = table
+            wandb.log(wandb_log_pf, step=actual_update_step)
     
     # =======================================================
     # 6. Final evaluation after training
@@ -1954,6 +2053,7 @@ def main():
     # evaluation to assess the final model quality. This gives us the
     # definitive metrics for the trained model.
     if coordinator.is_master():
+        maybe_init_wandb(actual_update_step)
         final_eval_enabled = cfg.get("final_eval", True)
         if final_eval_enabled:
             logger.info("Training complete. Running final evaluation...")
@@ -1988,6 +2088,8 @@ def main():
                     view_flatten_in_loss=view_flatten_in_loss,
                     use_ema=(ema is not None and cfg.get("eval_use_ema", True)),
                     value_range=final_val_range,
+                    train_target_hw=cfg.get("train_target_hw"),
+                    train_target_frames=cfg.get("train_target_frames"),
                 )
                 final_metrics = final_eval_results["metrics"]
                 logger.info("=" * 80)
@@ -1997,9 +2099,10 @@ def main():
                 logger.info("SSIM: %.4f ± %.4f", final_metrics["ssim_mean"], final_metrics["ssim_std"])
                 logger.info("MSE:  %.6f ± %.6f", final_metrics["mse_mean"], final_metrics["mse_std"])
                 logger.info("=" * 80)
-                if cfg.get("wandb", False):
+                if cfg.get("wandb", False) and wandb.run is not None:
                     prefix = f"final_eval/{label}"
                     final_log = {
+                        "global_step": actual_update_step,
                         "epoch_float": float(epoch + 1),
                         f"{prefix}/psnr_mean": final_metrics["psnr_mean"],
                         f"{prefix}/psnr_std": final_metrics["psnr_std"],

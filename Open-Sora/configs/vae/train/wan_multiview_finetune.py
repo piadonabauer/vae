@@ -7,7 +7,7 @@
 # (3) Ensure all .pt files have same shape [V,C,T,H,W] and value range [0,1].
 # batch_size must be <= num_samples or steps_per_epoch is 0.
 
-fixed_seq_eval_every_epochs = 5
+fixed_seq_eval_every_epochs = 200
 
 # ============
 # model config 
@@ -28,11 +28,11 @@ model = dict(
     # New cross-view encoder with in-encoder fusion + LoRA
     use_crossview_encoder=True,  # use MultiViewVideoVan instead of latent_fusion path
     # Fusion mode options (only used when use_crossview_encoder=True):
-    # - "cross_attention": bidirectional cross-attn between views (existing behavior)
-    # - "self_attention": self-attn across view axis per token, then mean(V)->1
-    # - "conv3d": channel-concat views, 1x1x1 3D conv 768->384 + norm/act + residual blocks
+    # - "cross_attention": bidirectional cross-attn between views
+    # - "self_attention": joint self-attn over all tokens from both views (length 2*N), then concat + ResBlocks
+    # - "conv3d": concat views in channels, 1×1×1 Conv3d -> GroupNorm+SiLU -> two FusionResidualBlock3d (symmetric Conv3d)
     fusion_mode="conv3d",
-    use_lora=True,               # master switch for LoRA modules in crossview path
+    use_lora=True,               # masfter switch for LoRA modules in crossview path
     use_lora_before=False,       # apply LoRA to newly introduced pre-bottleneck fusion modules
     use_lora_after=True,         # apply LoRA to bottleneck/decoder ("later" part)
     # Replace additive per-view latent embedding in decoder with view-specific latent LoRA adapters.
@@ -43,16 +43,32 @@ model = dict(
 # ============
 # data config 
 # ============
-# Data root for NeRSemble 128-res (pXXX / <sequence> / *.pt).
-DATA_ROOT = "/datasets/lindell-proj/neumayr/nersemble_v2/processed/64-res"
+from opensora.utils.nersemble_bucket import resolve_nersemble_bucket
+
+# Optional: parent of ``64-res`` / ``128-res`` (default: NeRSemble v2 processed root).
+nersemble_processed_base = None
+
+# ``DATA_ROOT``, ``train_target_hw``, ``train_target_frames`` are derived from ``bucket_config``:
+# - ``128px_...`` + 13 frames → load ``.../128-res``, train at 128×128, 13 frames.
+# - ``64px_...`` + ≤9 frames → ``.../64-res``; + >9 frames → ``128-res`` + on-the-fly downsample to 64.
+bucket_config = {
+    #"128px_ar1:1": {13: (1.0, 1)},
+    "128px_ar1:1": {9: (1.0, 1)},
+    # "64px_ar1:1": {13: (1.0, 1)},  # uses 128-res on disk, downsamples to 64×64
+}
+_resolved = resolve_nersemble_bucket(bucket_config, processed_base=nersemble_processed_base)
+DATA_ROOT = _resolved["data_root"]
+train_target_hw = _resolved["train_target_hw"]
+train_target_frames = _resolved["train_target_frames"]
 
 # Preset: "single_sequence" | "one_person" | "some_people" | "all_people_one_expression" | None (custom)
 # - single_sequence: 1 person, 1 sequence (p018 EXP-1-head). No val set.
 # - one_person: p018, all sequences except EMO-4-disgust+happy and SEN-10-port_strong_smokey; those two are val.
 # - some_people: train 17,31,32,33,35,36,37; evaluate on 18,30.
-# - all_people_one_expression: train on ALL folders in 128-res (all people) EXCEPT 018,030,038,085,097,124,175,226,227,240;
-#   only EXP-1-head sequences for training. Val = those excluded participants, EXP-1-head only.
+# - all_people_one_expression: all participants (minus val list); use expression_sequence for exact folder name.
 data_preset = "single_sequence"
+# For all_people_one_expression: exact sequence folder per person (e.g. EMO-1-shout+laugh)
+all_people_expression_sequence = "EMO-1-shout+laugh"
 
 if data_preset == "single_sequence":
     dataset = dict(
@@ -103,7 +119,7 @@ elif data_preset == "all_people_one_expression":
         scan_subdirs=True,
         participants=None,  # all pXXX in DATA_ROOT
         exclude_participants=_val_participants,
-        expression_filter="EXP-1-head",
+        expression_sequence=all_people_expression_sequence,
         repeat=1,
     )
     val_dataset = dict(
@@ -111,7 +127,7 @@ elif data_preset == "all_people_one_expression":
         data_path=DATA_ROOT,
         scan_subdirs=True,
         participants=_val_participants,
-        expression_filter="EXP-1-head",
+        expression_sequence=all_people_expression_sequence,
         repeat=1,
     )
 else:
@@ -124,13 +140,6 @@ else:
         repeat=1,
     )
     val_dataset = None
-
-# Bucket config for preprocessed 64x64 / 9-frame inputs.
-bucket_config = {
-    #"128px_ar1:1": {13: (1.0, 1)},  # 13 frames at 128x128 resolution
-    #"128px_ar1:1": {9: (1.0, 1)},  # 9 frames selected from 13 at 128x128 resolution
-    "64px_ar1:1": {9: (1.0, 1)},  # 9 frames selected from 13 at 64x64 resolution
-}
 
 num_bucket_build_workers = 1  # Small dataset, don't need many workers
 num_workers = 2  # Small dataset, minimal workers
@@ -165,8 +174,10 @@ pin_memory_cache_pre_alloc_numels = None  # Small dataset, don't need caching
 
 seed = 42
 outputs = "outputs"
+# Optional: fixed experiment folder name under outputs/ (else auto timestamp + config name)
+# experiment_name = "cross_attn_lora_after_16_all_people_9t_2v_64p"
 epochs = 10000  # One epoch = one pass over ALL samples (.pt files). steps_per_epoch = num_samples // batch_size. Total steps = epochs × steps_per_epoch. (9 participants = many samples, not 9.)
-log_every = 200  # Log every 10 steps
+log_every = 100  # Log every 10 steps
 # Save a checkpoint every N actual update steps (0 = only final save at end of training)
 ckpt_every = 500
 # Keep this many latest checkpoint dirs (epochX-global_stepY); -1 = keep all
@@ -180,10 +191,13 @@ ema_decay = 0.9999  # High EMA decay for stable fine-tuning
 #   python scripts/vae/train.py configs/vae/train/wan_multiview_finetune.py --load /path/to/epoch0-global_step200
 # Use the full path to a folder like .../outputs/<exp_name>/epoch0-global_step200 (not the experiment root).
 
-# Wandb configuration - name will be auto-generated from config
+# Wandb: charts use optimizer step (wandb.log step=...). Set wandb_expr_name for a distinct run name.
 wandb = True
 wandb_project = "wan_multiview_vae"
-# wandb_expr_name will be auto-generated if not set (see train.py)
+# wandb_expr_name = "conv3d_lora_after_16_all_people_9t_2v_64p"
+# Only call wandb.init after this many optimizer steps (avoids empty runs on short tests; resume past step inits immediately)
+wandb_min_steps_before_init = 10
+log_step_time = True  # Once: print avg wall time over the first 10 steps (set False to disable; uses tqdm.write)
 
 update_warmup_steps = False  # No warmup needed
 
@@ -211,11 +225,10 @@ view_flatten_in_disc = True  # Flatten views for discriminator (if used)
 # ============
 # Evaluation config
 # ============
-# Batch-level metrics (lightweight, every N steps)
-eval_every = 100  # Compute metrics on current batch every 50 steps
-
-# Full evaluation pass (more expensive, every N steps). Increase to reduce overhead (e.g. 500).
-full_eval_every = 100
+# eval_every: cheap metrics on the *current training batch* (PSNR/SSIM on that batch) every N steps.
+eval_every = 200
+# full_eval_every: separate dataloader over eval_num_samples from val (or train) — mean/std over several clips. Heavier.
+full_eval_every = 1000
 eval_num_samples = 3  # Evaluate on this many samples (e.g. one per sequence)
 eval_batch_size = 1  # Batch size for evaluation
 eval_use_ema = True  # Use EMA model for evaluation if available
@@ -234,10 +247,10 @@ log_memory = False  # Set to True to log GPU memory usage (adds small overhead)
 # Print timing every N steps (0 = off). Set to 0 to reduce I/O overhead when optimizing for speed.
 log_bottleneck_every = 200
 # Print latent shapes [B,V,C,T,H,W] every N steps; also enables VAE-internal shape logs (0 = off).
-log_latent_shapes_every = 100
+log_latent_shapes_every = 500
 
 # ============
 # Training steps and speed
 # ============
 # Samples = total .pt files (e.g. 9 participants × ~7 sequences each = 63 samples). Steps per epoch = samples // batch_size. Total steps = epochs × steps_per_epoch (e.g. 63 × 125 = 7875).
-batch_size = 128 # Use 1 for multi-sequence stability; increase to 2–4 once training converges
+batch_size = 1 # Use 1 for multi-sequence stability; increase to 2–4 once training converges

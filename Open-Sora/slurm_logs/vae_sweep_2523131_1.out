@@ -1,0 +1,106 @@
+Total experiments: 12
+Running: vae_fusion_lora_sweep_v1_cross_attention_rank32
+Overrides: --model.fusion_mode cross_attention --model.lora_rank 32 --experiment_name cross_attention_rank32
+Mon Mar 23 22:40:17 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.148.08             Driver Version: 570.148.08     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:17:00.0 Off |                    0 |
+| N/A   31C    P8             34W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+changing outputs/cross_attention_rank32 to share
+PTVideoDataset: Found 1 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 181 missing, 76 unexpected
+Trainable params: 59911216
+modulated mixed image ratio: 0.0
+[step_time] Average wall time over first 10 training steps: 2.3936 s
+[BOTTLENECK] step 200 | total_step 0.740s | time/data_load: 0.000s (0%) | time/forward: 0.292s (39%) | time/loss_compute: 0.012s (2%) | time/backward: 0.395s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.740s (100%)
+  -> at this rate 1000 steps ≈ 12.3 min
+[BOTTLENECK] step 400 | total_step 0.745s | time/data_load: 0.000s (0%) | time/forward: 0.295s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.396s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.745s (100%)
+  -> at this rate 1000 steps ≈ 12.4 min
+[BOTTLENECK] step 600 | total_step 0.747s | time/data_load: 0.000s (0%) | time/forward: 0.298s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.396s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.747s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 800 | total_step 0.758s | time/data_load: 0.000s (0%) | time/forward: 0.300s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.404s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.758s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 1000 | total_step 0.749s | time/data_load: 0.000s (0%) | time/forward: 0.299s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.396s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.749s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 1200 | total_step 0.749s | time/data_load: 0.000s (0%) | time/forward: 0.300s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.395s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.749s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 1400 | total_step 0.749s | time/data_load: 0.000s (0%) | time/forward: 0.300s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.394s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.749s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 1600 | total_step 0.754s | time/data_load: 0.000s (0%) | time/forward: 0.301s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.399s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.754s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 1800 | total_step 0.753s | time/data_load: 0.000s (0%) | time/forward: 0.303s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.396s (53%) | time/optimizer: 0.035s (5%) | time/total_step: 0.753s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 2000 | total_step 0.750s | time/data_load: 0.000s (0%) | time/forward: 0.301s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.395s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.750s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 2200 | total_step 0.762s | time/data_load: 0.000s (0%) | time/forward: 0.302s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.406s (53%) | time/optimizer: 0.034s (4%) | time/total_step: 0.762s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 2400 | total_step 0.756s | time/data_load: 0.000s (0%) | time/forward: 0.303s (40%) | time/loss_compute: 0.013s (2%) | time/backward: 0.398s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.756s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 2600 | total_step 0.757s | time/data_load: 0.000s (0%) | time/forward: 0.303s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.400s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.757s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 2800 | total_step 0.755s | time/data_load: 0.000s (0%) | time/forward: 0.305s (40%) | time/loss_compute: 0.013s (2%) | time/backward: 0.396s (52%) | time/optimizer: 0.035s (5%) | time/total_step: 0.755s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 3000 | total_step 0.756s | time/data_load: 0.000s (0%) | time/forward: 0.305s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.396s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.756s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 3200 | total_step 0.753s | time/data_load: 0.000s (0%) | time/forward: 0.304s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.395s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.753s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 3400 | total_step 0.750s | time/data_load: 0.000s (0%) | time/forward: 0.302s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.394s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.750s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 3600 | total_step 0.760s | time/data_load: 0.000s (0%) | time/forward: 0.305s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.401s (53%) | time/optimizer: 0.034s (5%) | time/total_step: 0.760s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 3800 | total_step 0.753s | time/data_load: 0.000s (0%) | time/forward: 0.305s (41%) | time/loss_compute: 0.012s (2%) | time/backward: 0.393s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.753s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 4000 | total_step 0.759s | time/data_load: 0.000s (0%) | time/forward: 0.306s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.399s (53%) | time/optimizer: 0.034s (4%) | time/total_step: 0.759s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 4200 | total_step 0.754s | time/data_load: 0.000s (0%) | time/forward: 0.306s (41%) | time/loss_compute: 0.012s (2%) | time/backward: 0.394s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.754s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 4400 | total_step 0.753s | time/data_load: 0.000s (0%) | time/forward: 0.306s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.392s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.753s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 4600 | total_step 0.766s | time/data_load: 0.000s (0%) | time/forward: 0.307s (40%) | time/loss_compute: 0.012s (2%) | time/backward: 0.406s (53%) | time/optimizer: 0.034s (4%) | time/total_step: 0.766s (100%)
+  -> at this rate 1000 steps ≈ 12.8 min
+[BOTTLENECK] step 4800 | total_step 0.753s | time/data_load: 0.000s (0%) | time/forward: 0.306s (41%) | time/loss_compute: 0.012s (2%) | time/backward: 0.393s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.753s (100%)
+  -> at this rate 1000 steps ≈ 12.5 min
+[BOTTLENECK] step 5000 | total_step 0.763s | time/data_load: 0.000s (0%) | time/forward: 0.310s (41%) | time/loss_compute: 0.012s (2%) | time/backward: 0.400s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.763s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 5200 | total_step 0.760s | time/data_load: 0.000s (0%) | time/forward: 0.309s (41%) | time/loss_compute: 0.012s (2%) | time/backward: 0.397s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.760s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 5400 | total_step 0.770s | time/data_load: 0.000s (0%) | time/forward: 0.312s (40%) | time/loss_compute: 0.013s (2%) | time/backward: 0.404s (53%) | time/optimizer: 0.034s (4%) | time/total_step: 0.770s (100%)
+  -> at this rate 1000 steps ≈ 12.8 min
+[BOTTLENECK] step 5600 | total_step 0.757s | time/data_load: 0.000s (0%) | time/forward: 0.309s (41%) | time/loss_compute: 0.012s (2%) | time/backward: 0.394s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.757s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 5800 | total_step 0.755s | time/data_load: 0.000s (0%) | time/forward: 0.309s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.392s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.755s (100%)
+  -> at this rate 1000 steps ≈ 12.6 min
+[BOTTLENECK] step 6000 | total_step 0.763s | time/data_load: 0.000s (0%) | time/forward: 0.310s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.399s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.763s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 6200 | total_step 0.759s | time/data_load: 0.000s (0%) | time/forward: 0.309s (41%) | time/loss_compute: 0.012s (2%) | time/backward: 0.397s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.759s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 6400 | total_step 0.763s | time/data_load: 0.000s (0%) | time/forward: 0.311s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.398s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.763s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 6600 | total_step 0.765s | time/data_load: 0.000s (0%) | time/forward: 0.310s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.401s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.765s (100%)
+  -> at this rate 1000 steps ≈ 12.8 min
+[BOTTLENECK] step 6800 | total_step 0.766s | time/data_load: 0.000s (0%) | time/forward: 0.311s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.401s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.766s (100%)
+  -> at this rate 1000 steps ≈ 12.8 min
+[BOTTLENECK] step 7000 | total_step 0.759s | time/data_load: 0.000s (0%) | time/forward: 0.313s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.392s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.759s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 7200 | total_step 0.762s | time/data_load: 0.000s (0%) | time/forward: 0.313s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.394s (52%) | time/optimizer: 0.034s (5%) | time/total_step: 0.762s (100%)
+  -> at this rate 1000 steps ≈ 12.7 min
+[BOTTLENECK] step 7400 | total_step 0.767s | time/data_load: 0.000s (0%) | time/forward: 0.312s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.400s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.767s (100%)
+  -> at this rate 1000 steps ≈ 12.8 min
+[BOTTLENECK] step 7600 | total_step 0.765s | time/data_load: 0.000s (0%) | time/forward: 0.312s (41%) | time/loss_compute: 0.013s (2%) | time/backward: 0.399s (52%) | time/optimizer: 0.034s (4%) | time/total_step: 0.765s (100%)
+  -> at this rate 1000 steps ≈ 12.8 min

@@ -33,7 +33,9 @@ def read_config(config_path: str) -> Config:
     Returns:
         Config: The configuration object.
     """
-    cfg = Config.fromfile(config_path)
+    # Disable lazy import so config files can call project helpers (e.g.
+    # ``resolve_nersemble_bucket``) and use real values when building paths.
+    cfg = Config.fromfile(config_path, lazy_import=False)
     return cfg
 
 
@@ -180,9 +182,9 @@ def create_experiment_workspace(
     exp_dir = f"{output_dir}/{exp_name}"
     if is_main_process():
         os.makedirs(exp_dir, exist_ok=True)
-        # Save the config
+        # Save the config (default=str handles Path and other non-JSON types)
         with open(f"{exp_dir}/config.txt", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
+            json.dump(config, f, indent=4, default=str)
 
     return exp_name, exp_dir
 
