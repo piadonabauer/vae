@@ -6,7 +6,7 @@
 #SBATCH --time=0-06:00:00
 #SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.out
 #SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.err
-#SBATCH --array=1-12%6
+#SBATCH --array=1-8%6
 #SBATCH --exclude=kn051
 
 module --force purge
@@ -24,11 +24,26 @@ train_file=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/trai
 my_config=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py
 sweep_name=vae_fusion_lora_sweep_v1
 
+# EXPERIMENTS=()
+# for mode in cross_attention self_attention conv3d; do
+#     for rank in 32 64 128 256; do
+#         suffix="${mode}_rank${rank}"
+#         EXPERIMENTS+=("${suffix}|--model.fusion_mode ${mode} --model.lora_rank ${rank} --experiment_name ${suffix}")
+#     done
+# done
+
 EXPERIMENTS=()
+
 for mode in cross_attention self_attention conv3d; do
-    for rank in 32 64 128 256; do
-        suffix="${mode}_rank${rank}"
-        EXPERIMENTS+=("${suffix}|--model.fusion_mode ${mode} --model.lora_rank ${rank} --experiment_name ${suffix}")
+    for rank in 16 32 64 128; do
+        if [[
+            ("$mode" == "cross_attention" && ("$rank" == 128 || "$rank" == 16)) ||
+            ("$mode" == "self_attention" && ("$rank" == 16 || "$rank" == 64)) ||
+            ("$mode" == "conv3d" && ("$rank" == 16 || "$rank" == 32 || "$rank" == 64 || "$rank" == 128))
+        ]]; then
+            suffix="${mode}_rank${rank}"
+            EXPERIMENTS+=("${suffix}|--model.fusion_mode ${mode} --model.lora_rank ${rank} --experiment_name ${suffix}")
+        fi
     done
 done
 

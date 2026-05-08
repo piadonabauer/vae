@@ -104,6 +104,167 @@ def log_model_params(model: nn.Module):
     log_message(f"[{model_name}] Number of trainable parameters: {format_numel_str(num_params_trainable)}")
 
 
+def log_trainable_param_overview(
+    model: nn.Module,
+    label: str = "model",
+    emit=None,
+    detailed_lora_buckets: bool = False,
+) -> None:
+    """Log trainable vs frozen split, LoRA vs base, and a heuristic attention-related LoRA share.
+
+    Args:
+        emit: callable(str) -> None; default ``log_message``.
+        detailed_lora_buckets: extra heuristic buckets (encoder/stem vs decoder vs viewwise).
+    """
+    emit = emit or log_message
+    total = 0
+    trainable = 0
+    lora_t = 0
+    lora_attn_t = 0
+    lora_enc_t = 0
+    lora_dec_t = 0
+    lora_viewwise_t = 0
+    attn_keywords = ("attn", "attention", "cross", "fusion", "mha", "qkv", "proj_attn", "to_q", "to_k", "to_v")
+    enc_hints = ("encoder", "stem", "downsample", "conv1", "intro")
+    dec_hints = ("decoder", "upsample", "up_", "mid.")
+    for name, p in model.named_parameters():
+        n = p.numel()
+        total += n
+        if not p.requires_grad:
+            continue
+        trainable += n
+        low = name.lower()
+        if "lora" in low:
+            lora_t += n
+            if any(k in low for k in attn_keywords):
+                lora_attn_t += n
+            if detailed_lora_buckets:
+                if "viewwise" in low or "view_wise" in low:
+                    lora_viewwise_t += n
+                elif any(h in low for h in enc_hints):
+                    lora_enc_t += n
+                elif any(h in low for h in dec_hints):
+                    lora_dec_t += n
+    if total == 0:
+        return
+    frozen = total - trainable
+    base_t = trainable - lora_t
+    lora_other_t = lora_t - lora_attn_t
+
+    def pct(a, b):
+        return 100.0 * a / b if b else 0.0
+
+    emit(
+        f"[{label}] param overview: total={format_numel_str(total)} trainable={format_numel_str(trainable)} "
+        f"({pct(trainable, total):.2f}% of weights) frozen={format_numel_str(frozen)}"
+    )
+    if lora_t > 0:
+        emit(
+            f"[{label}] LoRA trainable: {format_numel_str(lora_t)} ({pct(lora_t, trainable):.1f}% of trainable); "
+            f"heuristic attention/cross-fusion LoRA: {format_numel_str(lora_attn_t)} "
+            f"({pct(lora_attn_t, lora_t):.1f}% of LoRA); other LoRA: {format_numel_str(lora_other_t)}"
+        )
+        emit(
+            f"[{label}] base trainable (non-LoRA): {format_numel_str(base_t)} ({pct(base_t, trainable):.1f}% of trainable)"
+        )
+        if detailed_lora_buckets:
+            overlap_note = " (buckets overlap if a name matches multiple hints)"
+            emit(
+                f"[{label}] LoRA heuristic buckets{overlap_note}: "
+                f"encoder/stem-ish={format_numel_str(lora_enc_t)}, "
+                f"decoder-ish={format_numel_str(lora_dec_t)}, "
+                f"viewwise-ish={format_numel_str(lora_viewwise_t)}"
+            )
+    else:
+        emit(f"[{label}] no parameter names containing 'lora' among trainable weights (LoRA overview skipped)")
+
+
+def log_wan_multiview_training_design_summary(model: nn.Module, model_cfg, emit=None) -> None:
+    """One-time human-readable summary: fusion modes, LoRA switches, viewwise vs embeddings, rank, and param stats.
+
+    ``model_cfg`` should be the training config's ``model`` dict (dict-like with ``.get``).
+    """
+    emit = emit or log_message
+    m = model_cfg
+    if not hasattr(m, "get"):
+        m = dict(m)
+
+    def ln(s: str) -> None:
+        emit(s)
+
+    ln("======== Wan multiview / crossview design summary (one-time) ========")
+
+    use_cv = m.get("use_crossview_encoder", True)
+    ln(f"use_crossview_encoder={use_cv}")
+    if not use_cv:
+        ln(
+            "  -> Legacy path: WanVideoVAE + latent_fusion / latent_expand / view_group_fusion. "
+            "Fields fusion_mode, use_lora_before/after, use_viewwise_decoder_lora apply to AttentionMultiViewVideoVan only; "
+            "they do not affect this path."
+        )
+        ln("======== end design summary ========")
+        log_trainable_param_overview(model, "VAE", emit=emit, detailed_lora_buckets=True)
+        return
+
+    fm = m.get("fusion_mode", "cross_attention")
+    fusion_blurbs = {
+        "cross_attention": (
+            "Bidirectional cross-attention between views: each view attends to the other view’s tokens, "
+            "then features are combined for the rest of the encoder/decoder. Strong when views are aligned but not identical."
+        ),
+        "self_attention": (
+            "Concatenate tokens from all views into one sequence (length ≈ 2× spatial tokens), run self-attention, "
+            "then concat channels + residual blocks. One joint mixing stage instead of pairwise cross-attn."
+        ),
+        "conv3d": (
+            "Concatenate views along the channel axis and mix with 1×1×1 Conv3d + FusionResidualBlock3d. "
+            "Cheaper than attention; inductive bias is local convolutional mixing rather than token attention."
+        ),
+    }
+    ln(f"fusion_mode={fm!r}")
+    ln(f"  -> {fusion_blurbs.get(fm, 'No built-in blurb for this mode; check AttentionMultiViewVideoVan in diffsynth.')}")
+
+    ln(f"view_in={m.get('view_in')}, view_mixing_strategy={m.get('view_mixing_strategy', 'n/a')}")
+    ln(
+        "use_view_embedding vs use_viewwise_decoder_lora: "
+        "per-view additive embeddings bias early (or latent) features with a small vector per view; "
+        "viewwise_decoder_lora adds low-rank adapters on the decoder side conditioned by view index—typically more "
+        "flexible than a single embedding per view for reconstruction, at the cost of more trainable parameters."
+    )
+    ln(f"  use_view_embedding={m.get('use_view_embedding', False)}")
+    ln(f"  use_viewwise_decoder_lora={m.get('use_viewwise_decoder_lora', False)}")
+
+    use_lora = m.get("use_lora", True)
+    lb = m.get("use_lora_before", False)
+    la = m.get("use_lora_after", True)
+    r = m.get("lora_rank", 16)
+    ln(
+        f"use_lora={use_lora}, use_lora_before={lb}, use_lora_after={la}, lora_rank={r}. "
+        "Before = LoRA on the encoder stem / early downsampling; after = bottleneck and later decoder. "
+        "Both can be enabled for two complementary adaptation regions."
+    )
+    ln(
+        "LoRA rank: all listed adapters in this stack typically share this rank. "
+        "Larger rank increases adapter capacity and parameter count roughly linearly in rank; "
+        "too high can overfit small datasets, too low can underfit cross-view cues."
+    )
+
+    if not use_lora:
+        ln("  -> With use_lora=False, LoRA modules should be absent; trainable weights are mostly base conv/attn (subject to freeze_temporal/train_spatial).")
+
+    if m.get("full_finetune_decoder", False):
+        ln(
+            "full_finetune_decoder=True: base conv/attn inside decoder LoRA wrappers are trainable "
+            "alongside LoRA deltas; decode still uses per-view indices and nn.Embedding view conditioning "
+            "in AttentionMultiViewVideoVan. For a heavier phase-2, consider use_lora=False to drop adapters entirely."
+        )
+
+    ln(f"freeze_temporal={m.get('freeze_temporal')}, train_spatial={m.get('train_spatial')}")
+    ln("======== end design summary ========")
+
+    log_trainable_param_overview(model, "VAE", emit=emit, detailed_lora_buckets=True)
+
+
 # ======================================================
 # String
 # ======================================================

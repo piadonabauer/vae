@@ -1,0 +1,35 @@
+=== wan_multiview_generalization task 1/1 idx=0 ===
+wandb_expr_name=generalization_gen_none__perc1p5__k1em6_128px_all_people
+experiment_name (outputs dir)=generalization_gen_none__perc1p5__k1em6_128px_all_people__job3295186_t1
+Overrides: 
+Sat Apr 25 22:06:22 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.148.08             Driver Version: 570.148.08     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:E3:00.0 Off |                    0 |
+| N/A   26C    P8             33W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_ADDR=127.0.0.1 MASTER_PORT=35187
+DYNAMO_BACKEND=inductor
+Launch attempt 1/3 on port 35187
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/128-res train_target_hw=(128, 128) train_target_frames=9 bucket_config={'128px_ar1:1': {9: (1.0, 1)}}
+changing outputs/generalization_gen_none__perc1p5__k1em6_128px_all_people__job3295186_t1 to share
+PTVideoDataset: Found 7116 .pt file(s)
+PTVideoDataset: Found 238 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 228 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+[step_time] Average wall time over first 10 training steps: 2.9886 s

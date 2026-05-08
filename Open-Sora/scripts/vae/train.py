@@ -4,6 +4,8 @@
 #  --load /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/260228_150719-.../epoch0-global_step200
 
 import gc
+import json
+import math
 import os
 import random
 import shutil
@@ -65,7 +67,7 @@ import torch
 import torch.distributed as dist
 from torch.utils.data.dataloader import default_collate
 from colossalai.booster import Booster
-from colossalai.utils import set_seed
+from colossalai.utils import get_current_device, set_seed
 from torch.profiler import ProfilerActivity, profile, schedule
 from tqdm import tqdm
 
@@ -78,6 +80,7 @@ from opensora.acceleration.parallel_states import get_data_parallel_group
 from opensora.datasets.dataloader import prepare_dataloader
 from opensora.datasets.pin_memory_cache import PinMemoryCache
 from opensora.models.vae.losses import DiscriminatorLoss, GeneratorLoss, VAELoss
+from opensora.models.vae.stylegan2_disc_loader import build_stylegan2_ada_discriminator_from_state_dict
 from opensora.models.vae.utils import DiagonalGaussianDistribution
 from opensora.models.vae.wan_video_vae import build_multiview_wan_video_vae  # Register multi-view VAE model
 from opensora.registry import DATASETS, MODELS, build_module
@@ -89,12 +92,12 @@ from opensora.utils.misc import (
     all_reduce_sum,
     is_log_process,
     log_model_params,
+    log_trainable_param_overview,
+    log_wan_multiview_training_design_summary,
     to_torch_dtype,
 )
 from opensora.utils.optimizer import create_lr_scheduler, create_optimizer
 from opensora.utils.train import create_colossalai_plugin, set_lr, set_warmup_steps, setup_device, update_ema
-
-torch.backends.cudnn.benchmark = True
 
 WAIT = 1
 WARMUP = 10
@@ -105,6 +108,375 @@ my_schedule = schedule(
     warmup=WARMUP,  # number of warmup steps with profiling
     active=ACTIVE,  # number of active steps with profiling
 )
+
+
+def _loss_config_dict(cfg) -> dict:
+    """Structured VAE + GAN loss settings for run names, JSONL, and wandb."""
+    vlc = cfg.get("vae_loss_config") if isinstance(cfg.get("vae_loss_config"), dict) else {}
+    disc_choice = cfg.get("discriminator_choice")
+    if disc_choice is None:
+        dr = cfg.get("discriminator")
+        if isinstance(dr, dict):
+            disc_choice = dr.get("type", "unknown")
+        else:
+            disc_choice = "none" if dr is None else str(dr)
+    gdw = cfg.get("gen_disc_weight")
+    if gdw is None:
+        gcfg = cfg.get("gen_loss_config")
+        if isinstance(gcfg, dict):
+            gdw = gcfg.get("disc_weight")
+    if cfg.get("discriminator", None) is None:
+        gdw = None
+    return {
+        "vae_loss_preset": cfg.get("vae_loss_preset", "default"),
+        "perceptual_loss_weight": vlc.get(
+            "perceptual_loss_weight", cfg.get("perceptual_loss_weight", None)
+        ),
+        "kl_loss_weight": vlc.get("kl_loss_weight", cfg.get("kl_loss_weight", None)),
+        "view_consistency_weight": vlc.get(
+            "view_consistency_weight", cfg.get("view_consistency_weight", None)
+        ),
+        "logvar_init": vlc.get("logvar_init", cfg.get("logvar_init", None)),
+        "discriminator_choice": disc_choice,
+        "gen_disc_weight": gdw,
+    }
+
+
+def _loss_signature_slug(cfg) -> str:
+    """Filesystem- and wandb-safe short string describing loss weights."""
+    d = _loss_config_dict(cfg)
+
+    def _tok(x):
+        if x is None:
+            return "na"
+        s = str(x).replace(" ", "")
+        return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in s)[:32]
+
+    parts = [
+        f"lp{_tok(d['vae_loss_preset'])}",
+        f"per{_tok(d['perceptual_loss_weight'])}",
+        f"kl{_tok(d['kl_loss_weight'])}",
+        f"vc{_tok(d['view_consistency_weight'])}",
+        f"disc{_tok(d['discriminator_choice'])}",
+        f"gdw{_tok(d['gen_disc_weight'])}",
+    ]
+    return "_".join(parts)[:200]
+
+
+def append_eval_metrics_jsonl(exp_dir: str, record: dict) -> None:
+    """Append one JSON object per line to eval_metrics.jsonl (master process only)."""
+    path = os.path.join(exp_dir, "eval_metrics.jsonl")
+    line = json.dumps(record, default=str) + "\n"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(line)
+
+
+def append_training_debug_jsonl(exp_dir: str, record: dict) -> None:
+    """Append one JSON object per line to train_debug_stats.jsonl (master process only)."""
+    path = os.path.join(exp_dir, "train_debug_stats.jsonl")
+    line = json.dumps(record, default=str) + "\n"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(line)
+
+
+def _to_float_scalar(x):
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    if torch.is_tensor(x):
+        if x.numel() == 1:
+            return float(x.detach().item())
+        return None
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def _to_precise_float_str(x, digits: int = 12):
+    """Render scalar values with explicit precision for debug logging."""
+    v = _to_float_scalar(x)
+    if v is None:
+        return None
+    return format(v, f".{digits}g")
+
+
+def _extract_batch_sample_ids(batch: dict):
+    """Best-effort extraction of per-sample IDs from a dataloader batch."""
+    if not isinstance(batch, dict):
+        return None
+
+    index_keys = ("index", "indices", "idx", "sample_idx", "sample_index")
+    for key in index_keys:
+        if key not in batch:
+            continue
+        val = batch[key]
+        if torch.is_tensor(val):
+            if val.ndim == 0:
+                return [int(val.detach().item())]
+            return [int(x) for x in val.detach().cpu().tolist()]
+        if isinstance(val, (list, tuple)):
+            out = []
+            for x in val:
+                try:
+                    out.append(int(x))
+                except Exception:
+                    out.append(str(x))
+            return out
+        try:
+            return [int(val)]
+        except Exception:
+            return [str(val)]
+
+    path_keys = ("path", "paths", "file", "files")
+    for key in path_keys:
+        if key not in batch:
+            continue
+        val = batch[key]
+        if isinstance(val, str):
+            return [val]
+        if isinstance(val, (list, tuple)):
+            return [str(x) for x in val]
+        return [str(val)]
+
+    return None
+
+
+def collect_trainable_param_stats(model, include_weight_stats: bool = True, optimizer=None) -> dict:
+    """Collect grad/weight stats for trainable parameters.
+
+    With ColossalAI ZeRO / LowLevelZero, ``p.grad`` is often **unset** on the module's
+    ``nn.Parameter`` objects after ``backward`` (gradients are sharded internally). In that
+    case we fall back to ``optimizer.get_grad_norm()`` when available (same idea as W&B
+    ``global_grad_norm``).
+    """
+    m = model
+    if hasattr(model, "unwrap"):
+        try:
+            m = model.unwrap()
+        except Exception:
+            m = model.module if hasattr(model, "module") else model
+    elif hasattr(model, "module"):
+        m = model.module
+
+    grad_abs_mean_sum = 0.0
+    grad_abs_max = 0.0
+    grad_sq_sum = 0.0
+    grad_numel = 0
+    grad_nonfinite = 0
+    grad_tensors = 0
+
+    weight_abs_mean_sum = 0.0
+    weight_abs_max = 0.0
+    weight_sq_sum = 0.0
+    weight_numel = 0
+    weight_nonfinite = 0
+    weight_tensors = 0
+
+    for p in m.parameters():
+        if not p.requires_grad:
+            continue
+        if p.grad is not None:
+            g = p.grad.detach()
+            g_abs = g.abs()
+            grad_abs_mean_sum += g_abs.sum().item()
+            grad_abs_max = max(grad_abs_max, g_abs.max().item())
+            grad_sq_sum += torch.sum(g * g).item()
+            grad_numel += g.numel()
+            grad_nonfinite += int((~torch.isfinite(g)).sum().item())
+            grad_tensors += 1
+        if include_weight_stats:
+            w = p.detach()
+            w_abs = w.abs()
+            weight_abs_mean_sum += w_abs.sum().item()
+            weight_abs_max = max(weight_abs_max, w_abs.max().item())
+            weight_sq_sum += torch.sum(w * w).item()
+            weight_numel += w.numel()
+            weight_nonfinite += int((~torch.isfinite(w)).sum().item())
+            weight_tensors += 1
+
+    # ZeRO / sharded optimizers: recover global norm from optimizer when per-param grads missing.
+    grad_fallback_norm = None
+    if grad_numel == 0 and optimizer is not None and hasattr(optimizer, "get_grad_norm"):
+        try:
+            gn = optimizer.get_grad_norm()
+            grad_fallback_norm = float(gn) if gn is not None else None
+        except Exception:
+            grad_fallback_norm = None
+
+    if grad_numel > 0:
+        l2 = grad_sq_sum**0.5
+        grad_stats_source = "per_parameter_grad"
+        out = {
+            "grad_abs_mean": (grad_abs_mean_sum / max(1, grad_numel)),
+            "grad_abs_max": grad_abs_max,
+            "grad_l2_norm": l2,
+            "global_grad_norm": l2,
+            "grad_numel": int(grad_numel),
+            "grad_nonfinite": int(grad_nonfinite),
+            "grad_tensors_with_grad": int(grad_tensors),
+            "grad_stats_source": grad_stats_source,
+        }
+    elif grad_fallback_norm is not None:
+        out = {
+            "grad_abs_mean": None,
+            "grad_abs_max": None,
+            "grad_l2_norm": grad_fallback_norm,
+            "grad_numel": None,
+            "grad_nonfinite": 0,
+            "grad_tensors_with_grad": 0,
+            "grad_stats_source": "optimizer_get_grad_norm (sharded ZeRO; per-param .grad empty on module)",
+            "global_grad_norm": grad_fallback_norm,
+        }
+    else:
+        out = {
+            "grad_abs_mean": 0.0,
+            "grad_abs_max": 0.0,
+            "grad_l2_norm": 0.0,
+            "global_grad_norm": 0.0,
+            "grad_numel": int(grad_numel),
+            "grad_nonfinite": int(grad_nonfinite),
+            "grad_tensors_with_grad": int(grad_tensors),
+            "grad_stats_source": "none (no grads and get_grad_norm unavailable)",
+        }
+    if include_weight_stats:
+        out.update(
+            {
+                "weight_abs_mean": (weight_abs_mean_sum / max(1, weight_numel)),
+                "weight_abs_max": weight_abs_max,
+                "weight_l2_norm": weight_sq_sum ** 0.5,
+                "weight_numel": int(weight_numel),
+                "weight_nonfinite": int(weight_nonfinite),
+                "weight_tensors": int(weight_tensors),
+            }
+        )
+    return out
+
+
+def _iter_optimizer_grad_tensors(optimizer):
+    """Yield unique gradient tensors visible to the optimizer.
+
+    Under ZeRO, gradients may live on master/sharded params instead of module parameters.
+    """
+    seen = set()
+
+    def _yield_from_params(params):
+        for p in params:
+            if p is None:
+                continue
+            g = getattr(p, "grad", None)
+            if g is None:
+                continue
+            gid = id(g)
+            if gid in seen:
+                continue
+            seen.add(gid)
+            yield g
+
+    for group in getattr(optimizer, "param_groups", []):
+        yield from _yield_from_params(group.get("params", []))
+
+    for group in getattr(optimizer, "_master_param_groups", []):
+        yield from _yield_from_params(group)
+
+
+@torch.no_grad()
+def _safe_optimizer_get_grad_norm(optimizer) -> float | None:
+    """Best-effort fallback when optimizer-managed grad tensors are not directly visible."""
+    if optimizer is None or not hasattr(optimizer, "get_grad_norm"):
+        return None
+    try:
+        gn = optimizer.get_grad_norm()
+    except Exception:
+        return None
+    if gn is None:
+        return None
+    if isinstance(gn, torch.Tensor):
+        try:
+            return float(gn.detach().float().item())
+        except Exception:
+            return None
+    try:
+        return float(gn)
+    except Exception:
+        return None
+
+
+@torch.no_grad()
+def compute_optimizer_global_grad_norm(optimizer, dp_group=None) -> float | None:
+    """Compute true global grad norm across DP ranks for optimizer-visible grads."""
+    local_sq_sum = 0.0
+    local_found_grad = False
+    for g in _iter_optimizer_grad_tensors(optimizer):
+        local_found_grad = True
+        gg = g.detach()
+        if gg.is_sparse:
+            gg = gg.coalesce().values()
+        gg = gg.float()
+        local_sq_sum += torch.sum(gg * gg).item()
+    device = get_current_device()
+    sq_sum = torch.tensor(local_sq_sum, dtype=torch.float64, device=device)
+    found_grad_any = torch.tensor(1 if local_found_grad else 0, dtype=torch.int64, device=device)
+    if dist.is_initialized():
+        dist.all_reduce(sq_sum, op=dist.ReduceOp.SUM, group=dp_group)
+        dist.all_reduce(found_grad_any, op=dist.ReduceOp.SUM, group=dp_group)
+    if int(found_grad_any.item()) == 0:
+        return _safe_optimizer_get_grad_norm(optimizer)
+    return float(torch.sqrt(sq_sum).item())
+
+
+@torch.no_grad()
+def clip_optimizer_grad_norm_global_(optimizer, max_norm: float, dp_group=None, eps: float = 1e-6):
+    """Clip optimizer gradients using a truly global L2 norm across DP ranks."""
+    if max_norm is None or max_norm <= 0:
+        return None, None, 1.0
+
+    pre_clip_norm = compute_optimizer_global_grad_norm(optimizer, dp_group=dp_group)
+    if pre_clip_norm is None:
+        return None, None, 1.0
+
+    clip_coef = float(max_norm) / (pre_clip_norm + eps)
+    clip_coef_clamped = clip_coef if clip_coef < 1.0 else 1.0
+    if clip_coef_clamped < 1.0:
+        for g in _iter_optimizer_grad_tensors(optimizer):
+            g.mul_(clip_coef_clamped)
+
+    post_clip_norm = compute_optimizer_global_grad_norm(optimizer, dp_group=dp_group)
+    return pre_clip_norm, post_clip_norm, clip_coef_clamped
+
+
+def apply_pytorch_determinism(cfg) -> bool:
+    """CUDA/PyTorch settings for best-effort reproducibility. Call before ``setup_device()`` so
+    ``CUBLAS_WORKSPACE_CONFIG`` can take effect. Returns the effective ``deterministic`` flag.
+
+    Bit-exact runs are still not guaranteed under distributed ZeRO, BF16, or non-deterministic
+    kernels; use ``dtype=\"fp32\"`` and ``plugin=\"none\"`` on one GPU for stricter replay.
+    """
+    deterministic = bool(cfg.get("deterministic", True))
+    if deterministic:
+        # Deterministic cuBLAS matmul selection (must be set before CUDA context init when possible).
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.allow_tf32 = False
+        if hasattr(torch.backends, "cuda") and hasattr(torch.backends.cuda, "matmul"):
+            torch.backends.cuda.matmul.allow_tf32 = False
+        try:
+            torch.set_float32_matmul_precision("highest")
+        except Exception:
+            pass
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except TypeError:
+            try:
+                torch.use_deterministic_algorithms(True)
+            except Exception as exc:
+                print(f"[determinism] torch.use_deterministic_algorithms unavailable: {exc}")
+    else:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
+    return deterministic
 
 
 # Evaluation Metrics and Visualization Functions
@@ -682,6 +1054,7 @@ def evaluate_model(
     value_range="[0,1]",
     train_target_hw=None,
     train_target_frames=None,
+    vis_max_samples=4,
 ):
     """
     Run a full evaluation pass over the dataset (or a subset).
@@ -691,7 +1064,8 @@ def evaluate_model(
         dataloader: DataLoader for evaluation data
         device: Device to run evaluation on
         dtype: Data type for evaluation
-        num_eval_samples: Number of samples to evaluate (for speed)
+        num_eval_samples: Clip count to score (sum of batch sizes). None or <=0 = entire dataloader.
+        vis_max_samples: Max clips in the W&B visualization grid (first batch only).
         view_flatten_in_loss: Whether to flatten views for loss computation
         use_ema: Whether to use EMA model if available
         value_range: "[0,1]" or "[-1,1]" - if "[-1,1]", scale batch to [-1,1] before model and use for vis
@@ -713,12 +1087,15 @@ def evaluate_model(
     
     visualization_samples = []
     num_collected = 0
-    
+    eval_all = num_eval_samples is None or (
+        isinstance(num_eval_samples, (int, float)) and num_eval_samples <= 0
+    )
+
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
-            if num_collected >= num_eval_samples:
+            if not eval_all and num_collected >= int(num_eval_samples):
                 break
-            
+
             x = batch["video"].to(device, dtype)
             if train_target_hw is not None and train_target_frames is not None:
                 x = downsample_video_tensor(
@@ -746,12 +1123,15 @@ def evaluate_model(
             all_metrics["ssim"].extend(metrics["ssim_per_sample"])
             all_metrics["mse"].append(metrics["mse"])
             
-            # Collect samples for visualization (first batch only, or until we have enough)
+            # Visualization: first batch only; clip count is separate from metric coverage.
             if len(visualization_samples) == 0:
-                vis_images = create_visualization_grid(x, x_rec, num_samples=min(4, x.shape[0]), value_range=value_range)
+                n_vis = min(max(1, int(vis_max_samples)), int(x.shape[0]))
+                vis_images = create_visualization_grid(
+                    x, x_rec, num_samples=n_vis, value_range=value_range
+                )
                 visualization_samples.extend(vis_images)
-            
-            num_collected += x.shape[0] if not is_multiview else x.shape[0] * x.shape[1]
+
+            num_collected += x.shape[0]
     
     # Aggregate metrics
     aggregated = {
@@ -871,6 +1251,136 @@ def main():
     # == parse configs ==
     cfg = parse_configs()
 
+    # Normalize discriminator-related overrides immediately so run naming, W&B labels,
+    # and training behavior all reflect the effective (post-CLI) configuration.
+    from opensora.utils.vae_discriminator_presets import apply_discriminator_bundle_to_cfg, resolve_vae_discriminator_bundle
+
+    _disc_choice = cfg.get("discriminator_choice", None)
+    _disc_raw = cfg.get("discriminator", None)
+    # Important: parser may coerce CLI `--discriminator_choice none` into Python None.
+    # If user provided discriminator_choice explicitly (even None), it must override
+    # any prebuilt dict from the base config.
+    _has_disc_choice_key = False
+    try:
+        _has_disc_choice_key = "discriminator_choice" in cfg
+    except Exception:
+        _has_disc_choice_key = hasattr(cfg, "discriminator_choice")
+
+    if _has_disc_choice_key:
+        apply_discriminator_bundle_to_cfg(cfg, resolve_vae_discriminator_bundle(_disc_choice))
+    elif not isinstance(_disc_raw, dict):
+        # Backward compatibility for configs that set `discriminator` directly.
+        apply_discriminator_bundle_to_cfg(cfg, resolve_vae_discriminator_bundle(_disc_raw))
+
+    # Apply optional top-level GAN weight override only when discriminator is enabled.
+    # Prefer gen_disc_weight: CLI passes --gen_disc_weight, which merge_args updates on cfg only
+    # for that key. The config file also sets sweep_gen_disc_weight for compatibility; if we read
+    # sweep first, a stale file value shadows every sweep job (all runs keep the same disc_weight).
+    _gdw_top = cfg.get("gen_disc_weight", None)
+    _gdw_sweep = cfg.get("sweep_gen_disc_weight", None)
+    _sweep_gdw = _gdw_top if _gdw_top is not None else _gdw_sweep
+
+    if cfg.get("discriminator", None) is None:
+        cfg.discriminator_choice = "none"
+        cfg.gen_disc_weight = None
+        cfg.sweep_gen_disc_weight = None
+    elif _sweep_gdw is not None and cfg.get("gen_loss_config") is not None:
+        _g = dict(cfg.gen_loss_config)
+        _g["disc_weight"] = float(_sweep_gdw)
+        cfg.gen_loss_config = _g
+        cfg.gen_disc_weight = float(_sweep_gdw)
+
+    # Keep multi-view discriminator input layout consistent with the effective preset
+    # after CLI overrides (base config may have been authored for a different default).
+    _disc_choice_norm = str(cfg.get("discriminator_choice", "none")).strip().lower()
+    if _disc_choice_norm in ("none", ""):
+        cfg.disc_multiview_mode = "joint_4d"
+        cfg.view_flatten_in_disc = False
+    elif _disc_choice_norm == "train":
+        cfg.disc_multiview_mode = "flatten_batch"
+        cfg.view_flatten_in_disc = True
+    elif _disc_choice_norm in ("trainmultiview4d", "train_multiview_4d", "train_mv4d"):
+        cfg.disc_multiview_mode = "joint_4d"
+        cfg.view_flatten_in_disc = False
+    elif _disc_choice_norm in ("trainmultiviewstack", "train_multiview_stack", "train_mv_stack"):
+        cfg.disc_multiview_mode = "stack_channels"
+        cfg.view_flatten_in_disc = False
+
+    # Keep top-level loss fields in sync with the effective nested config so
+    # logs/config dumps do not show stale defaults after CLI nested overrides.
+    _vlc = cfg.get("vae_loss_config", None)
+    if isinstance(_vlc, dict):
+        if "perceptual_loss_weight" in _vlc:
+            cfg.perceptual_loss_weight = _vlc["perceptual_loss_weight"]
+        if "kl_loss_weight" in _vlc:
+            cfg.kl_loss_weight = _vlc["kl_loss_weight"]
+        if "view_consistency_weight" in _vlc:
+            cfg.view_consistency_weight = _vlc["view_consistency_weight"]
+        if "logvar_init" in _vlc:
+            cfg.logvar_init = _vlc["logvar_init"]
+
+    # NeRSemble: ``bucket_config`` / ``DATA_ROOT`` are fixed at config import time. CLI
+    # ``--bucket_config`` updates only the dict unless we re-run the resolver and reroot
+    # ``dataset_presets`` paths that still point at the old ``DATA_ROOT``.
+    _bucket_cfg = cfg.get("bucket_config", None)
+    if _bucket_cfg:
+        from opensora.utils.nersemble_bucket import resolve_nersemble_bucket
+
+        _old_root = cfg.get("DATA_ROOT", None)
+        _resolved = resolve_nersemble_bucket(
+            dict(_bucket_cfg),
+            processed_base=cfg.get("nersemble_processed_base"),
+        )
+        cfg.DATA_ROOT = _resolved["data_root"]
+        cfg.train_target_hw = _resolved["train_target_hw"]
+        cfg.train_target_frames = _resolved["train_target_frames"]
+        if _old_root is not None and isinstance(_old_root, str) and _old_root != cfg.DATA_ROOT:
+            for _preset_name in ("dataset_presets", "val_dataset_presets"):
+                _presets = cfg.get(_preset_name)
+                if not isinstance(_presets, dict):
+                    continue
+                for _ds in _presets.values():
+                    if _ds is None or not isinstance(_ds, dict):
+                        continue
+                    _p = _ds.get("data_path")
+                    if isinstance(_p, str) and _p.startswith(_old_root):
+                        _ds["data_path"] = cfg.DATA_ROOT + _p[len(_old_root) :]
+        print(
+            "[wan_multiview] effective data: "
+            f"epochs={cfg.get('epochs')} "
+            f"DATA_ROOT={cfg.get('DATA_ROOT')} "
+            f"train_target_hw={cfg.get('train_target_hw')} "
+            f"train_target_frames={cfg.get('train_target_frames')} "
+            f"bucket_config={dict(_bucket_cfg)}"
+        )
+
+    # Some configs construct `cfg.dataset` during initial config parsing, but
+    # CLI overrides are merged afterwards. Rebuild dataset configs here so
+    # overrides take effect.
+    dataset_presets = cfg.get("dataset_presets", None) if hasattr(cfg, "get") else getattr(cfg, "dataset_presets", None)
+    val_dataset_presets = cfg.get("val_dataset_presets", None) if hasattr(cfg, "get") else getattr(cfg, "val_dataset_presets", None)
+    if isinstance(dataset_presets, dict):
+        preset = cfg.get("data_preset", None) if hasattr(cfg, "get") else getattr(cfg, "data_preset", None)
+        default_key = "__default__"
+        key = preset if preset in dataset_presets else default_key
+        if key in dataset_presets:
+            cfg.dataset = dataset_presets[key]
+        if isinstance(val_dataset_presets, dict) and key in val_dataset_presets:
+            cfg.val_dataset = val_dataset_presets[key]
+
+    # Backward compatibility: some configs may expose a callable hook.
+    build_dataset_fn = None
+    if hasattr(cfg, "get"):
+        build_dataset_fn = cfg.get("build_dataset", None)
+    if build_dataset_fn is None:
+        build_dataset_fn = getattr(cfg, "build_dataset", None)
+    if callable(build_dataset_fn):
+        dataset_cfg, val_dataset_cfg = build_dataset_fn(cfg)
+        cfg.dataset = dataset_cfg
+        cfg.val_dataset = val_dataset_cfg
+
+    apply_pytorch_determinism(cfg)
+
     # == get dtype & device ==
     dtype = to_torch_dtype(cfg.get("dtype", "bf16"))
     device, coordinator = setup_device()
@@ -883,11 +1393,25 @@ def main():
     # == init ColossalAI booster ==
     plugin_type = cfg.get("plugin", "zero2")
     plugin_config = cfg.get("plugin_config", {})
+    configured_grad_clip = float(cfg.get("grad_clip", 0) or 0.0)
+    # ZeRO2 clipping: ColossalAI's LowLevelZeroOptimizer (stage=2) clips grads internally inside
+    # step() via _unscale_and_clip_grads over the grad_store shards — the only place where the
+    # actual gradient tensors are accessible. The manual path (torch.clip_grad_norm_ +
+    # clip_optimizer_grad_norm_global_) cannot reach those tensors and silently does nothing.
+    # Therefore zero2 must use plugin-internal clipping (force_manual=False).
+    # zero1 shards only optimizer states, not gradients, so param.grad is visible → manual works.
+    force_manual_global_grad_clip = bool(
+        cfg.get(
+            "force_manual_global_grad_clip",
+            configured_grad_clip > 0 and plugin_type in ("zero1", "zero1-seq"),
+        )
+    )
+    plugin_grad_clip = 0.0 if force_manual_global_grad_clip else configured_grad_clip
     plugin = (
         create_colossalai_plugin(
             plugin=plugin_type,
             dtype=cfg.get("dtype", "bf16"),
-            grad_clip=cfg.get("grad_clip", 0),
+            grad_clip=plugin_grad_clip,
             **plugin_config,
         )
         if plugin_type != "none"
@@ -895,10 +1419,12 @@ def main():
     )
     booster = Booster(plugin=plugin)
 
-    # == init exp_dir ==
+    # == init exp_dir (folder name includes loss weights unless experiment_name is set) ==
+    loss_slug = _loss_signature_slug(cfg)
+    model_name_for_dir = f"{config_to_name(cfg)}_{loss_slug}"[:200]
     exp_name, exp_dir = create_experiment_workspace(
         cfg.get("outputs", "./outputs"),
-        model_name=config_to_name(cfg),
+        model_name=model_name_for_dir,
         config=cfg.to_dict(),
         exp_name=cfg.get("experiment_name"),
     )
@@ -909,8 +1435,32 @@ def main():
 
     # == init logger ==
     logger = create_logger(exp_dir)
+    if cfg.get("deterministic", True):
+        logger.info(
+            "Determinism mode: cuBLAS workspace, cudnn deterministic, TF32 disabled, "
+            "torch.use_deterministic_algorithms(warn_only=True); data workers use seed+worker_id; "
+            "epoch Python RNG uses seed+rank. Multi-GPU ZeRO and BF16 may still break bit-for-bit replay."
+        )
+    if force_manual_global_grad_clip and configured_grad_clip > 0:
+        logger.info(
+            "Using explicit global grad clipping (max_norm=%s) with DP all-reduce; "
+            "plugin-internal clipping disabled to avoid ZeRO shard-local clipping ambiguity.",
+            configured_grad_clip,
+        )
     logger.info("Training configuration:\n %s", pformat(cfg.to_dict()))
-    
+    if coordinator.is_master():
+        append_eval_metrics_jsonl(
+            exp_dir,
+            {
+                "kind": "meta",
+                "loss_config": _loss_config_dict(cfg),
+                "loss_signature_slug": loss_slug,
+                "exp_dir": os.path.abspath(exp_dir),
+            },
+        )
+        with open(os.path.join(exp_dir, "loss_config.json"), "w", encoding="utf-8") as _lf:
+            json.dump(_loss_config_dict(cfg), _lf, indent=2)
+
 
 
 
@@ -986,6 +1536,10 @@ def main():
         prefetch_factor=cfg.get("prefetch_factor", None),
         cache_pin_memory=cache_pin_memory,
     )
+    _persistent_dl_extras = {}
+    if int(cfg.get("num_workers", 0) or 0) > 0 and cfg.get("persistent_workers", False):
+        _persistent_dl_extras["persistent_workers"] = True
+    dataloader_args.update(_persistent_dl_extras)
     dataloader, sampler = prepare_dataloader(
         bucket_config=cfg.get("bucket_config", None),
         num_bucket_build_workers=cfg.get("num_bucket_build_workers", 1),
@@ -1001,6 +1555,11 @@ def main():
     # == build vae model ==
     model = build_module(cfg.model, MODELS, device_map=device, torch_dtype=dtype).train()
     log_model_params(model)
+    if is_log_process(plugin_type, plugin_config):
+        if cfg.get("log_training_design_summary", False):
+            pass  # deferred to first training step (after booster.wrap) — see training loop
+        elif cfg.get("log_training_param_overview", True):
+            log_trainable_param_overview(model, "VAE")
 
     if cfg.get("grad_checkpoint", False):
         set_grad_checkpoint(model)
@@ -1015,10 +1574,66 @@ def main():
         ema = ema_shape_dict = None
         logger.info("No EMA model created.")
 
+    def _freeze_first_child_modules(module, num_children: int):
+        """Freeze parameters in the first N immediate child modules."""
+        if num_children <= 0:
+            return
+        child_modules = list(module.named_children())
+        for _, child in child_modules[:num_children]:
+            child.requires_grad_(False)
+
     # == build discriminator model ==
+
     use_discriminator = cfg.get("discriminator", None) is not None
     if use_discriminator:
-        discriminator = build_module(cfg.discriminator, MODELS).to(device, dtype).train()
+        disc_cfg = cfg.discriminator
+        disc_type = disc_cfg.get("type")
+        if disc_type == "pretrained_stylegan2_discriminator":
+            from huggingface_hub import hf_hub_download
+
+            repo_id = disc_cfg.get("repo_id", "mukhbiir/StyleGAN2_Discriminator")
+            filename = disc_cfg.get("filename", "model.pt")
+            model_path = hf_hub_download(repo_id=repo_id, filename=filename)
+            loaded = torch.load(model_path, map_location="cpu", weights_only=False)
+            if isinstance(loaded, torch.nn.Module):
+                discriminator = loaded.to(device).train()
+            else:
+                discriminator = build_stylegan2_ada_discriminator_from_state_dict(
+                    loaded,
+                    device,
+                    img_resolution=int(disc_cfg.get("img_resolution", 512)),
+                    img_channels=int(disc_cfg.get("img_channels", 3)),
+                    stylegan2_ada_root=disc_cfg.get("stylegan2_ada_root"),
+                ).train()
+            freeze_layers = int(disc_cfg.get("freeze_layers", 0) or 0)
+            # Pretrained path may wrap NVlabs D in a module with a single child `core`;
+            # freeze sub-blocks on the inner core so freeze_layers matches StyleGAN blocks.
+            _freeze_first_child_modules(getattr(discriminator, "core", discriminator), freeze_layers)
+            logger.info(
+                "Loaded pretrained discriminator from %s/%s (preset=%s, freeze_layers=%d)",
+                repo_id,
+                filename,
+                disc_cfg.get("pretrained", "unknown"),
+                freeze_layers,
+            )
+        elif disc_type == "pretrained_sd_vae_nlayer_discriminator":
+            from opensora.models.vae.sd_ldm_discriminator import build_pretrained_sd_vae_nlayer_discriminator
+
+            disc_kwargs = {k: v for k, v in disc_cfg.items() if k != "type"}
+            discriminator = build_pretrained_sd_vae_nlayer_discriminator(**disc_kwargs).to(device, dtype).train()
+            freeze_layers = int(disc_cfg.get("freeze_layers", 0) or 0)
+            logger.info(
+                "Loaded LDM PatchGAN (SD VAE) discriminator repo_id=%s filename=%s freeze_layers=%d",
+                disc_cfg.get("repo_id", "stabilityai/sd-vae-ft-mse"),
+                disc_cfg.get("filename", "diffusion_pytorch_model.bin"),
+                freeze_layers,
+            )
+        else:
+            # Ensure discriminator classes are registered in the MODELS registry.
+            # Some training entrypoints may not import the discriminator module by default.
+            import opensora.models.vae.discriminator  # noqa: F401
+
+            discriminator = build_module(disc_cfg, MODELS).to(device, dtype).train()
         log_model_params(discriminator)
         generator_loss_fn = GeneratorLoss(**cfg.gen_loss_config)
         discriminator_loss_fn = DiscriminatorLoss(**cfg.disc_loss_config)
@@ -1040,9 +1655,9 @@ def main():
             epochs=cfg.get("epochs", 1000),
             **cfg.disc_lr_scheduler,
         )
-    
     total_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print("Trainable params:", total_trainable)
+    if is_log_process(plugin_type, plugin_config):
+        logger.info("VAE trainable params (optimizer): %s", f"{total_trainable:,}")
 
     # =======================================================
     # 4. distributed training preparation with colossalai
@@ -1073,6 +1688,22 @@ def main():
     # Multi-view input controls. These are opt-in and safe for single-view.
     view_flatten_in_loss = cfg.get("view_flatten_in_loss", True)
     view_flatten_in_disc = cfg.get("view_flatten_in_disc", True)
+    # Multi-view 3D discriminator input: flatten_batch | stack_channels | joint_4d (see wan_multiview_finetune.py).
+    disc_multiview_mode = cfg.get("disc_multiview_mode", "flatten_batch")
+    disc_per_frame_2d = cfg.get("disc_per_frame_2d", False)
+    # Safety guard: plain 3D PatchGAN discriminator expects 5D input [B,C,T,H,W].
+    # If multiview clips are used, force view flattening into batch to avoid 6D conv3d errors.
+    if use_discriminator and not disc_per_frame_2d:
+        _disc_cfg = cfg.get("discriminator", None)
+        _disc_type = _disc_cfg.get("type") if isinstance(_disc_cfg, dict) else None
+        if _disc_type == "N_Layer_discriminator_3D":
+            if disc_multiview_mode != "flatten_batch" or not view_flatten_in_disc:
+                logger.warning(
+                    "Overriding discriminator input layout for N_Layer_discriminator_3D: "
+                    "forcing disc_multiview_mode='flatten_batch' and view_flatten_in_disc=True."
+                )
+            disc_multiview_mode = "flatten_batch"
+            view_flatten_in_disc = True
     # modulate mixed image ratio since we force rank 0 to be video
     num_ranks = dist.get_world_size()
     modulated_mixed_image_ratio = (
@@ -1204,16 +1835,58 @@ def main():
     def _build_wandb_run_name():
         explicit = cfg.get("wandb_expr_name")
         if explicit:
-            return explicit
+            # Keep user label but append loss signature so runs remain distinguishable.
+            return f"{str(explicit).strip()}__{loss_slug}"[:256]
+
+        def _tok(s):
+            t = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(s))
+            return "_".join(x for x in t.split("_") if x)
+
         m = cfg.model
-        ds = cfg.dataset
         bucket_key = next(iter(cfg.get("bucket_config") or {}), "")
+        bucket_s = _tok(bucket_key.replace(":", "").replace("/", ""))
+
+        # View decoding: view-wise decoder LoRA vs per-view latent embeddings vs neither
+        if m.get("use_viewwise_decoder_lora"):
+            view_dec = "vwlora"
+        elif m.get("use_view_embedding"):
+            view_dec = "vemb"
+        else:
+            view_dec = "novw"
+
+        thw = cfg.get("train_target_hw")
+        if thw is not None and len(thw) >= 2:
+            h, w = int(thw[0]), int(thw[1])
+            px_part = f"{h}x{w}px" if h != w else f"{h}px"
+        else:
+            px_part = bucket_s or "hwunk"
+
+        tf = cfg.get("train_target_frames")
+        t_part = f"{int(tf)}t" if tf is not None else "tunk"
+
+        disc_cfg = cfg.get("discriminator")
+        if disc_cfg is None:
+            vlp = _tok(cfg.get("vae_loss_preset", "default"))
+            loss_part = f"loss_{vlp}"
+        elif disc_cfg.get("type") in (
+            "pretrained_stylegan2_discriminator",
+            "pretrained_sd_vae_nlayer_discriminator",
+        ):
+            loss_part = "loss_disc_pretrained"
+        else:
+            loss_part = "loss_disc_scratch"
+
         parts = [
-            m.get("fusion_mode", "fusion"),
-            f"lora_r{m.get('lora_rank', 16)}",
-            "after" if m.get("use_lora_after", True) else "noafter",
-            cfg.get("data_preset", "") or "data",
-            bucket_key.replace(":", "").replace("/", ""),
+            _tok(m.get("fusion_mode", "fusion")),
+            "lb" if m.get("use_lora_before") else "nolb",
+            "la" if m.get("use_lora_after") else "nola",
+            view_dec,
+            f"r{m.get('lora_rank', 16)}",
+            px_part,
+            t_part,
+            _tok(cfg.get("data_preset", "") or "data"),
+            loss_part,
+            loss_slug,
             f"{m.get('view_in', 2)}v",
         ]
         name = "_".join(str(p) for p in parts if str(p))
@@ -1240,6 +1913,10 @@ def main():
             name=wandb_name,
             config=cfg.to_dict(),
             dir=exp_dir,
+        )
+        wandb.config.update(
+            {"loss_config": _loss_config_dict(cfg), "loss_signature_slug": loss_slug},
+            allow_val_change=True,
         )
         run_id = wandb.run.id
         run_url = getattr(wandb.run, "url", None) or ""
@@ -1270,18 +1947,65 @@ def main():
     # =======================================================
     # 6. training loop
     # =======================================================
+    first_training_global_step = start_epoch * num_steps_per_epoch + start_step
+
     dist.barrier()
     accumulation_steps = int(cfg.get("accumulation_steps", 1))
     actual_update_step = 0
+    debug_stats_start_step = int(cfg.get("debug_stats_start_step", 0))
+    debug_stats_every = max(1, int(cfg.get("debug_stats_every", 500)))
+    debug_stats_weight_every = max(1, int(cfg.get("debug_stats_weight_every", 500)))
+    # Train-batch PSNR guard (rank 0): enforce on optimizer update boundaries (not micro-steps)
+    # so behavior matches logged train_batch snapshots when accumulation_steps > 1.
+    train_psnr_guard_threshold = float(
+        cfg.get("train_psnr_guard_threshold", cfg.get("psnr_guard_threshold", 15.0))
+    )
+    train_psnr_guard_consecutive = max(
+        1, int(cfg.get("train_psnr_guard_consecutive", cfg.get("psnr_guard_required_consecutive", 3)))
+    )
+    train_psnr_guard_start_step = max(0, int(cfg.get("train_psnr_guard_start_step", 15000)))
+    train_psnr_guard_start_epoch = cfg.get("train_psnr_guard_start_epoch", None)
+    if train_psnr_guard_start_epoch is None:
+        # Backward compatibility: if only step-based start is provided, convert to epoch index.
+        train_psnr_guard_start_epoch = train_psnr_guard_start_step // max(1, num_steps_per_epoch)
+    train_psnr_guard_start_epoch = max(0, int(train_psnr_guard_start_epoch))
+    train_psnr_guard_min_epochs = max(0, int(cfg.get("train_psnr_guard_min_epochs", 0)))
+    train_psnr_guard_min_updates = max(0, int(cfg.get("train_psnr_guard_min_updates", 0)))
+    train_psnr_low_streak = 0
+    train_psnr_bad_for_ckpt = False
+    last_epoch_psnr_mean = float("nan")
+    last_saved_ckpt_epoch = -1
+    early_stop_requested = False
+    _psnr_stop_log_once = False
     # One-time average wall time over first 10 steps; set log_step_time False to disable.
     _log_step_time_once = cfg.get("log_step_time", True)
     _step_time_bench_done = False
     _step_time_bench_samples = []
+    if coordinator.is_master():
+        append_training_debug_jsonl(
+            exp_dir,
+            {
+                "kind": "meta",
+                "dtype_config": str(cfg.get("dtype", "bf16")),
+                "torch_dtype_runtime": str(dtype),
+                "debug_stats_start_step": debug_stats_start_step,
+                "debug_stats_every": debug_stats_every,
+                "debug_stats_weight_every": debug_stats_weight_every,
+                "train_psnr_guard_threshold": train_psnr_guard_threshold,
+                "train_psnr_guard_consecutive": train_psnr_guard_consecutive,
+                "train_psnr_guard_start_epoch": train_psnr_guard_start_epoch,
+                "train_psnr_guard_start_step": train_psnr_guard_start_step,
+                "train_psnr_guard_min_epochs": train_psnr_guard_min_epochs,
+                "train_psnr_guard_min_updates": train_psnr_guard_min_updates,
+            },
+        )
     for epoch in range(start_epoch, cfg_epochs):
+        epoch_psnr_sum = 0.0
+        epoch_psnr_count = 0
         # == set dataloader to new epoch ==
         sampler.set_epoch(epoch)
         dataiter = iter(dataloader)
-        random.seed(1024 + dist.get_rank())  # load vid/img for each rank
+        random.seed(int(cfg.get("seed", 1024)) + dist.get_rank())
 
         # == training loop in an epoch ==
         with tqdm(
@@ -1294,6 +2018,7 @@ def main():
             if coordinator.is_master():
                 pbar.set_postfix(epoch=epoch)
             pbar_iter = iter(pbar)
+            current_update_sample_ids = []
 
             def fetch_data():
                 step, batch = next(pbar_iter)
@@ -1318,6 +2043,8 @@ def main():
 
             with profiler_ctxt:
                 for _ in range(start_step, num_steps_per_epoch):
+                    if early_stop_requested:
+                        break
                     if cfg.get("profile", False) and _ == WARMUP + ACTIVE + WAIT + 3:
                         break
 
@@ -1329,6 +2056,11 @@ def main():
                     # We time this separately to see if we're GPU-starved (waiting for data)
                     data_load_start = time.time()
                     batch, step, pinned_video = batch_, step_, pinned_video_
+                    if (step + 1) % accumulation_steps == 1:
+                        current_update_sample_ids = []
+                    step_sample_ids = _extract_batch_sample_ids(batch)
+                    if step_sample_ids is not None:
+                        current_update_sample_ids.append(step_sample_ids)
                     
                     import sys
                     sys.stdout.flush()
@@ -1347,6 +2079,22 @@ def main():
                     epoch_float = (global_step + 1) / max(1, num_steps_per_epoch)
 
                     maybe_init_wandb(actual_update_step)
+
+                    if (
+                        is_log_process(plugin_type, plugin_config)
+                        and cfg.get("log_training_design_summary", False)
+                        and global_step == first_training_global_step
+                    ):
+                        if cfg.model.get("type") == "multiview_wan_video_vae":
+                            log_wan_multiview_training_design_summary(model, cfg.model, emit=logger.info)
+                        else:
+                            logger.info(
+                                "log_training_design_summary: model.type is not multiview_wan_video_vae; "
+                                "printing generic trainable overview only."
+                            )
+                            log_trainable_param_overview(
+                                model, "VAE", emit=logger.info, detailed_lora_buckets=True
+                            )
 
                     # == mixed strategy ==
                     x = batch["video"]
@@ -1398,6 +2146,26 @@ def main():
                         x_rec, posterior, z = model(x)
                     forward_time = time.time() - forward_start
                     timing_stats["forward"].append(forward_time)
+
+                    # Train-batch PSNR/SSIM/MSE every step (master + video): same as wandb train_batch/*.
+                    if coordinator.is_master() and use_video == 1:
+                        with torch.no_grad():
+                            _bm = compute_metrics(x, x_rec)
+                        loss_dict["psnr"] = _bm["psnr"]
+                        loss_dict["ssim"] = _bm["ssim"]
+                        loss_dict["mse"] = _bm["mse"]
+                        on_update_boundary = ((global_step + 1) % accumulation_steps == 0)
+                        if cfg.get("train_psnr_guard", True) and on_update_boundary:
+                            try:
+                                _tb = float(_bm["psnr"])
+                            except (TypeError, ValueError):
+                                _tb = float("nan")
+                            if not math.isnan(_tb):
+                                # Keep per-update quality gate for checkpoint eligibility.
+                                train_psnr_bad_for_ckpt = _tb < train_psnr_guard_threshold
+                                # Epoch-level guard aggregation for early stop decision.
+                                epoch_psnr_sum += _tb
+                                epoch_psnr_count += 1
 
                     # Step 0 diagnostic: catch constant (white) output early
                     if coordinator.is_master() and step == 0:
@@ -1501,14 +2269,16 @@ def main():
 
                     ret = vae_loss_fn(x_loss, x_rec_loss, posterior_loss)
 
-                    # View consistency loss: encourage different views to be similar
-                    # This helps prevent the model from learning to ignore views
+                    # View consistency loss: encourage reconstructions to stay coherent
+                    # across all view pairs (all-to-all).
                     view_loss = 0.0
                     if is_multiview and x_rec.shape[1] > 1:
-                        # Compute MSE between consecutive views
+                        # Compute pairwise MSE over all distinct view pairs.
                         view_losses = []
-                        for i in range(x_rec.shape[1] - 1):
-                            view_losses.append(F.mse_loss(x_rec[:, i], x_rec[:, i + 1]))
+                        num_views = x_rec.shape[1]
+                        for i in range(num_views):
+                            for j in range(i + 1, num_views):
+                                view_losses.append(F.mse_loss(x_rec[:, i], x_rec[:, j]))
                         view_loss = sum(view_losses) / len(view_losses)
                     
                     # Add view consistency loss to total loss
@@ -1527,15 +2297,40 @@ def main():
                     # == generator loss ==
                     # Discriminator forward pass can be expensive, especially with 3D convolutions
                     # We time it separately to see if it's slowing down training
+                    adaptive_w = None
+                    g_adv_loss = None
                     if use_discriminator:
                         disc_start = time.time()
                         # turn off grad update for disc
                         discriminator.requires_grad_(False)
                         disc_input = x_rec
-                        # Discriminator expects 5D, so flatten views if requested.
-                        if is_multiview and view_flatten_in_disc:
+                        # For pretrained 2D discriminator, flatten views+time to frame batches.
+                        if disc_per_frame_2d:
+                            if disc_input.dim() == 6:
+                                b, v, c, t, h, w = disc_input.shape
+                                disc_input = disc_input.reshape(b * v * t, c, h, w)
+                            elif disc_input.dim() == 5:
+                                b, c, t, h, w = disc_input.shape
+                                disc_input = disc_input.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
+                        elif is_multiview and not disc_per_frame_2d:
                             b, v, c, t, h, w = disc_input.shape
-                            disc_input = disc_input.view(b * v, c, t, h, w)
+                            if disc_multiview_mode == "joint_4d":
+                                pass
+                            elif disc_multiview_mode == "stack_channels":
+                                disc_input = disc_input.reshape(b, v * c, t, h, w)
+                            elif disc_multiview_mode == "flatten_batch":
+                                if view_flatten_in_disc:
+                                    disc_input = disc_input.view(b * v, c, t, h, w)
+                                else:
+                                    raise ValueError(
+                                        "disc_multiview_mode='flatten_batch' requires view_flatten_in_disc=True, "
+                                        "or use stack_channels / joint_4d with view_flatten_in_disc=False."
+                                    )
+                            else:
+                                raise ValueError(
+                                    f"Unknown disc_multiview_mode={disc_multiview_mode!r} "
+                                    "(use flatten_batch, stack_channels, or joint_4d)."
+                                )
                         fake_logits = discriminator(disc_input.contiguous())
 
                         generator_loss, g_loss = generator_loss_fn(
@@ -1545,6 +2340,14 @@ def main():
                             actual_update_step,
                             is_training=model.training,
                         )
+                        g_adv_loss = g_loss.detach()
+                        adaptive_w = None
+                        # Optional: two extra autograd.grad calls on the last layer (expensive); keep off for speed.
+                        if cfg.get("gan_log_adaptive_grad_metrics", False):
+                            last_layer = model.module.get_last_layer()
+                            g_recon = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
+                            g_adv = torch.autograd.grad(g_loss, last_layer, retain_graph=True)[0]
+                            adaptive_w = torch.norm(g_recon) / (torch.norm(g_adv) + 1e-4)
 
                         vae_loss += generator_loss
                         # turn on disc training
@@ -1554,136 +2357,270 @@ def main():
                     else:
                         timing_stats["discriminator"].append(0.0)  # No discriminator, no time spent
 
-                        # == generator backward & update ==
-                        # Backward pass computes gradients - can be slow with large models
-                        # We time it to see if gradient computation is the bottleneck
-                        backward_start = time.time()
-                        ctx = (
-                            booster.no_sync(model, optimizer)
-                            if cfg.get("plugin", "zero2") in ("zero1", "zero1-seq")
-                            and (step + 1) % accumulation_steps != 0
-                            else nullcontext()
-                        )
-                        with Timer("backward", log=True) if cfg.get("profile", False) else nullcontext():
-                            with ctx:
-                                booster.backward(loss=vae_loss / accumulation_steps, optimizer=optimizer)
-                        backward_time = time.time() - backward_start
-                        timing_stats["backward"].append(backward_time)
+                    # == generator backward & update ==
+                    # Backward pass computes gradients - can be slow with large models
+                    # We time it to see if gradient computation is the bottleneck
+                    backward_start = time.time()
+                    ctx = (
+                        booster.no_sync(model, optimizer)
+                        if cfg.get("plugin", "zero2") in ("zero1", "zero1-seq")
+                        and (step + 1) % accumulation_steps != 0
+                        else nullcontext()
+                    )
+                    with Timer("backward", log=True) if cfg.get("profile", False) else nullcontext():
+                        with ctx:
+                            booster.backward(loss=vae_loss / accumulation_steps, optimizer=optimizer)
+                    backward_time = time.time() - backward_start
+                    timing_stats["backward"].append(backward_time)
 
-                        # Optimizer step updates weights - usually fast but can be slow with large models
-                        # or complex optimizers (e.g., Adam with many parameters)
-                        optimizer_start = time.time()
-                        with Timer("optimizer", log=True) if cfg.get("profile", False) else nullcontext():
-                            if (step + 1) % accumulation_steps == 0:
-                                optimizer.step()
-                                optimizer.zero_grad()
-                                if lr_scheduler is not None:
-                                    lr_scheduler.step(
-                                        actual_update_step,
-                                    )
-                                # == update EMA ==
-                                # EMA update is usually fast but we include it in optimizer timing
-                                if ema is not None:
-                                    update_ema(
-                                        ema,
-                                        model.unwrap(),
-                                        optimizer=optimizer,
-                                        decay=cfg.get("ema_decay", 0.9999),
-                                    )
-                        optimizer_time = time.time() - optimizer_start
-                        timing_stats["optimizer"].append(optimizer_time)
-
-                        # -- logging --
-                        log_loss("all", vae_loss, loss_dict, use_video)
-                        log_loss("nll", nll_loss, loss_dict, use_video)
-                        log_loss("nll_rec", recon_loss, loss_dict, use_video)
-                        log_loss("nll_per", perceptual_loss, loss_dict, use_video)
-                        log_loss("kl", kl_loss, loss_dict, use_video)
-                        if use_discriminator:
-                            log_loss("gen_w", generator_loss, loss_dict, use_video)
-                            log_loss("gen", g_loss, loss_dict, use_video)
-                        
-                        # -- compute reconstruction metrics on current batch (every eval_every) --
-                        eval_every = cfg.get("eval_every", 0)
-                        compute_batch_metrics = (
-                            eval_every > 0
-                            and (global_step + 1) % accumulation_steps == 0
-                            and actual_update_step % eval_every == 0
-                            and coordinator.is_master()
-                            and use_video == 1
+                    # Grad stats: collect right after backward (before step / zero_grad). Under ZeRO,
+                    # per-parameter .grad on the module is often empty; collect_trainable_param_stats
+                    # falls back to optimizer.get_grad_norm().
+                    pending_train_stats = None
+                    pre_clip_global_grad_norm = None
+                    if (step + 1) % accumulation_steps == 0:
+                        should_log_train_debug = (
+                            coordinator.is_master()
+                            and actual_update_step >= debug_stats_start_step
+                            and actual_update_step % debug_stats_every == 0
                         )
-                        if compute_batch_metrics:
-                            batch_metrics = compute_metrics(x, x_rec)
-                            loss_dict["psnr"] = batch_metrics["psnr"]
-                            loss_dict["ssim"] = batch_metrics["ssim"]
-                            loss_dict["mse"] = batch_metrics["mse"]
+                        if should_log_train_debug:
+                            include_weight_stats = actual_update_step % debug_stats_weight_every == 0
+                            pending_train_stats = collect_trainable_param_stats(
+                                model,
+                                include_weight_stats=include_weight_stats,
+                                optimizer=optimizer,
+                            )
+                        if force_manual_global_grad_clip and configured_grad_clip > 0:
+                            pre_clip_global_grad_norm = compute_optimizer_global_grad_norm(
+                                optimizer,
+                                dp_group=get_data_parallel_group(),
+                            )
+                            if pending_train_stats is not None and pre_clip_global_grad_norm is not None:
+                                pending_train_stats["global_grad_norm"] = pre_clip_global_grad_norm
+                                pending_train_stats["grad_l2_norm"] = pre_clip_global_grad_norm
+                                pending_train_stats["grad_stats_source"] = (
+                                    "optimizer_grad_tensors_global_dp_allreduce (pre-clip)"
+                                )
 
-                        # -- plot train reconstruction every log_every steps (fixed train samples: 1 or 3 people) --
-                        log_every_steps = cfg.get("log_every", 10)
-                        plot_reconstruction = (
-                            (global_step + 1) % accumulation_steps == 0
-                            and actual_update_step % log_every_steps == 0
-                            and coordinator.is_master()
-                            and use_video == 1
-                        )
-                        if plot_reconstruction:
-                            vis_range = "[-1,1]" if (vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview)) else "[0,1]"
-                            dataset = dataloader.dataset
-                            participants_cfg = getattr(dataset, "participants", None)
-                            # 1 sample if single person, 3 samples from 3 people if multi-person
-                            num_vis = 3 if (participants_cfg is not None and len(participants_cfg) > 1) else 1
-                            num_vis = min(num_vis, len(dataset))
-                            vis_items = []
-                            if participants_cfg is not None and len(participants_cfg) > 1 and num_vis > 1:
-                                seen_pids = set()
-                                for idx in range(len(dataset)):
-                                    sample = dataset[idx]
-                                    pt_path = sample.get("path", "")
-                                    pid = None
-                                    for part in os.path.normpath(pt_path).split(os.sep):
-                                        if len(part) == 4 and part[0] == "p" and part[1:].isdigit():
-                                            pid = part
-                                            break
-                                    if pid is None or pid in seen_pids:
-                                        continue
-                                    seen_pids.add(pid)
-                                    vis_items.append(sample)
-                                    if len(vis_items) >= num_vis:
+                    # Optimizer step updates weights - usually fast but can be slow with large models
+                    # or complex optimizers (e.g., Adam with many parameters)
+                    optimizer_start = time.time()
+                    post_clip_global_grad_norm = None
+                    with Timer("optimizer", log=True) if cfg.get("profile", False) else nullcontext():
+                        if (step + 1) % accumulation_steps == 0:
+                            print(f"[GradClip] force_manual={force_manual_global_grad_clip}, configured_grad_clip={configured_grad_clip}, plugin_grad_clip={plugin_grad_clip}")
+                            if force_manual_global_grad_clip and configured_grad_clip > 0:
+                                # Manual clipping path (zero1 / non-ZeRO): param.grad is visible,
+                                # so torch.clip_grad_norm_ + clip_optimizer_grad_norm_global_ work.
+                                _ = torch.nn.utils.clip_grad_norm_(
+                                    model.parameters(),
+                                    max_norm=configured_grad_clip,
+                                )
+                                (
+                                    _manual_pre_clip_norm,
+                                    _manual_post_clip_norm,
+                                    _,
+                                ) = clip_optimizer_grad_norm_global_(
+                                    optimizer,
+                                    max_norm=configured_grad_clip,
+                                    dp_group=get_data_parallel_group(),
+                                )
+                                if _manual_pre_clip_norm is not None:
+                                    pre_clip_global_grad_norm = _manual_pre_clip_norm
+                                if _manual_post_clip_norm is not None:
+                                    post_clip_global_grad_norm = _manual_post_clip_norm
+                                print(f"[GradClip manual] pre={pre_clip_global_grad_norm}, post={post_clip_global_grad_norm}")
+
+                            optimizer.step()
+
+                            if not force_manual_global_grad_clip and configured_grad_clip > 0:
+                                # Plugin-internal clipping path (ZeRO2+): ColossalAI's step() calls
+                                # _compute_grad_norm (all-reduce), stores it in _current_grad_norm,
+                                # then calls _unscale_and_clip_grads — all before returning.
+                                # So get_grad_norm() immediately after step() gives the CURRENT
+                                # step's pre-clip norm. Post-clip is analytically min(pre, max_norm).
+                                _plugin_pre = _safe_optimizer_get_grad_norm(optimizer)
+                                if _plugin_pre is not None:
+                                    pre_clip_global_grad_norm = _plugin_pre
+                                    post_clip_global_grad_norm = min(_plugin_pre, float(configured_grad_clip))
+                                    if pending_train_stats is not None:
+                                        pending_train_stats["grad_l2_norm"] = _plugin_pre
+                                        pending_train_stats["global_grad_norm"] = _plugin_pre
+                                        pending_train_stats["grad_stats_source"] = (
+                                            "optimizer_get_grad_norm (plugin-internal clip; pre-clip from step)"
+                                        )
+                                print(f"[GradClip plugin] pre={pre_clip_global_grad_norm}, post={post_clip_global_grad_norm}, max_norm={configured_grad_clip}")
+
+                            if lr_scheduler is not None:
+                                lr_scheduler.step(
+                                    actual_update_step,
+                                )
+                            # == update EMA ==
+                            # EMA update is usually fast but we include it in optimizer timing
+                            if ema is not None:
+                                update_ema(
+                                    ema,
+                                    model.unwrap(),
+                                    optimizer=optimizer,
+                                    decay=cfg.get("ema_decay", 0.9999),
+                                )
+                            optimizer.zero_grad()
+                    optimizer_time = time.time() - optimizer_start
+                    timing_stats["optimizer"].append(optimizer_time)
+
+                    # -- logging --
+                    log_loss("all", vae_loss, loss_dict, use_video)
+                    log_loss("nll", nll_loss, loss_dict, use_video)
+                    log_loss("nll_rec", recon_loss, loss_dict, use_video)
+                    log_loss("nll_per", perceptual_loss, loss_dict, use_video)
+                    log_loss("kl", kl_loss, loss_dict, use_video)
+                    if use_discriminator:
+                        log_loss("gen_w", generator_loss, loss_dict, use_video)
+                        log_loss("gen", g_loss, loss_dict, use_video)
+                    if (step + 1) % accumulation_steps == 0 and pending_train_stats is not None:
+                        flat_update_sample_ids = [
+                            sid for microbatch_ids in current_update_sample_ids for sid in microbatch_ids
+                        ]
+                        train_stats_record = {
+                            "kind": "train_update_stats",
+                            "actual_update_step": int(actual_update_step),
+                            "global_step": int(global_step),
+                            "epoch": int(epoch),
+                            "lr": float(optimizer.param_groups[0]["lr"]),
+                            "dtype_config": str(cfg.get("dtype", "bf16")),
+                            "torch_dtype_runtime": str(dtype),
+                            "loss_total": _to_float_scalar(loss_dict.get("all")),
+                            "loss_nll": _to_float_scalar(loss_dict.get("nll")),
+                            "loss_nll_rec": _to_float_scalar(loss_dict.get("nll_rec")),
+                            "loss_nll_per": _to_float_scalar(loss_dict.get("nll_per")),
+                            "loss_kl": _to_float_scalar(loss_dict.get("kl")),
+                            "loss_vc": _to_float_scalar(loss_dict.get("vc")),
+                            "loss_total_precise": _to_precise_float_str(loss_dict.get("all")),
+                            "loss_nll_precise": _to_precise_float_str(loss_dict.get("nll")),
+                            "loss_nll_rec_precise": _to_precise_float_str(loss_dict.get("nll_rec")),
+                            "loss_nll_per_precise": _to_precise_float_str(loss_dict.get("nll_per")),
+                            "loss_kl_precise": _to_precise_float_str(loss_dict.get("kl")),
+                            "loss_vc_precise": _to_precise_float_str(loss_dict.get("vc")),
+                            # Batch PSNR from the same training step, if computed.
+                            "train_batch_psnr": _to_float_scalar(loss_dict.get("psnr")),
+                            "train_batch_psnr_precise": _to_precise_float_str(loss_dict.get("psnr")),
+                            # Explicitly measured global grad norm before clipping for this update.
+                            "pre_clip_global_grad_norm": pre_clip_global_grad_norm,
+                            # Best-effort post-clip norm captured after optimizer.step() and before zero_grad().
+                            "post_clip_global_grad_norm": post_clip_global_grad_norm,
+                            # Sample IDs/paths used by this optimizer update (across accumulation microbatches).
+                            "update_microbatch_sample_ids": current_update_sample_ids,
+                            "update_flat_sample_ids": flat_update_sample_ids,
+                            "update_flat_sample_count": int(len(flat_update_sample_ids)),
+                        }
+                        train_stats_record.update(pending_train_stats)
+                        append_training_debug_jsonl(exp_dir, train_stats_record)
+                    
+                    # -- JSONL train_batch snapshot (optional; throttled by eval_every) --
+                    eval_every = cfg.get("eval_every", 0)
+                    batch_eval_this_step = (
+                        eval_every > 0
+                        and (global_step + 1) % accumulation_steps == 0
+                        and actual_update_step % eval_every == 0
+                        and coordinator.is_master()
+                        and use_video == 1
+                        and "psnr" in loss_dict
+                    )
+
+                    # -- plot train reconstruction every log_every steps (fixed train samples: 1 or 3 people) --
+                    log_every_steps = cfg.get("log_every", 10)
+                    plot_reconstruction = (
+                        (global_step + 1) % accumulation_steps == 0
+                        and actual_update_step % log_every_steps == 0
+                        and coordinator.is_master()
+                        and use_video == 1
+                    )
+                    if plot_reconstruction:
+                        vis_range = "[-1,1]" if (vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview)) else "[0,1]"
+                        dataset = dataloader.dataset
+                        participants_cfg = getattr(dataset, "participants", None)
+                        # 1 sample if single person; else up to num_reconstruction_vis_samples distinct people
+                        _nrv = int(cfg.get("num_reconstruction_vis_samples", 3))
+                        num_vis = _nrv if (participants_cfg is not None and len(participants_cfg) > 1) else 1
+                        num_vis = min(num_vis, len(dataset))
+                        vis_items = []
+                        if participants_cfg is not None and len(participants_cfg) > 1 and num_vis > 1:
+                            seen_pids = set()
+                            for idx in range(len(dataset)):
+                                sample = dataset[idx]
+                                pt_path = sample.get("path", "")
+                                pid = None
+                                for part in os.path.normpath(pt_path).split(os.sep):
+                                    if len(part) == 4 and part[0] == "p" and part[1:].isdigit():
+                                        pid = part
                                         break
-                            if len(vis_items) < num_vis:
-                                vis_items = [dataset[i] for i in range(num_vis)]
-                            n_vis = len(vis_items)
-                            vis_batch = default_collate(vis_items[:n_vis])
-                            x_vis = vis_batch["video"].to(device, dtype)
-                            x_vis = apply_train_bucket_spatiotemporal(x_vis, cfg)
+                                if pid is None or pid in seen_pids:
+                                    continue
+                                seen_pids.add(pid)
+                                vis_items.append(sample)
+                                if len(vis_items) >= num_vis:
+                                    break
+                        if len(vis_items) < num_vis:
+                            vis_items = [dataset[i] for i in range(num_vis)]
+                        n_vis = len(vis_items)
+                        vis_batch = default_collate(vis_items[:n_vis])
+                        x_vis = vis_batch["video"].to(device, dtype)
+                        x_vis = apply_train_bucket_spatiotemporal(x_vis, cfg)
+                        if vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview):
+                            x_vis = x_vis * 2.0 - 1.0
+                        with torch.no_grad():
+                            x_rec_vis, _, _ = model(x_vis)
+                        vis_images = create_visualization_grid(x_vis, x_rec_vis, num_samples=n_vis, value_range=vis_range)
+                        loss_dict["reconstruction_samples"] = vis_images
+                        # Also plot val/test reconstructions every log_every when val_dataset exists
+                        if val_dataset is not None and len(val_dataset) > 0:
+                            n_val = min(int(cfg.get("num_reconstruction_vis_samples", 3)), len(val_dataset))
+                            val_items = [val_dataset[i] for i in range(n_val)]
+                            val_batch = default_collate(val_items)
+                            x_val = val_batch["video"].to(device, dtype)
+                            x_val = apply_train_bucket_spatiotemporal(x_val, cfg)
                             if vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview):
-                                x_vis = x_vis * 2.0 - 1.0
+                                x_val = x_val * 2.0 - 1.0
                             with torch.no_grad():
-                                x_rec_vis, _, _ = model(x_vis)
-                            vis_images = create_visualization_grid(x_vis, x_rec_vis, num_samples=n_vis, value_range=vis_range)
-                            loss_dict["reconstruction_samples"] = vis_images
-                            # Also plot val/test reconstructions every log_every when val_dataset exists
-                            if val_dataset is not None and len(val_dataset) > 0:
-                                n_val = min(3, len(val_dataset))
-                                val_items = [val_dataset[i] for i in range(n_val)]
-                                val_batch = default_collate(val_items)
-                                x_val = val_batch["video"].to(device, dtype)
-                                x_val = apply_train_bucket_spatiotemporal(x_val, cfg)
-                                if vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview):
-                                    x_val = x_val * 2.0 - 1.0
-                                with torch.no_grad():
-                                    x_rec_val, _, _ = model(x_val)
-                                val_vis_images = create_visualization_grid(x_val, x_rec_val, num_samples=n_val, value_range=vis_range)
-                                loss_dict["val_reconstruction_samples"] = val_vis_images
+                                x_rec_val, _, _ = model(x_val)
+                            val_vis_images = create_visualization_grid(x_val, x_rec_val, num_samples=n_val, value_range=vis_range)
+                            loss_dict["val_reconstruction_samples"] = val_vis_images
 
                     # == loss: discriminator adversarial ==
                     if use_discriminator:
                         real_input = x.detach()
                         fake_input = x_rec.detach()
-                        if is_multiview and view_flatten_in_disc:
+                        if disc_per_frame_2d:
+                            if real_input.dim() == 6:
+                                b, v, c, t, h, w = real_input.shape
+                                real_input = real_input.reshape(b * v * t, c, h, w)
+                                fake_input = fake_input.reshape(b * v * t, c, h, w)
+                            elif real_input.dim() == 5:
+                                b, c, t, h, w = real_input.shape
+                                real_input = real_input.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
+                                fake_input = fake_input.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
+                        elif is_multiview and not disc_per_frame_2d:
                             b, v, c, t, h, w = real_input.shape
-                            real_input = real_input.view(b * v, c, t, h, w)
-                            fake_input = fake_input.view(b * v, c, t, h, w)
+                            if disc_multiview_mode == "joint_4d":
+                                pass
+                            elif disc_multiview_mode == "stack_channels":
+                                real_input = real_input.reshape(b, v * c, t, h, w)
+                                fake_input = fake_input.reshape(b, v * c, t, h, w)
+                            elif disc_multiview_mode == "flatten_batch":
+                                if view_flatten_in_disc:
+                                    real_input = real_input.view(b * v, c, t, h, w)
+                                    fake_input = fake_input.view(b * v, c, t, h, w)
+                                else:
+                                    raise ValueError(
+                                        "disc_multiview_mode='flatten_batch' requires view_flatten_in_disc=True, "
+                                        "or use stack_channels / joint_4d with view_flatten_in_disc=False."
+                                    )
+                            else:
+                                raise ValueError(
+                                    f"Unknown disc_multiview_mode={disc_multiview_mode!r} "
+                                    "(use flatten_batch, stack_channels, or joint_4d)."
+                                )
                         real_logits = discriminator(real_input.contiguous())
                         fake_logits = discriminator(fake_input.contiguous())
                         disc_loss = discriminator_loss_fn(
@@ -1710,10 +2647,66 @@ def main():
 
                         # log
                         log_loss("disc", disc_loss, loss_dict, use_video)
+                        # if (
+                        #     coordinator.is_master()
+                        #     and (global_step + 1) % accumulation_steps == 0
+                        #     and actual_update_step % 100 == 0
+                        #     and g_adv_loss is not None
+                        #     and adaptive_w is not None
+                        # ):
+                        #     print("g_adv_loss:", g_adv_loss.item())
+                        #     print("d_loss:", disc_loss.item())
+                        #     print("adaptive_weight:", adaptive_w.item())
+
+                    # Persist train-batch metrics + loss snapshot (after disc, so loss_dict is complete)
+                    if batch_eval_this_step:
+                        _keys = (
+                            "all",
+                            "nll",
+                            "nll_rec",
+                            "nll_per",
+                            "kl",
+                            "view_loss",
+                            "gen",
+                            "gen_w",
+                            "disc",
+                        )
+                        def _loss_item(v):
+                            if v is None:
+                                return None
+                            return float(v.item()) if hasattr(v, "item") else float(v)
+
+                        losses_snapshot = {
+                            k: _loss_item(loss_dict[k]) for k in _keys if k in loss_dict and loss_dict[k] is not None
+                        }
+                        append_eval_metrics_jsonl(
+                            exp_dir,
+                            {
+                                "kind": "train_batch",
+                                "actual_update_step": int(actual_update_step),
+                                "global_step": int(global_step),
+                                "epoch": int(epoch),
+                                "metrics": {
+                                    "psnr": float(loss_dict["psnr"]),
+                                    "ssim": float(loss_dict["ssim"]),
+                                    "mse": float(loss_dict["mse"]),
+                                },
+                                "losses": losses_snapshot,
+                                "loss_config": _loss_config_dict(cfg),
+                            },
+                        )
 
                     # Wall-clock for full training iteration (generator ± discriminator paths)
                     step_time = time.time() - step_start_time
                     timing_stats["total_step"].append(step_time)
+
+                    if dist.is_initialized() and dist.get_world_size() > 1:
+                        _sync_stop = torch.zeros(1, dtype=torch.int32, device=device)
+                        if coordinator.is_master():
+                            _sync_stop[0] = 1 if early_stop_requested else 0
+                        dist.broadcast(_sync_stop, src=0)
+                        early_stop_requested = bool(_sync_stop.item())
+
                     if (
                         _log_step_time_once
                         and not _step_time_bench_done
@@ -1787,6 +2780,7 @@ def main():
                                         "epoch": epoch,
                                         "epoch_float": epoch_float,
                                         "lr": optimizer.param_groups[0]["lr"],
+                                        "train/use_video": int(use_video),
                                         # Average losses over log_every steps
                                         "loss/total": avg_loss["all"],
                                         "loss/nll": avg_loss.get("nll", 0.0),
@@ -1795,6 +2789,12 @@ def main():
                                         "loss/kl": avg_loss.get("kl", 0.0),
                                         "global_grad_norm": optimizer.get_grad_norm(),
                                     }
+                                
+                                # Discriminator / GAN losses (only when enabled)
+                                if use_discriminator:
+                                    wandb_log_dict["loss/disc"] = avg_loss.get("disc", 0.0)
+                                    wandb_log_dict["loss/gen"] = avg_loss.get("gen", 0.0)
+                                    wandb_log_dict["loss/gen_w"] = avg_loss.get("gen_w", 0.0)
 
                                 # Add timing stats to wandb - super useful for bottleneck analysis!
                                 # You can plot these in wandb to see which operation takes the most time
@@ -1810,11 +2810,11 @@ def main():
                                             if timing_stats["memory_reserved"] else 0
                                         )
                                 
-                                # Add reconstruction metrics if computed
+                                # Train-batch recon metrics (current minibatch only; full eval uses eval/* keys)
                                 if "psnr" in loss_dict:
-                                    wandb_log_dict["metrics/psnr"] = loss_dict["psnr"]
-                                    wandb_log_dict["metrics/ssim"] = loss_dict["ssim"]
-                                    wandb_log_dict["metrics/mse"] = loss_dict["mse"]
+                                    wandb_log_dict["train_batch/psnr"] = loss_dict["psnr"]
+                                    wandb_log_dict["train_batch/ssim"] = loss_dict["ssim"]
+                                    wandb_log_dict["train_batch/mse"] = loss_dict["mse"]
                                 
                                 # Add visualizations if available (train + val so both appear in Media)
                                 if "reconstruction_samples" in loss_dict:
@@ -1833,135 +2833,190 @@ def main():
                                     if len(timing_stats[key]) > 100:
                                         timing_stats[key] = timing_stats[key][-100:]
 
-                        # == checkpoint saving ==
-                        ckpt_every = cfg.get("ckpt_every", 0)
-                        if ckpt_every > 0 and actual_update_step % ckpt_every == 0:
-                            # mannually garbage collection
-                            gc.collect()
+                        # -- periodic full evaluation (runs even when save_ckpt is False) --
+                        full_eval_every = cfg.get("full_eval_every", 0)
+                        if (
+                            full_eval_every > 0
+                            and actual_update_step % full_eval_every == 0
+                            and coordinator.is_master()
+                        ):
+                            eval_ds = val_dataset if val_dataset is not None else dataset
+                            eval_ds_label = "val" if val_dataset is not None else "train"
+                            logger.info("Running full evaluation at step %s (%s)...", actual_update_step, eval_ds_label)
 
-                            # Disable async_io if tensornvme is not available to avoid AsyncFileWriter errors
-                            # ColossalAI tries to use AsyncFileWriter even when async_io is enabled, causing errors
-                            # if tensornvme is not installed
-                            use_async_io = False  # Set to False to avoid AsyncFileWriter dependency
-                            
-                            save_dir = checkpoint_io.save(
-                                booster,
+                            eval_model = model
+                            eval_dataloader, _ = prepare_dataloader(
+                                bucket_config=cfg.get("bucket_config", None),
+                                num_bucket_build_workers=cfg.get("num_bucket_build_workers", 1),
+                                dataset=eval_ds,
+                                batch_size=cfg.get("eval_batch_size", cfg.get("batch_size", 4)),
+                                num_workers=cfg.get("num_workers", 4),
+                                seed=cfg.get("seed", 1024) + 9999,
+                                shuffle=True,
+                                drop_last=False,
+                                pin_memory=True,
+                                process_group=get_data_parallel_group(),
+                                prefetch_factor=cfg.get("prefetch_factor", None),
+                                cache_pin_memory=False,
+                                **_persistent_dl_extras,
+                            )
+                            eval_val_range = cfg.get("vae_target_range") or (
+                                "[-1,1]" if cfg.model.get("type") == "multiview_wan_video_vae" else "[0,1]"
+                            )
+                            eval_results = evaluate_model(
+                                eval_model,
+                                eval_dataloader,
+                                device,
+                                dtype,
+                                num_eval_samples=cfg.get("eval_num_samples", 32),
+                                view_flatten_in_loss=view_flatten_in_loss,
+                                use_ema=(ema is not None and cfg.get("eval_use_ema", True)),
+                                value_range=eval_val_range,
+                                train_target_hw=cfg.get("train_target_hw"),
+                                train_target_frames=cfg.get("train_target_frames"),
+                                vis_max_samples=cfg.get("num_reconstruction_vis_samples", 3),
+                            )
+                            eval_metrics = eval_results["metrics"]
+                            logger.info(
+                                "Evaluation (%s) - PSNR: %.2f ± %.2f, SSIM: %.4f ± %.4f, MSE: %.6f ± %.6f",
+                                eval_ds_label,
+                                eval_metrics["psnr_mean"],
+                                eval_metrics["psnr_std"],
+                                eval_metrics["ssim_mean"],
+                                eval_metrics["ssim_std"],
+                                eval_metrics["mse_mean"],
+                                eval_metrics["mse_std"],
+                            )
+                            append_eval_metrics_jsonl(
                                 exp_dir,
-                                model=model,
-                                ema=ema,
-                                optimizer=optimizer,
-                                lr_scheduler=lr_scheduler,
-                                sampler=sampler,
-                                epoch=epoch,
-                                step=step + 1,
-                                global_step=global_step + 1,
-                                batch_size=cfg.get("batch_size", None),
-                                actual_update_step=actual_update_step,
-                                ema_shape_dict=ema_shape_dict,
-                                async_io=use_async_io,
+                                {
+                                    "kind": "full_eval",
+                                    "split": eval_ds_label,
+                                    "actual_update_step": int(actual_update_step),
+                                    "global_step": int(global_step),
+                                    "epoch": int(epoch),
+                                    "metrics": {
+                                        "psnr_mean": float(eval_metrics["psnr_mean"]),
+                                        "psnr_std": float(eval_metrics["psnr_std"]),
+                                        "ssim_mean": float(eval_metrics["ssim_mean"]),
+                                        "ssim_std": float(eval_metrics["ssim_std"]),
+                                        "mse_mean": float(eval_metrics["mse_mean"]),
+                                        "mse_std": float(eval_metrics["mse_std"]),
+                                    },
+                                    "loss_config": _loss_config_dict(cfg),
+                                },
                             )
-
-                            if use_discriminator:
-                                booster.save_model(discriminator, os.path.join(save_dir, "discriminator"), shard=True)
-                                booster.save_optimizer(
-                                    disc_optimizer,
-                                    os.path.join(save_dir, "disc_optimizer"),
-                                    shard=True,
-                                    size_per_shard=4096,
-                                )
-                                if disc_lr_scheduler is not None:
-                                    booster.save_lr_scheduler(
-                                        disc_lr_scheduler, os.path.join(save_dir, "disc_lr_scheduler")
-                                    )
-                            dist.barrier()
-
-                            logger.info(
-                                "Saved checkpoint at epoch %s, step %s, global_step %s to %s",
-                                epoch,
-                                step + 1,
-                                actual_update_step,
-                                save_dir,
-                            )
-
-                            # remove old checkpoints
-                            rm_checkpoints(exp_dir, keep_n_latest=cfg.get("keep_n_latest", -1))
-                            logger.info(
-                                "Removed old checkpoints and kept %s latest ones.", cfg.get("keep_n_latest", -1)
-                            )
-                            
-                            # -- periodic full evaluation --
-                            # Run a more comprehensive evaluation pass periodically to get
-                            # better statistics than single-batch metrics. This evaluates
-                            # over multiple samples to get more reliable metrics.
-                            full_eval_every = cfg.get("full_eval_every", 0)  # 0 means disabled
-                            if (
-                                full_eval_every > 0
-                                and actual_update_step % full_eval_every == 0
-                                and coordinator.is_master()
-                            ):
-                                # Evaluate on held-out val data when present, else on train dataset
-                                eval_ds = val_dataset if val_dataset is not None else dataset
-                                eval_ds_label = "val" if val_dataset is not None else "train"
-                                logger.info("Running full evaluation at step %s (%s)...", actual_update_step, eval_ds_label)
-                                
-                                eval_model = model
-                                eval_dataloader, _ = prepare_dataloader(
-                                    bucket_config=cfg.get("bucket_config", None),
-                                    num_bucket_build_workers=cfg.get("num_bucket_build_workers", 1),
-                                    dataset=eval_ds,
-                                    batch_size=cfg.get("eval_batch_size", cfg.get("batch_size", 4)),
-                                    num_workers=cfg.get("num_workers", 4),
-                                    seed=cfg.get("seed", 1024) + 9999,
-                                    shuffle=True,
-                                    drop_last=False,
-                                    pin_memory=True,
-                                    process_group=get_data_parallel_group(),
-                                    prefetch_factor=cfg.get("prefetch_factor", None),
-                                    cache_pin_memory=False,
-                                )
-                                eval_val_range = cfg.get("vae_target_range") or ("[-1,1]" if cfg.model.get("type") == "multiview_wan_video_vae" else "[0,1]")
-                                eval_results = evaluate_model(
-                                    eval_model,
-                                    eval_dataloader,
-                                    device,
-                                    dtype,
-                                    num_eval_samples=cfg.get("eval_num_samples", 32),
-                                    view_flatten_in_loss=view_flatten_in_loss,
-                                    use_ema=(ema is not None and cfg.get("eval_use_ema", True)),
-                                    value_range=eval_val_range,
-                                    train_target_hw=cfg.get("train_target_hw"),
-                                    train_target_frames=cfg.get("train_target_frames"),
-                                )
-                                eval_metrics = eval_results["metrics"]
-                                logger.info(
-                                    "Evaluation (%s) - PSNR: %.2f ± %.2f, SSIM: %.4f ± %.4f, MSE: %.6f ± %.6f",
-                                    eval_ds_label,
-                                    eval_metrics["psnr_mean"],
-                                    eval_metrics["psnr_std"],
-                                    eval_metrics["ssim_mean"],
-                                    eval_metrics["ssim_std"],
-                                    eval_metrics["mse_mean"],
-                                    eval_metrics["mse_std"],
-                                )
-                                if cfg.get("wandb", False) and wandb.run is not None:
-                                    prefix = f"eval/{eval_ds_label}"
-                                    log_dict = {
-                                        "global_step": actual_update_step,
-                                        "epoch_float": epoch_float,
-                                        f"{prefix}/psnr_mean": eval_metrics["psnr_mean"],
-                                        f"{prefix}/psnr_std": eval_metrics["psnr_std"],
-                                        f"{prefix}/ssim_mean": eval_metrics["ssim_mean"],
-                                        f"{prefix}/ssim_std": eval_metrics["ssim_std"],
-                                        f"{prefix}/mse_mean": eval_metrics["mse_mean"],
-                                        f"{prefix}/mse_std": eval_metrics["mse_std"],
-                                        f"{prefix}/reconstructions": eval_results["visualizations"],
-                                    }
-                                    if eval_ds_label == "val":
-                                        log_dict["val_reconstructions"] = eval_results["visualizations"]
-                                    wandb.log(log_dict, step=actual_update_step)
+                            if cfg.get("wandb", False) and wandb.run is not None:
+                                prefix = f"eval/{eval_ds_label}"
+                                log_dict = {
+                                    "global_step": actual_update_step,
+                                    "epoch_float": epoch_float,
+                                    f"{prefix}/psnr_mean": eval_metrics["psnr_mean"],
+                                    f"{prefix}/psnr_std": eval_metrics["psnr_std"],
+                                    f"{prefix}/ssim_mean": eval_metrics["ssim_mean"],
+                                    f"{prefix}/ssim_std": eval_metrics["ssim_std"],
+                                    f"{prefix}/mse_mean": eval_metrics["mse_mean"],
+                                    f"{prefix}/mse_std": eval_metrics["mse_std"],
+                                    f"{prefix}/reconstructions": eval_results["visualizations"],
+                                }
+                                wandb.log(log_dict, step=actual_update_step)
 
             if cfg.get("profile", False):
                 profiler_ctxt.export_chrome_trace("./log/profile/trace.json")
+        epoch_psnr_mean = float("nan")
+        if epoch_psnr_count > 0:
+            epoch_psnr_mean = epoch_psnr_sum / max(1, epoch_psnr_count)
+            last_epoch_psnr_mean = epoch_psnr_mean
+            train_psnr_bad_for_ckpt = epoch_psnr_mean < train_psnr_guard_threshold
+        if cfg.get("train_psnr_guard", True) and epoch_psnr_count > 0 and not early_stop_requested:
+            monitor_epoch = (epoch + 1) >= (train_psnr_guard_start_epoch + 1)
+            warmup_done = (epoch + 1) >= (train_psnr_guard_start_epoch + train_psnr_guard_min_epochs + 1)
+            if not monitor_epoch or not warmup_done:
+                train_psnr_low_streak = 0
+            else:
+                if epoch_psnr_mean < train_psnr_guard_threshold:
+                    train_psnr_low_streak += 1
+                else:
+                    train_psnr_low_streak = 0
+                if train_psnr_low_streak >= train_psnr_guard_consecutive:
+                    early_stop_requested = True
+                    if coordinator.is_master() and not _psnr_stop_log_once:
+                        _psnr_stop_log_once = True
+                        logger.error(
+                            "Train PSNR guard: %s consecutive epochs with mean train_batch PSNR < %.3f "
+                            "after start epoch %s + warmup %s epochs (epoch_mean=%.3f). "
+                            "Stopping training.",
+                            train_psnr_guard_consecutive,
+                            train_psnr_guard_threshold,
+                            train_psnr_guard_start_epoch,
+                            train_psnr_guard_min_epochs,
+                            epoch_psnr_mean,
+                        )
+        # == checkpoint saving at epoch end (optional; default off via save_ckpt) ==
+        save_ckpt = cfg.get("save_ckpt", False)
+        if save_ckpt and coordinator.is_master():
+            if epoch_psnr_count <= 0:
+                logger.warning(
+                    "Skipping epoch-end checkpoint at epoch %s (no train PSNR samples available).",
+                    epoch,
+                )
+            elif train_psnr_bad_for_ckpt:
+                logger.warning(
+                    "Skipping epoch-end checkpoint at epoch %s due to low epoch-mean train PSNR (%.3f < %.3f).",
+                    epoch,
+                    epoch_psnr_mean,
+                    train_psnr_guard_threshold,
+                )
+            else:
+                gc.collect()
+                use_async_io = False
+                save_dir = checkpoint_io.save(
+                    booster,
+                    exp_dir,
+                    model=model,
+                    ema=ema,
+                    optimizer=optimizer,
+                    lr_scheduler=lr_scheduler,
+                    sampler=sampler,
+                    epoch=epoch,
+                    step=step + 1,
+                    global_step=global_step + 1,
+                    batch_size=cfg.get("batch_size", None),
+                    actual_update_step=actual_update_step,
+                    ema_shape_dict=ema_shape_dict,
+                    async_io=use_async_io,
+                )
+
+                if use_discriminator:
+                    booster.save_model(discriminator, os.path.join(save_dir, "discriminator"), shard=True)
+                    booster.save_optimizer(
+                        disc_optimizer,
+                        os.path.join(save_dir, "disc_optimizer"),
+                        shard=True,
+                        size_per_shard=4096,
+                    )
+                    if disc_lr_scheduler is not None:
+                        booster.save_lr_scheduler(
+                            disc_lr_scheduler, os.path.join(save_dir, "disc_lr_scheduler")
+                        )
+                dist.barrier()
+                last_saved_ckpt_epoch = epoch
+
+                logger.info(
+                    "Saved epoch-end checkpoint at epoch %s, step %s, global_step %s (epoch_mean_psnr=%.3f) to %s",
+                    epoch,
+                    step + 1,
+                    actual_update_step,
+                    epoch_psnr_mean,
+                    save_dir,
+                )
+
+                keep_n_latest = int(cfg.get("keep_n_latest", 5))
+                rm_checkpoints(exp_dir, keep_n_latest=keep_n_latest)
+                logger.info("Removed old checkpoints and kept %s latest one(s).", keep_n_latest)
+        if early_stop_requested:
+            logger.info("Exited training loop early: epoch-based train_batch PSNR guard (see train_psnr_guard_*).")
+            break
 
         # Reset sampler for next epoch (if it has the reset method)
         if sampler is not None and hasattr(sampler, 'reset'):
@@ -1977,8 +3032,6 @@ def main():
             fixed_epoch_interval > 0
             and ((epoch + 1) % fixed_epoch_interval == 0)
             and coordinator.is_master()
-            and cfg.get("wandb", False)
-            and wandb.run is not None
             and fixed_train_index is not None
         ):
             logger.info(
@@ -1988,7 +3041,6 @@ def main():
             )
             vae_target_range = cfg.get("vae_target_range", None)
 
-            # Fixed train sequence
             train_metrics_pf = evaluate_fixed_sequence_per_frame(
                 model,
                 dataset,
@@ -2000,21 +3052,7 @@ def main():
                 train_target_frames=cfg.get("train_target_frames"),
             )
 
-            wandb_log_pf = {
-                "fixed_seq/name": fixed_seq_name,
-                "fixed_seq/epoch": epoch + 1,
-                "epoch_float": float(epoch + 1),
-                "global_step": actual_update_step,
-            }
-
-            for i, val in enumerate(train_metrics_pf["psnr_per_frame"]):
-                wandb_log_pf[f"fixed_seq/train/psnr_frame_{i}"] = val
-            for i, val in enumerate(train_metrics_pf["ssim_per_frame"]):
-                wandb_log_pf[f"fixed_seq/train/ssim_frame_{i}"] = val
-            for i, val in enumerate(train_metrics_pf["mse_per_frame"]):
-                wandb_log_pf[f"fixed_seq/train/mse_frame_{i}"] = val
-
-            # Fixed val/test sequence (same sequence name where possible)
+            val_metrics_pf = None
             if fixed_val_index is not None and val_dataset is not None:
                 val_metrics_pf = evaluate_fixed_sequence_per_frame(
                     model,
@@ -2026,25 +3064,63 @@ def main():
                     train_target_hw=cfg.get("train_target_hw"),
                     train_target_frames=cfg.get("train_target_frames"),
                 )
-                for i, val in enumerate(val_metrics_pf["psnr_per_frame"]):
-                    wandb_log_pf[f"fixed_seq/val/psnr_frame_{i}"] = val
-                for i, val in enumerate(val_metrics_pf["ssim_per_frame"]):
-                    wandb_log_pf[f"fixed_seq/val/ssim_frame_{i}"] = val
-                for i, val in enumerate(val_metrics_pf["mse_per_frame"]):
-                    wandb_log_pf[f"fixed_seq/val/mse_frame_{i}"] = val
 
-            table = wandb.Table(columns=["frame", "psnr", "ssim", "mse"])
+            fixed_record = {
+                "kind": "fixed_seq",
+                "epoch": int(epoch + 1),
+                "global_step": int(actual_update_step),
+                "sequence_name": fixed_seq_name,
+                "train": {
+                    "psnr_per_frame": train_metrics_pf["psnr_per_frame"],
+                    "ssim_per_frame": train_metrics_pf["ssim_per_frame"],
+                    "mse_per_frame": train_metrics_pf["mse_per_frame"],
+                    "psnr_mean": float(np.mean(train_metrics_pf["psnr_per_frame"])),
+                    "ssim_mean": float(np.mean(train_metrics_pf["ssim_per_frame"])),
+                    "mse_mean": float(np.mean(train_metrics_pf["mse_per_frame"])),
+                },
+                "loss_config": _loss_config_dict(cfg),
+            }
+            if val_metrics_pf is not None:
+                fixed_record["val"] = {
+                    "psnr_per_frame": val_metrics_pf["psnr_per_frame"],
+                    "ssim_per_frame": val_metrics_pf["ssim_per_frame"],
+                    "mse_per_frame": val_metrics_pf["mse_per_frame"],
+                    "psnr_mean": float(np.mean(val_metrics_pf["psnr_per_frame"])),
+                    "ssim_mean": float(np.mean(val_metrics_pf["ssim_per_frame"])),
+                    "mse_mean": float(np.mean(val_metrics_pf["mse_per_frame"])),
+                }
+            append_eval_metrics_jsonl(exp_dir, fixed_record)
 
-            for i in range(len(train_metrics_pf["psnr_per_frame"])):
-                table.add_data(
-                    i,
-                    train_metrics_pf["psnr_per_frame"][i],
-                    train_metrics_pf["ssim_per_frame"][i],
-                    train_metrics_pf["mse_per_frame"][i],
-                )
-
-            wandb_log_pf["fixed_seq/train_metrics"] = table
-            wandb.log(wandb_log_pf, step=actual_update_step)
+            if cfg.get("wandb", False) and wandb.run is not None:
+                table = wandb.Table(columns=["frame", "psnr", "ssim", "mse"])
+                for i in range(len(train_metrics_pf["psnr_per_frame"])):
+                    table.add_data(
+                        i,
+                        train_metrics_pf["psnr_per_frame"][i],
+                        train_metrics_pf["ssim_per_frame"][i],
+                        train_metrics_pf["mse_per_frame"][i],
+                    )
+                wandb_log_pf = {
+                    "fixed_seq/name": fixed_seq_name,
+                    "fixed_seq/epoch": epoch + 1,
+                    "epoch_float": float(epoch + 1),
+                    "global_step": actual_update_step,
+                    "fixed_seq/train/psnr_mean": float(np.mean(train_metrics_pf["psnr_per_frame"])),
+                    "fixed_seq/train/ssim_mean": float(np.mean(train_metrics_pf["ssim_per_frame"])),
+                    "fixed_seq/train/mse_mean": float(np.mean(train_metrics_pf["mse_per_frame"])),
+                    "fixed_seq/train_metrics_table": table,
+                }
+                if val_metrics_pf is not None:
+                    wandb_log_pf["fixed_seq/val/psnr_mean"] = float(
+                        np.mean(val_metrics_pf["psnr_per_frame"])
+                    )
+                    wandb_log_pf["fixed_seq/val/ssim_mean"] = float(
+                        np.mean(val_metrics_pf["ssim_per_frame"])
+                    )
+                    wandb_log_pf["fixed_seq/val/mse_mean"] = float(
+                        np.mean(val_metrics_pf["mse_per_frame"])
+                    )
+                wandb.log(wandb_log_pf, step=actual_update_step)
     
     # =======================================================
     # 6. Final evaluation after training
@@ -2078,6 +3154,7 @@ def main():
                     process_group=get_data_parallel_group(),
                     prefetch_factor=cfg.get("prefetch_factor", None),
                     cache_pin_memory=False,
+                    **_persistent_dl_extras,
                 )
                 final_eval_results = evaluate_model(
                     final_eval_model,
@@ -2090,6 +3167,7 @@ def main():
                     value_range=final_val_range,
                     train_target_hw=cfg.get("train_target_hw"),
                     train_target_frames=cfg.get("train_target_frames"),
+                    vis_max_samples=cfg.get("num_reconstruction_vis_samples", 3),
                 )
                 final_metrics = final_eval_results["metrics"]
                 logger.info("=" * 80)
@@ -2099,6 +3177,23 @@ def main():
                 logger.info("SSIM: %.4f ± %.4f", final_metrics["ssim_mean"], final_metrics["ssim_std"])
                 logger.info("MSE:  %.6f ± %.6f", final_metrics["mse_mean"], final_metrics["mse_std"])
                 logger.info("=" * 80)
+                append_eval_metrics_jsonl(
+                    exp_dir,
+                    {
+                        "kind": "final_eval",
+                        "split": label,
+                        "actual_update_step": int(actual_update_step),
+                        "metrics": {
+                            "psnr_mean": float(final_metrics["psnr_mean"]),
+                            "psnr_std": float(final_metrics["psnr_std"]),
+                            "ssim_mean": float(final_metrics["ssim_mean"]),
+                            "ssim_std": float(final_metrics["ssim_std"]),
+                            "mse_mean": float(final_metrics["mse_mean"]),
+                            "mse_std": float(final_metrics["mse_std"]),
+                        },
+                        "loss_config": _loss_config_dict(cfg),
+                    },
+                )
                 if cfg.get("wandb", False) and wandb.run is not None:
                     prefix = f"final_eval/{label}"
                     final_log = {
@@ -2112,50 +3207,63 @@ def main():
                         f"{prefix}/mse_std": final_metrics["mse_std"],
                         f"{prefix}/reconstructions": final_eval_results["visualizations"],
                     }
-                    if label == "val":
-                        final_log["val_reconstructions"] = final_eval_results["visualizations"]
                     wandb.log(final_log, step=actual_update_step)
             logger.info("Final evaluation complete.")
     
     # =======================================================
-    # 7. Save final checkpoint after training
+    # 7. Save final checkpoint after training (optional)
     # =======================================================
-    # Save the final checkpoint after all training and evaluation is complete
     if coordinator.is_master():
-        logger.info("Saving final checkpoint...")
-        use_async_io = False  # Disable async_io to avoid AsyncFileWriter dependency
-        
-        final_save_dir = checkpoint_io.save(
-            booster,
-            exp_dir,
-            model=model,
-            ema=ema,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-            sampler=sampler,
-            epoch=epoch,
-            step=step + 1,
-            global_step=global_step + 1,
-            batch_size=cfg.get("batch_size", None),
-            actual_update_step=actual_update_step,
-            ema_shape_dict=ema_shape_dict,
-            async_io=use_async_io,
-        )
+        save_ckpt = cfg.get("save_ckpt", False)
+        if save_ckpt and last_saved_ckpt_epoch != epoch and not train_psnr_bad_for_ckpt:
+            logger.info("Saving final checkpoint...")
+            use_async_io = False
 
-        if use_discriminator:
-            booster.save_model(discriminator, os.path.join(final_save_dir, "discriminator"), shard=True)
-            booster.save_optimizer(
-                disc_optimizer,
-                os.path.join(final_save_dir, "disc_optimizer"),
-                shard=True,
-                size_per_shard=4096,
+            final_save_dir = checkpoint_io.save(
+                booster,
+                exp_dir,
+                model=model,
+                ema=ema,
+                optimizer=optimizer,
+                lr_scheduler=lr_scheduler,
+                sampler=sampler,
+                epoch=epoch,
+                step=step + 1,
+                global_step=global_step + 1,
+                batch_size=cfg.get("batch_size", None),
+                actual_update_step=actual_update_step,
+                ema_shape_dict=ema_shape_dict,
+                async_io=use_async_io,
             )
-            if disc_lr_scheduler is not None:
-                booster.save_lr_scheduler(
-                    disc_lr_scheduler, os.path.join(final_save_dir, "disc_lr_scheduler")
+
+            if use_discriminator:
+                booster.save_model(discriminator, os.path.join(final_save_dir, "discriminator"), shard=True)
+                booster.save_optimizer(
+                    disc_optimizer,
+                    os.path.join(final_save_dir, "disc_optimizer"),
+                    shard=True,
+                    size_per_shard=4096,
                 )
-        
-        logger.info(f"Final checkpoint saved to {final_save_dir}")
+                if disc_lr_scheduler is not None:
+                    booster.save_lr_scheduler(
+                        disc_lr_scheduler, os.path.join(final_save_dir, "disc_lr_scheduler")
+                    )
+
+            logger.info("Final checkpoint saved to %s", final_save_dir)
+            keep_n_latest = int(cfg.get("keep_n_latest", 5))
+            rm_checkpoints(exp_dir, keep_n_latest=keep_n_latest)
+            logger.info("Removed old checkpoints and kept %s latest one(s).", keep_n_latest)
+        else:
+            if not save_ckpt:
+                logger.info("Skipping final checkpoint save (save_ckpt=False).")
+            elif last_saved_ckpt_epoch == epoch:
+                logger.info("Skipping final checkpoint save (already saved at epoch end).")
+            elif train_psnr_bad_for_ckpt:
+                logger.info(
+                    "Skipping final checkpoint save due to low epoch-mean train PSNR (last=%.3f, threshold=%.3f).",
+                    last_epoch_psnr_mean,
+                    train_psnr_guard_threshold,
+                )
     
     dist.barrier()
     logger.info("Training complete!")

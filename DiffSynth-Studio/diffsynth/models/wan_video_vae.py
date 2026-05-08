@@ -1381,9 +1381,9 @@ class MultiViewVideoVAE_(nn.Module):
 # NEW
 class CrossViewAttention(nn.Module):
     """
-    Bidirectional cross-attention over flattened spatial-temporal tokens.
+    Bidirectional cross-attention over spatial tokens per time step.
 
-    Expects inputs of shape [B, N_tokens, C] with C=embed_dim.
+    Expects inputs of shape [B, T, N_spatial, C] with C=embed_dim.
     """
 
     def __init__(self, embed_dim=384, num_heads=8):
@@ -1395,23 +1395,30 @@ class CrossViewAttention(nn.Module):
             embed_dim=embed_dim, num_heads=num_heads, batch_first=True
         )
 
-    def forward(self, x0, x1):
-        # x0, x1: [B, N, C]
-        x0_orig, x1_orig = x0, x1
-        x0_n = self.norm(x0)
-        x1_n = self.norm(x1)
-        attn_0, _ = self.attn(x0_n, x1_n, x1_n, need_weights=False)
-        attn_1, _ = self.attn(x1_n, x0_n, x0_n, need_weights=False)
-        x0_enriched = x0_orig + attn_0
-        x1_enriched = x1_orig + attn_1
-        return x0_enriched, x1_enriched
+    def forward(self, tokens_per_view):
+        # tokens_per_view: list[[B, T, N, C]] with arbitrary number of views.
+        if len(tokens_per_view) < 2:
+            return tokens_per_view
+        b, t, n, c = tokens_per_view[0].shape
+        x_stack = torch.stack(tokens_per_view, dim=1)  # [B, V, T, N, C]
+        x_norm = self.norm(x_stack)
+
+        # All-to-all: each view queries the concatenated keys/values from all views.
+        kv = x_norm.permute(0, 2, 1, 3, 4).reshape(b * t, -1, c)  # [B*T, V*N, C]
+        enriched = []
+        for v_idx in range(x_stack.shape[1]):
+            q = x_norm[:, v_idx].reshape(b * t, n, c)
+            attn_v, _ = self.attn(q, kv, kv, need_weights=False)
+            attn_v = attn_v.reshape(b, t, n, c)
+            enriched.append(tokens_per_view[v_idx] + attn_v)
+        return enriched
 
 
 class JointViewAttention(nn.Module):
     """
-    Self-attention over all spatial-temporal tokens from all views in one sequence.
+    Self-attention over both views' spatial tokens per time step.
 
-    Concatenates view tokens to length V*N, runs MHA, splits back (same layout as two-view cross path).
+    Concatenates view tokens to length 2*N at each t, runs MHA, and splits back.
     """
 
     def __init__(self, embed_dim=384, num_heads=8):
@@ -1421,14 +1428,18 @@ class JointViewAttention(nn.Module):
             embed_dim=embed_dim, num_heads=num_heads, batch_first=True
         )
 
-    def forward(self, tokens_0, tokens_1):
-        # tokens_*: [B, N, C]
-        x = torch.cat([tokens_0, tokens_1], dim=1)
+    def forward(self, tokens_per_view):
+        # tokens_per_view: list[[B, T, N, C]] with arbitrary number of views.
+        if len(tokens_per_view) < 2:
+            return tokens_per_view
+        b, t, n, c = tokens_per_view[0].shape
+        x = torch.cat(tokens_per_view, dim=2)  # [B, T, V*N, C]
         x_norm = self.norm(x)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm, need_weights=False)
-        x = x + attn_out
-        tokens_0_out, tokens_1_out = x.chunk(2, dim=1)
-        return tokens_0_out, tokens_1_out
+        x_norm_bt = x_norm.reshape(b * t, x.shape[2], c)
+        attn_out, _ = self.attn(x_norm_bt, x_norm_bt, x_norm_bt, need_weights=False)
+        attn_out = attn_out.reshape(b, t, x.shape[2], c)
+        x_enriched = x + attn_out
+        return list(x_enriched.split(n, dim=2))
 
 
 class LoRAConv3d(nn.Module):
@@ -1464,6 +1475,65 @@ class LoRAConv3d(nn.Module):
         ) else self.base_conv(x)
         lora_out = self.lora_up(self.lora_down(x)) * self.alpha
         return base_out + lora_out
+
+
+class LoRAConv2d(nn.Module):
+    """
+    LoRA adapter for 2D convolutions (e.g. spatial downsample in ``Resample``).
+
+    Base conv is frozen. Low-rank path: 1×1 down → r→r conv with **same** kernel,
+    stride, padding, dilation as ``base_conv`` → 1×1 up, so outputs match ``base_conv(x)``.
+    """
+
+    def __init__(self, base_conv: nn.Conv2d, rank: int = 16, alpha: float = 1.0):
+        super().__init__()
+        assert isinstance(base_conv, nn.Conv2d)
+        self.base_conv = base_conv
+        for p in self.base_conv.parameters():
+            p.requires_grad = False
+
+        in_channels = base_conv.in_channels
+        out_channels = base_conv.out_channels
+        self.rank = rank
+        self.alpha = alpha
+
+        ks = base_conv.kernel_size
+        st = base_conv.stride
+        pad = base_conv.padding
+        dil = base_conv.dilation
+        if isinstance(ks, int):
+            ks = (ks, ks)
+        if isinstance(st, int):
+            st = (st, st)
+        if isinstance(pad, int):
+            pad = (pad, pad)
+        if isinstance(dil, int):
+            dil = (dil, dil)
+
+        if base_conv.groups != 1:
+            raise NotImplementedError(
+                "LoRAConv2d for grouped Conv2d is not implemented; use groups=1."
+            )
+
+        self.lora_down = nn.Conv2d(in_channels, rank, kernel_size=1, bias=False)
+        self.lora_mid = nn.Conv2d(
+            rank,
+            rank,
+            kernel_size=ks,
+            stride=st,
+            padding=pad,
+            dilation=dil,
+            bias=False,
+        )
+        self.lora_up = nn.Conv2d(rank, out_channels, kernel_size=1, bias=False)
+
+        nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.lora_mid.weight, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_up.weight)
+
+    def forward(self, x):
+        h = self.lora_up(self.lora_mid(self.lora_down(x)))
+        return self.base_conv(x) + self.alpha * h
 
 
 class LoRAAttentionBlock(nn.Module):
@@ -1572,6 +1642,11 @@ class AttentionMultiViewVideoVan(nn.Module):
 
     - Input:  [B, 2, 3, T, H, W]
     - Output: fused latent [B, z_dim, T', H', W'] (same as VideoVAE_)
+
+    LoRA placement:
+    - ``use_lora_before``: Encoder3d stem *before* fusion (``encoder.conv1`` + ``encoder.downsamples``),
+      i.e. the per-view path. Additive with ``use_lora_after``.
+    - ``use_lora_after``: ``encoder.middle``, ``encoder.head``, and full ``decoder`` (post-fusion).
     """
 
     def __init__(
@@ -1589,6 +1664,7 @@ class AttentionMultiViewVideoVan(nn.Module):
         use_lora_before: bool = False,
         use_lora_after: bool = True,
         use_viewwise_decoder_lora: bool = False,
+        num_views: int = 2,
     ):
         super().__init__()
         # Back-compat: old name "joint_attention" is the same as "self_attention".
@@ -1607,6 +1683,7 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.use_lora_before = use_lora_before
         self.use_lora_after = use_lora_after
         self.use_viewwise_decoder_lora = use_viewwise_decoder_lora
+        self.num_views = int(num_views)
 
         # Reuse the standard encoder/decoder stacks
         self.encoder = Encoder3d(
@@ -1618,12 +1695,11 @@ class AttentionMultiViewVideoVan(nn.Module):
             dim, z_dim, dim_mult, num_res_blocks, attn_scales, self.temperal_upsample, dropout
         )
 
-        # Learnable per-view embeddings for view-conditioned decoding
-        # We currently support exactly 2 views: indices {0, 1}.
-        self.view_embed = nn.Embedding(2, z_dim)
+        # Learnable per-view embeddings for view-conditioned decoding.
+        self.view_embed = nn.Embedding(self.num_views, z_dim)
 
         bottleneck_channels = dim * dim_mult[-1]
-        fused_channels = bottleneck_channels * 2  # concatenated along channels (2 views)
+        fused_channels = bottleneck_channels * self.num_views  # concatenated along channels
 
         # Fusion modules at feature level (after downsamples, before bottleneck middle/head).
         self.cross_attn = None
@@ -1631,6 +1707,11 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.view_conv_fuse = None
         self.view_conv_norm = None
         self.view_conv_act = None
+        self.conv4d_spatial = None
+        self.conv4d_temporal = None
+        self.conv4d_view = None
+        self.conv4d_norm = None
+        self.conv4d_act = None
         self.fusion_resblock1 = None
         self.fusion_resblock2 = None
 
@@ -1651,22 +1732,41 @@ class AttentionMultiViewVideoVan(nn.Module):
             self.view_conv_act = nn.SiLU()
             self.fusion_resblock1 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
             self.fusion_resblock2 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
+        elif fusion_mode == "conv4d":
+            # Factorized 4D fusion:
+            # (B,C,T,V,H,W) -> spatial Conv2d over (H,W), then temporal Conv3d over (T,H,W),
+            # then view Conv3d over (V,H,W) to compress V -> 1.
+            self.conv4d_spatial = nn.Conv2d(bottleneck_channels, bottleneck_channels, kernel_size=3, padding=1)
+            self.conv4d_temporal = nn.Conv3d(
+                bottleneck_channels, bottleneck_channels, kernel_size=3, padding=1
+            )
+            self.conv4d_view = nn.Conv3d(
+                bottleneck_channels,
+                bottleneck_channels,
+                kernel_size=(self.num_views, 3, 3),
+                padding=(0, 1, 1),
+            )
+            gn_groups = 32 if bottleneck_channels % 32 == 0 else 16
+            self.conv4d_norm = nn.GroupNorm(gn_groups, bottleneck_channels)
+            self.conv4d_act = nn.SiLU()
+            self.fusion_resblock1 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
+            self.fusion_resblock2 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
         else:
             raise ValueError(
                 f"Unsupported fusion_mode={fusion_mode}. "
-                "Use one of: cross_attention, self_attention, conv3d."
+                "Use one of: cross_attention, self_attention, conv3d, conv4d."
             )
 
         # Optional per-view latent LoRA adapters for decoding.
         # These replace additive view embeddings when enabled.
         if self.use_viewwise_decoder_lora:
             self.view_lora_down = nn.ModuleList(
-                [nn.Conv3d(z_dim, lora_rank, kernel_size=1, bias=False) for _ in range(2)]
+                [nn.Conv3d(z_dim, lora_rank, kernel_size=1, bias=False) for _ in range(self.num_views)]
             )
             self.view_lora_up = nn.ModuleList(
-                [nn.Conv3d(lora_rank, z_dim, kernel_size=1, bias=False) for _ in range(2)]
+                [nn.Conv3d(lora_rank, z_dim, kernel_size=1, bias=False) for _ in range(self.num_views)]
             )
-            for i in range(2):
+            for i in range(self.num_views):
                 nn.init.kaiming_uniform_(self.view_lora_down[i].weight, a=math.sqrt(5))
                 nn.init.zeros_(self.view_lora_up[i].weight)
         else:
@@ -1679,7 +1779,8 @@ class AttentionMultiViewVideoVan(nn.Module):
 
     def _enable_lora(self):
         # Helpers to recursively wrap conv and attention modules with LoRA
-        def wrap_conv3d_with_lora(module: nn.Module):
+        def wrap_conv_with_lora(module: nn.Module):
+            """Wrap CausalConv3d / Conv3d / Conv2d in the subtree (incl. Resample spatial convs)."""
             for name, child in list(module.named_children()):
                 if isinstance(child, (CausalConv3d, nn.Conv3d)):
                     setattr(
@@ -1687,8 +1788,14 @@ class AttentionMultiViewVideoVan(nn.Module):
                         name,
                         LoRAConv3d(child, rank=self.lora_rank, alpha=1.0),
                     )
+                elif isinstance(child, nn.Conv2d):
+                    setattr(
+                        module,
+                        name,
+                        LoRAConv2d(child, rank=self.lora_rank, alpha=1.0),
+                    )
                 else:
-                    wrap_conv3d_with_lora(child)
+                    wrap_conv_with_lora(child)
 
         def wrap_attn_with_lora(module: nn.Module):
             for name, child in list(module.named_children()):
@@ -1701,42 +1808,30 @@ class AttentionMultiViewVideoVan(nn.Module):
                 else:
                     wrap_attn_with_lora(child)
 
-        # "Before" LoRA: newly introduced fusion modules.
+        # "Before" LoRA: shared Encoder3d stem used *before* view fusion (conv1 + downsamples per view).
+        # This is additive to "after" (middle/head/decoder), not "LoRA on fusion blocks".
         if self.use_lora_before:
-            if self.cross_attn is not None and hasattr(self.cross_attn, "attn"):
-                # Wrap cross-view MHA projections via LoRA on qkv/proj path is non-trivial here;
-                # we keep cross_attn as-is and LoRA the downstream fusion ResBlocks.
-                pass
-            if self.joint_attn is not None and hasattr(self.joint_attn, "attn"):
-                pass
-            if self.view_conv_fuse is not None:
-                self.view_conv_fuse = LoRAConv3d(
-                    self.view_conv_fuse, rank=self.lora_rank, alpha=1.0
-                )
-            if self.fusion_resblock1 is not None:
-                wrap_conv3d_with_lora(self.fusion_resblock1)
-            if self.fusion_resblock2 is not None:
-                wrap_conv3d_with_lora(self.fusion_resblock2)
+            self.encoder.conv1 = LoRAConv3d(
+                self.encoder.conv1, rank=self.lora_rank, alpha=1.0
+            )
+            wrap_conv_with_lora(self.encoder.downsamples)
+            wrap_attn_with_lora(self.encoder.downsamples)
 
-        # "After" LoRA: bottleneck middle/head and full decoder.
+        # "After" LoRA: bottleneck middle/head and full decoder (post-fusion path + decode).
         if self.use_lora_after:
             wrap_attn_with_lora(self.encoder.middle)
-            wrap_conv3d_with_lora(self.encoder.middle)
-            wrap_conv3d_with_lora(self.encoder.head)
-            wrap_conv3d_with_lora(self.decoder)
+            wrap_conv_with_lora(self.encoder.middle)
+            wrap_conv_with_lora(self.encoder.head)
+            wrap_conv_with_lora(self.decoder)
             wrap_attn_with_lora(self.decoder)
 
     def encode(self, x, scale):
         """
-        x: [B, 2, 3, T, H, W]
+        x: [B, V, 3, T, H, W]
         Returns: mu [B, z_dim, T', H', W']
         """
         b, v, c, t, h, w = x.shape
-        assert v == 2, f"MultiViewVideoVan expects exactly 2 views, got {v}"
-
-        # Split views
-        x0 = x[:, 0]
-        x1 = x[:, 1]
+        assert v == self.num_views, f"AttentionMultiViewVideoVan expects {self.num_views} views, got {v}"
 
         # We do not use encoder.forward; manually unroll conv1 + downsamples
         def run_down_path(x_in):
@@ -1747,44 +1842,39 @@ class AttentionMultiViewVideoVan(nn.Module):
                 x_out = layer(x_out)
             return x_out
 
-        feat_0 = run_down_path(x0)  # [B, C=384, T'=1, H'=16, W'=16]
-        feat_1 = run_down_path(x1)
+        feats = [run_down_path(x[:, i]) for i in range(v)]
 
-        # Flatten to tokens: [B, 256, 384]
+        # Keep time explicit for attention: [B, T', (H'*W'), C]
         def flatten_feat(feat):
-            b, c, t2, h2, w2 = feat.shape
-            tokens = rearrange(feat, "b c t h w -> b (t h w) c")
+            _, _, _, h2, w2 = feat.shape
+            tokens = rearrange(feat, "b c t h w -> b t (h w) c")
             return tokens
 
-        tokens_0 = flatten_feat(feat_0)
-        tokens_1 = flatten_feat(feat_1)
+        tokens_per_view = [flatten_feat(feat) for feat in feats]
 
         # Back to [B, C, T', H', W']
         def unflatten_tokens(tokens):
-            b, n, c = tokens.shape
+            b, t2, n, c = tokens.shape
             # Recover grid from feat_0 shape instead of hardcoding
-            _, _, t2, h2, w2 = feat_0.shape
-            assert n == t2 * h2 * w2, "Token count mismatch when unflattening"
-            return rearrange(tokens, "b (t h w) c -> b c t h w", t=t2, h=h2, w=w2)
+            _, _, _, h2, w2 = feats[0].shape
+            assert n == h2 * w2, "Token count mismatch when unflattening"
+            return rearrange(tokens, "b t (h w) c -> b c t h w", h=h2, w=w2)
 
         if self.fusion_mode == "cross_attention":
-            tokens_0_enriched, tokens_1_enriched = self.cross_attn(tokens_0, tokens_1)
-            feat_0_enriched = unflatten_tokens(tokens_0_enriched)
-            feat_1_enriched = unflatten_tokens(tokens_1_enriched)
-            # [B, 2C, T', H', W'] -> [B, C, T', H', W']
-            fused = torch.cat([feat_0_enriched, feat_1_enriched], dim=1)
+            tokens_enriched = self.cross_attn(tokens_per_view)
+            feats_enriched = [unflatten_tokens(tok) for tok in tokens_enriched]
+            fused = torch.cat(feats_enriched, dim=1)
             fused = self.fusion_resblock1(fused)
             fused = self.fusion_resblock2(fused)
         elif self.fusion_mode == "self_attention":
-            tokens_0_enriched, tokens_1_enriched = self.joint_attn(tokens_0, tokens_1)
-            feat_0_enriched = unflatten_tokens(tokens_0_enriched)
-            feat_1_enriched = unflatten_tokens(tokens_1_enriched)
-            fused = torch.cat([feat_0_enriched, feat_1_enriched], dim=1)
+            tokens_enriched = self.joint_attn(tokens_per_view)
+            feats_enriched = [unflatten_tokens(tok) for tok in tokens_enriched]
+            fused = torch.cat(feats_enriched, dim=1)
             fused = self.fusion_resblock1(fused)
             fused = self.fusion_resblock2(fused)
-        else:
+        elif self.fusion_mode == "conv3d":
             # conv3d fusion
-            fused = torch.cat([feat_0, feat_1], dim=1)  # [B,2C,T',H',W']
+            fused = torch.cat(feats, dim=1)  # [B,V*C,T',H',W']
             fused = self.view_conv_fuse(fused)
             # GroupNorm expects 4D; apply per-time slice.
             b2, c2, t2, h2, w2 = fused.shape
@@ -1792,6 +1882,39 @@ class AttentionMultiViewVideoVan(nn.Module):
             fused_2d = self.view_conv_norm(fused_2d)
             fused_2d = self.view_conv_act(fused_2d)
             fused = fused_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
+            fused = self.fusion_resblock1(fused)
+            fused = self.fusion_resblock2(fused)
+        else:
+            # conv4d fusion (factorized): spatial -> temporal -> view compression.
+            # Start from [B,C,T,V,H,W] for explicit view axis processing.
+            x_4d = torch.stack(feats, dim=3)
+            b2, c2, t2, v2, h2, w2 = x_4d.shape
+            assert v2 == self.num_views, f"conv4d expected {self.num_views} views, got {v2}"
+
+            # Spatial 2D conv: (B,V,T,C,H,W) -> (B*V*T,C,H,W)
+            x_spatial = x_4d.permute(0, 3, 2, 1, 4, 5).reshape(b2 * v2 * t2, c2, h2, w2)
+            x_spatial = self.conv4d_spatial(x_spatial)
+            x_spatial = self.conv4d_norm(x_spatial)
+            x_spatial = self.conv4d_act(x_spatial)
+            x_spatial = x_spatial.view(b2, v2, t2, c2, h2, w2).permute(0, 1, 3, 2, 4, 5).contiguous()
+
+            # Temporal 3D conv on (T,H,W): (B*V,C,T,H,W)
+            x_temporal = x_spatial.reshape(b2 * v2, c2, t2, h2, w2)
+            x_temporal = self.conv4d_temporal(x_temporal)
+            x_temporal_2d = x_temporal.permute(0, 2, 1, 3, 4).reshape(b2 * v2 * t2, c2, h2, w2)
+            x_temporal_2d = self.conv4d_norm(x_temporal_2d)
+            x_temporal_2d = self.conv4d_act(x_temporal_2d)
+            x_temporal = x_temporal_2d.view(b2 * v2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
+            x_temporal = x_temporal.view(b2, v2, c2, t2, h2, w2)
+
+            # View 3D conv on (V,H,W): (B*T,C,V,H,W), then squeeze V from 2 -> 1.
+            x_view = x_temporal.permute(0, 3, 2, 1, 4, 5).reshape(b2 * t2, c2, v2, h2, w2)
+            x_view = self.conv4d_view(x_view)
+            x_view_2d = x_view.permute(0, 2, 1, 3, 4).reshape(b2 * t2, c2, h2, w2)
+            x_view_2d = self.conv4d_norm(x_view_2d)
+            x_view_2d = self.conv4d_act(x_view_2d)
+            fused = x_view_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
+
             fused = self.fusion_resblock1(fused)
             fused = self.fusion_resblock2(fused)
 
@@ -1828,6 +1951,8 @@ class AttentionMultiViewVideoVan(nn.Module):
         z: [B, z_dim, T', H', W']
         Returns: reconstruction [B, 3, T, H, W]
         """
+        if not (0 <= view_idx < self.num_views):
+            raise IndexError(f"view_idx={view_idx} out of range for num_views={self.num_views}")
         if self.use_viewwise_decoder_lora:
             # Apply view-specific low-rank latent modulation instead of embeddings.
             lora_delta = self.view_lora_up[view_idx](self.view_lora_down[view_idx](z))

@@ -74,19 +74,30 @@ def merge_args(cfg: Config, args: argparse.Namespace) -> Config:
         k_split = k.split(".")
         target = cfg
         for key in k_split[:-1]:
-            assert key in cfg, f"Key {key} not found in config"
+            assert key in target, f"Key {key} not found in config"
             target = target[key]
+        leaf = k_split[-1]
         if v.lower() == "none":
             v = None
-        elif k in target:
-            v_type = type(target[k])
-            if v_type == bool:
+        elif leaf in target:
+            cur_v = target[leaf]
+            v_type = type(cur_v)
+            if cur_v is None:
+                # Keep CLI overrides working for optional config keys that default to None
+                # (e.g. wandb_expr_name, custom optional knobs).
                 v = auto_convert(v)
+            elif v_type == bool:
+                v = auto_convert(v)
+            elif isinstance(cur_v, dict):
+                # CLI passes a Python literal, e.g. ``--bucket_config "{'128px_ar1:1': {9: (1.0, 1)}}"``
+                v = ast.literal_eval(v)
+            elif isinstance(cur_v, (list, tuple)):
+                v = ast.literal_eval(v)
             else:
-                v = type(target[k])(v)
+                v = v_type(v)
         else:
             v = auto_convert(v)
-        target[k_split[-1]] = v
+        target[leaf] = v
     return cfg
 
 

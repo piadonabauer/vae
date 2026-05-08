@@ -1,0 +1,238 @@
+=== wan_multiview_train_mv4d_loss_sweep task 47/54 idx=46 ===
+wandb_expr_name=sweep_mv4d__perc3p0__d01__k1em7
+experiment_name (outputs dir)=sweep_mv4d__perc3p0__d01__k1em7__job3167885_t47
+epochs=30 bucket_config={'128px_ar1:1':{9:(1.0,1)}}
+Overrides: --discriminator_choice TrainMultiview4D --vae_loss_config.perceptual_loss_weight 3.0 --gen_disc_weight 0.1 --sweep_gen_disc_weight 0.1 --vae_loss_config.kl_loss_weight 1e-7
+Wed Apr 15 08:12:51 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.148.08             Driver Version: 570.148.08     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:65:00.0 Off |                    0 |
+| N/A   28C    P0             55W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_ADDR=127.0.0.1 MASTER_PORT=27932
+DYNAMO_BACKEND=inductor
+Launch attempt 1/3 on port 27932
+[wan_multiview] effective data: epochs=30 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/128-res train_target_hw=(128, 128) train_target_frames=9 bucket_config={'128px_ar1:1': {9: (1.0, 1)}}
+changing outputs/sweep_mv4d__perc3p0__d01__k1em7__job3167885_t47 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 228 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+[step_time] Average wall time over first 10 training steps: 3.2669 s
+[04/15/26 08:20:42] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 08:27:25] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 08:34:05] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 08:40:45] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 08:47:26] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 08:54:10] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:00:50] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:07:33] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:14:17] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:21:00] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:27:44] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:34:28] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:41:11] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:47:55] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 09:54:39] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:01:22] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:08:08] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:14:54] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:21:39] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:28:24] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:35:09] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:41:55] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:48:41] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:55:27] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[04/15/26 10:59:18] INFO     colossalai - colossalai - INFO:                    
+                             /home/piado/.local/lib/python3.11/site-packages/col
+                             ossalai/booster/plugin/low_level_zero_plugin.py:240
+                              save_sharded_optimizer                            
+                    INFO     colossalai - colossalai - INFO: The optimizer is   
+                             going to be split to checkpoint shards. You can    
+                             find where each parameters has been saved in the   
+                             index located at pytorch_optim.bin.index.json.     
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33msweep_mv4d__perc3p0__d01__k1em7__lpdefault_per3.0_kl1e-07_vc0.0_discTrainMultiview4D_gdw0.1[0m at: [34mhttps://wandb.ai/pia-uni/wan_multiview_vae/runs/3xwolbni[0m

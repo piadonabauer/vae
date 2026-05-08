@@ -1,0 +1,89 @@
+{
+  "os": "Linux-6.8.0-54-generic-x86_64-Intel-R-_Xeon-R-_Gold_6338_CPU_@_2.00GHz-with-glibc2.37",
+  "python": "CPython 3.11.5",
+  "startedAt": "2026-03-25T06:36:25.235604Z",
+  "args": [
+    "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py",
+    "--model.use_viewwise_decoder_lora",
+    "True",
+    "--experiment_name",
+    "run2_viewwise_decoder_lora"
+  ],
+  "program": "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py",
+  "git": {
+    "remote": "git@github.com:piadonabauer/vae.git",
+    "commit": "0ada0c67bbde440f15fc917805d420251d5aae97"
+  },
+  "email": "pia.donabauer@campus.lmu.de",
+  "root": "outputs/run2_viewwise_decoder_lora",
+  "host": "kn102",
+  "executable": "/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python",
+  "cpu_count": 64,
+  "cpu_count_logical": 64,
+  "gpu": "NVIDIA L40S",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "33501757440",
+      "used": "8683569152"
+    }
+  },
+  "memory": {
+    "total": "540453687296"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA L40S",
+      "memoryTotal": "48305799168",
+      "cudaCores": 18176,
+      "architecture": "Ada",
+      "uuid": "GPU-f7b4d7c9-2c79-d82e-af87-5188c21d142f"
+    }
+  ],
+  "cudaVersion": "12.8",
+  "slurm": {
+    "array_job_id": "2553890",
+    "array_task_count": "4",
+    "array_task_id": "2",
+    "array_task_max": "4",
+    "array_task_min": "1",
+    "array_task_step": "1",
+    "cluster_name": "killarney",
+    "cpus_on_node": "8",
+    "cpus_per_task": "8",
+    "gpus_on_node": "1",
+    "gtids": "0",
+    "job_account": "aip-lindell",
+    "job_cpus_per_node": "8",
+    "job_end_time": "1774449335",
+    "job_gid": "3156567",
+    "job_gpus": "2",
+    "job_id": "2553892",
+    "job_name": "vae_sweep",
+    "job_nodelist": "kn102",
+    "job_num_nodes": "1",
+    "job_partition": "gpubase_l40s_b2",
+    "job_qos": "normal",
+    "job_start_time": "1774420535",
+    "job_uid": "3156567",
+    "job_user": "piado",
+    "jobid": "2553892",
+    "localid": "0",
+    "mem_per_node": "65536",
+    "nnodes": "1",
+    "nodeid": "0",
+    "nodelist": "kn102",
+    "prio_process": "0",
+    "procid": "0",
+    "script_context": "prolog_task",
+    "submit_dir": "/project/6101839/piado",
+    "submit_host": "klogin04",
+    "task_pid": "448221",
+    "tasks_per_node": "1",
+    "tmpdir": "/tmp",
+    "topology_addr": "ib-core1.ib-leaf2.kn102",
+    "topology_addr_pattern": "switch.switch.node",
+    "tres_per_task": "cpu=8"
+  },
+  "writerId": "iz3s4amweofwu5ng5ubyam3pjyo765u9"
+}

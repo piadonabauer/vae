@@ -1,0 +1,16 @@
+Sequence: EMO-1-shout+laugh
+Camera serial: 220700191
+Resolution: 176x256
+Downsampling: ds256
+Frame indices: [0, 5, 10, 15, 20]
+
+Average PSNR (dB): 42.56781911871532
+Average SSIM: 0.98075084288915
+Average MSE: 5.538848927244544e-05
+
+Per-frame metrics:
+  t=0 idx=0: PSNR=42.3449 dB, SSIM=0.979513, MSE=5.82781e-05
+  t=1 idx=5: PSNR=42.5461 dB, SSIM=0.981116, MSE=5.56409e-05
+  t=2 idx=10: PSNR=42.7218 dB, SSIM=0.98138, MSE=5.34346e-05
+  t=3 idx=15: PSNR=42.6805 dB, SSIM=0.981125, MSE=5.3945e-05
+  t=4 idx=20: PSNR=42.5458 dB, SSIM=0.98062, MSE=5.56439e-05

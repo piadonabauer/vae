@@ -1,15 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=nersemble_preprocess
-#SBATCH --array=0-9
 #SBATCH --gres=gpu:l40s:1
-#SBATCH --cpus-per-task=8
+#SBATCH --array=0-9
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=20:00:00
-#SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --error=logs/%x_%A_%a.err
+#SBATCH --time=05:00:00
+#SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/logs/%x_%A_%a.out
+#SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/logs/%x_%A_%a.err
 
-# Array job: 10 tasks (0-9), each gets 1 GPU. Participants are split across tasks by SLURM_ARRAY_TASK_ID.
-# To use more/fewer GPUs, change --array (e.g. 0-19 for 20 GPUs).
+# GPUs: each array task requests exactly ONE GPU (--gres=gpu:l40s:1). The line --array=0-9
+# launches 10 separate tasks (when the full array runs), so up to 10 GPUs are used in parallel,
+# each running a disjoint chunk of .tar archives. For a single-GPU single job, use e.g.
+#   #SBATCH --array=0-0
+# or submit without array and unset SLURM_ARRAY_TASK_ID (then one task processes all tars).
 
 # Run from the directory where you submitted (sbatch run_preprocess.sh from vae/). SLURM sets SLURM_SUBMIT_DIR.
 VAE_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -19,13 +22,21 @@ mkdir -p logs
 module load StdEnv cuda opencv python scipy-stack
 source "$VAE_DIR/snth/bin/activate"
 
-# Paths (override via env if needed)
-NERSEMBLE_ROOT="${NERSEMBLE_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2/extracted}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2/processed}"
+# --output-root is the *parent*; the script always appends "<image-size>-res" (here: 128-res).
+NERSEMBLE_ROOT="${NERSEMBLE_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames}"
+# Large temp for tar extract; override with TEMP_DIR=... (Compute Canada: often same as $SCRATCH).
+TEMP_DIR="${TEMP_DIR:-${SCRATCH:-/scratch/${USER}}}"
 
-# Each array task sees SLURM_ARRAY_TASK_ID and SLURM_ARRAY_TASK_COUNT; the Python script assigns a chunk of participants to this task.
-srun python data/processing/preprocess_nersemble.py \
+srun python3 /home/piado/projects/aip-lindell/piado/vae/data/processing/preprocess_nersemble.py \
   --nersemble-root "$NERSEMBLE_ROOT" \
+  --from-tars \
   --output-root "$OUTPUT_ROOT" \
   --image-size 128 \
+  --frames 9 \
+  --images-subdir images_fgr \
+  --disable-background-removal \
+  --camera-serials 222200036 220700191 222200037 222200047 \
+  --only-sequences EMO-1-shout+laugh \
+  --temp-dir "$TEMP_DIR" \
   --skip-existing

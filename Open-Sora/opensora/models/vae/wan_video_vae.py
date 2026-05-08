@@ -18,9 +18,31 @@ diffsynth_root = Path(__file__).resolve().parent.parent.parent.parent.parent / "
 if str(diffsynth_root) not in sys.path:
     sys.path.insert(0, str(diffsynth_root))
 
-from diffsynth.models.wan_video_vae import WanVideoVAE, AttentionMultiViewVideoVan
+from diffsynth.models.wan_video_vae import (
+    AttentionMultiViewVideoVan,
+    LoRAAttentionBlock,
+    LoRAConv2d,
+    LoRAConv3d,
+    WanVideoVAE,
+)
 
 from opensora.registry import MODELS
+
+
+def _unfreeze_lora_wrapped_bases(module: nn.Module) -> None:
+    """Enable gradients on frozen base convs/attn inside DiffSynth LoRA wrappers (decoder full finetune)."""
+    for m in module.modules():
+        if isinstance(m, LoRAConv3d):
+            for p in m.base_conv.parameters():
+                p.requires_grad = True
+        elif isinstance(m, LoRAConv2d):
+            for p in m.base_conv.parameters():
+                p.requires_grad = True
+        elif isinstance(m, LoRAAttentionBlock):
+            for p in m.to_qkv.parameters():
+                p.requires_grad = True
+            for p in m.proj.parameters():
+                p.requires_grad = True
 
 
 # class MultiviewWanVideoVAE(nn.Module):
@@ -241,6 +263,7 @@ class MultiviewWanVideoVAE(nn.Module):
         use_lora_after: bool = True,
         use_viewwise_decoder_lora: bool = False,
         lora_rank: int = 16,
+        full_finetune_decoder: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -275,6 +298,7 @@ class MultiviewWanVideoVAE(nn.Module):
                 use_lora_before=use_lora_before,
                 use_lora_after=use_lora_after,
                 use_viewwise_decoder_lora=use_viewwise_decoder_lora,
+                num_views=view_in,
             )
 
             # Optionally load Wan 2.1 weights into the internal encoder/decoder
@@ -289,6 +313,14 @@ class MultiviewWanVideoVAE(nn.Module):
                     print(f"  -> {n_ckpt} ckpt keys; {n_missing} missing, {n_unexp} unexpected")
                 except Exception as e:
                     print(f"Warning: failed to load pretrained weights into crossview_vae: {e}")
+
+            # Train full decoder conv/attn weights inside LoRA wrappers (still uses view_idx + view embeddings).
+            if full_finetune_decoder:
+                _unfreeze_lora_wrapped_bases(self.crossview_vae.decoder)
+                print(
+                    "[MultiviewWanVideoVAE] full_finetune_decoder=True: unfrozen base weights in "
+                    "crossview_vae.decoder LoRA wrappers (LoRA deltas remain trainable)."
+                )
 
             # For the cross-view encoder path, we do NOT use latent_fusion / latent_expand / group_fusion;
             # all multi-view fusion happens inside AttentionMultiViewVideoVan.
@@ -594,9 +626,42 @@ class MultiviewWanVideoVAE(nn.Module):
     
     def get_last_layer(self):
         """Get the last layer for adversarial loss computation."""
-        if hasattr(self.base_vae, "model") and hasattr(self.base_vae.model, "decoder"):
-            # Return the final output layer of the decoder
-            return self.base_vae.model.decoder[-1]
+        def _pick_tensor_from_layer(layer: nn.Module):
+            """
+            GeneratorLoss expects `last_layer` to be a Tensor/Parameter (or iterable of Tensors),
+            because it calls `torch.autograd.grad(nll_loss, last_layer, ...)`.
+            """
+            # Common case: Conv/Linear with a `weight` tensor.
+            if hasattr(layer, "weight") and isinstance(getattr(layer, "weight"), torch.Tensor):
+                return getattr(layer, "weight")
+
+            # LoRAConv3d wrapper in DiffSynth has `lora_up` / `lora_down`; use the final trainable weight.
+            if hasattr(layer, "lora_up") and hasattr(layer.lora_up, "weight"):
+                return layer.lora_up.weight
+
+            # Otherwise, pick any trainable parameter tensor.
+            trainable_params = [p for p in layer.parameters() if p.requires_grad]
+            if trainable_params:
+                return trainable_params[-1]
+
+            # Fall back to the first parameter tensor (may be frozen, but prevents crashes).
+            params = list(layer.parameters())
+            return params[-1] if params else None
+
+        # Original (non-crossview) path.
+        if hasattr(self, "base_vae") and hasattr(self.base_vae, "model") and hasattr(self.base_vae.model, "decoder"):
+            layer = self.base_vae.model.decoder[-1]
+            return _pick_tensor_from_layer(layer)
+
+        # Crossview encoder path (use_crossview_encoder=True) does not define `base_vae`.
+        if hasattr(self, "crossview_vae") and hasattr(self.crossview_vae, "decoder"):
+            dec = self.crossview_vae.decoder
+            if hasattr(dec, "head") and isinstance(dec.head, nn.Sequential) and len(dec.head) > 0:
+                layer = dec.head[-1]
+                return _pick_tensor_from_layer(layer)
+            # Fallback: use decoder itself.
+            return _pick_tensor_from_layer(dec)
+
         return None
 
 @MODELS.register_module("multiview_wan_video_vae")
@@ -617,6 +682,7 @@ def build_multiview_wan_video_vae(
     use_lora_after: bool = True,
     use_viewwise_decoder_lora: bool = False,
     lora_rank: int = 16,
+    full_finetune_decoder: bool = False,
     **kwargs,
 ):
     """
@@ -658,6 +724,7 @@ def build_multiview_wan_video_vae(
         use_lora_after=use_lora_after,
         use_viewwise_decoder_lora=use_viewwise_decoder_lora,
         lora_rank=lora_rank,
+        full_finetune_decoder=full_finetune_decoder,
         **kwargs,
     )
     

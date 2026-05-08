@@ -1,0 +1,50 @@
+=== wan_multiview_loss_sweep task 62/81 idx=61 ===
+wandb_expr_name=sweep_mv4d__perc2p0__d01__k1em7
+experiment_name (outputs dir)=sweep_mv4d__perc2p0__d01__k1em7__job3155570_t62
+Overrides: --discriminator_choice TrainMultiview4D --vae_loss_config.perceptual_loss_weight 2.0 --gen_disc_weight 0.1 --vae_loss_config.kl_loss_weight 1e-7
+Tue Apr 14 13:16:14 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.148.08             Driver Version: 570.148.08     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:17:00.0 Off |                    0 |
+| N/A   32C    P8             34W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_ADDR=127.0.0.1 MASTER_PORT=35632
+DYNAMO_BACKEND=inductor
+Launch attempt 1/3 on port 35632
+changing outputs/sweep_mv4d__perc2p0__d01__k1em7__job3155570_t62 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 228 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Retrying with port 35633...
+Launch attempt 2/3 on port 35633
+changing outputs/sweep_mv4d__perc2p0__d01__k1em7__job3155570_t62 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 228 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Retrying with port 35634...
+Launch attempt 3/3 on port 35634
+changing outputs/sweep_mv4d__perc2p0__d01__k1em7__job3155570_t62 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 228 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Launch failed after 3 attempts (last port 35634, rc=0).

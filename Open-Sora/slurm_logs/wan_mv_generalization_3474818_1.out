@@ -1,0 +1,1274 @@
+=== wan_multiview_generalization task 1/1 idx=0 ===
+wandb_expr_name=generalization_gen_none__perc1p5__k1em6_256px_2_4_clipping
+experiment_name (outputs dir)=generalization_gen_none__perc1p5__k1em6_256px_2_4_clipping__job3474818_t1
+Overrides: --save_ckpt True
+Resume checkpoint: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/generalization_gen_none__perc1p5__k1em6_256px_2_2__job3447384_t1/epoch370-global_step18596
+Fri May  8 09:33:04 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.148.08             Driver Version: 570.148.08     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:E3:00.0 Off |                    0 |
+| N/A   35C    P0             96W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_ADDR=127.0.0.1 MASTER_PORT=34819
+DYNAMO_BACKEND=inductor
+Launch attempt 1/3 on port 34819
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res train_target_hw=(256, 256) train_target_frames=9 bucket_config={'256px_ar1:1': {9: (1.0, 1)}}
+changing outputs/generalization_gen_none__perc1p5__k1em6_256px_2_4_clipping__job3474818_t1 to share
+PTVideoDataset: Found 401 .pt file(s)
+PTVideoDataset: Found 9 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 228 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6702897643744067, post=0.6702897643744067, max_norm=1.0
+[step_time] Average wall time over first 10 training steps: 1.5820 s
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.2560584189508991, post=0.2560584189508991, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9158340632048438, post=0.9158340632048438, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.45891814058333946, post=0.45891814058333946, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.812613626017626, post=0.812613626017626, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5114770857357266, post=0.5114770857357266, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0209966191601052, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.113166240975537, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5934091141567489, post=0.5934091141567489, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.658252816064927, post=0.658252816064927, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7579124227499008, post=0.7579124227499008, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8549686868967984, post=0.8549686868967984, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.4365229083917812, post=0.4365229083917812, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9677791345084114, post=0.9677791345084114, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9647560234188229, post=0.9647560234188229, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.57871844788595, post=0.57871844788595, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.3652141381843484, post=0.3652141381843484, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6875532086329478, post=0.6875532086329478, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5182750112936089, post=0.5182750112936089, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.085287928985472, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.38592069334432055, post=0.38592069334432055, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7697073255766481, post=0.7697073255766481, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7548754692954209, post=0.7548754692954209, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.3245978838818124, post=0.3245978838818124, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5220941129283496, post=0.5220941129283496, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6071031721753266, post=0.6071031721753266, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.90225551643429, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.2627674893065883, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.017849308485793, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8916958177263746, post=0.8916958177263746, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9801708239933301, post=0.9801708239933301, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2413512480010227, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9981323026462815, post=0.9981323026462815, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4997850899919325, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8920640195252177, post=0.8920640195252177, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2998258730840624, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9701252067024041, post=0.9701252067024041, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0757308582479643, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3215632185953188, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9358622550967806, post=0.9358622550967806, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0922711865585222, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7946155529627805, post=0.7946155529627805, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7697837144357486, post=0.7697837144357486, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7678545970811179, post=0.7678545970811179, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8812253069292613, post=0.8812253069292613, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.861908282604845, post=0.861908282604845, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6205264685746706, post=0.6205264685746706, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7822541078439531, post=0.7822541078439531, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8418038494060159, post=0.8418038494060159, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5593231081202237, post=0.5593231081202237, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0453654550957965, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5146336417631977, post=0.5146336417631977, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7627774437362386, post=0.7627774437362386, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5130424849948425, post=0.5130424849948425, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5598751389575061, post=0.5598751389575061, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7795365426317216, post=0.7795365426317216, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6508949775743491, post=0.6508949775743491, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.3181616045983943, post=0.3181616045983943, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6543076243869794, post=0.6543076243869794, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7468287657149913, post=0.7468287657149913, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.552109381822948, post=0.552109381822948, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6803352076009189, post=0.6803352076009189, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8991096967362419, post=0.8991096967362419, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.4952503604598758, post=0.4952503604598758, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5152044315038703, post=0.5152044315038703, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.3936291191198091, post=0.3936291191198091, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.43841508124221396, post=0.43841508124221396, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6914487276121698, post=0.6914487276121698, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.42260699875412094, post=0.42260699875412094, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7220108862132799, post=0.7220108862132799, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5933824957837621, post=0.5933824957837621, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.665687704043115, post=0.665687704043115, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6989679792584717, post=0.6989679792584717, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=8.50250835432872, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.611154331891798, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7803121277881203, post=0.7803121277881203, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2959195949549243, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8679356483719362, post=0.8679356483719362, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4908910581879025, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4586232669175037, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8422719230165167, post=0.8422719230165167, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4060952843222039, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9191048980437297, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.918080250610031, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.323865437300256, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2590530154282125, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=49.864161181278284, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=10.723800670372006, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.686219794427323, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=9.247873835168352, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=10.213715879415762, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7659571512452332, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7224198436495823, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3803884952448207, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5808452163488298, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.9317010229619394, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.1848172767408633, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6435167531504973, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.1791303462641975, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2917651887461765, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.2271502873413787, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7625480636707164, post=0.7625480636707164, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6385099310528868, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2937068618732792, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4712845867437814, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.026729675801438, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.417034587580664, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2930671216531893, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2691704809657935, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1593952187474272, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.042577877544389, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1245889972564396, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7382774095814317, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3693372555314092, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3269168968971106, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0605306325550363, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6777742137797861, post=0.6777742137797861, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4852485896927168, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9558947607676406, post=0.9558947607676406, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.820106153420745, post=0.820106153420745, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7905671155042238, post=0.7905671155042238, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2778340369891357, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9179880667744019, post=0.9179880667744019, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.4582781288828862, post=0.4582781288828862, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.901803618769979, post=0.901803618769979, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8445016197631733, post=0.8445016197631733, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3540639936208685, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9340138148729901, post=0.9340138148729901, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8051549132804507, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9049876069437477, post=0.9049876069437477, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8436792132036146, post=0.8436792132036146, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.304964314016944, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1503049238888676, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4708852465206137, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9437921451480209, post=0.9437921451480209, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.964342976891595, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.743803585980367, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4750131218536677, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=321.3678042757239, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.5447268261594895, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.780738606826313, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.220253341069224, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.434083255625946, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.818002785312421, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2938428615101456, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.500104903174379, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.876054066685429, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=10.77623439719103, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.372780387878944, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9984890475570705, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=39.662128947602525, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=15.335558909457122, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.708906836799258, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.130223417967074, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=8.650611335452009, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.493212921760294, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2325470342424556, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.590023475537074, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3188322900345104, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.2241658479477753, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0303892531542374, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.589721574171789, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.7591484659420913, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.286934341782524, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=30.260777594842654, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=24.998688930465683, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=7.8464970736567725, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.1345884088828995, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.9002872127502943, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=11.666407845668878, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.511467539593127, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=158.38598151548956, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=15.691983862595109, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=23.6436713172759, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=84.9298826146457, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.2336821620270917, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9769780020061578, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7416085277630708, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=38.050938245556935, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.1669871118088375, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8023901514662182, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=195.16141156104607, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=35.30712071859585, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=19.654943474314944, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=6.142136560042995, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.3758276878152156, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=9.56155969322421, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=6.287863518764958, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.5291368117186024, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=7.757079305892789, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.9420002576518405, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.4627202434126483, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=23.29811024349333, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=364.14870760446206, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=467.86212579134894, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.5652857813844174, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=8.065474560297893, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=42.10318687138258, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.7498352014569836, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=16.91305839253957, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.091012996314281, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=7.834032095186246, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=25.960474341339445, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=17.275650193252044, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=74.1091921645436, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.6663667188059925, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.35130607904177, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=50.31303134424396, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.609209477960266, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.133586924600317, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=6.488325051120215, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.349127322729391, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4911981468426565, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.183801303341677, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0658340094430465, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.5855678513121667, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.1037777708127976, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.171161841511824, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.037544006621319, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1890396376628796, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7502231455631985, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5078368506170066, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.967936695984209, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4884696300561895, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.245431925252873, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5648116749805765, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.315230021079243, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.375795128638051, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4760428831337291, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9305538660638253, post=0.9305538660638253, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8934776064452576, post=0.8934776064452576, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4912489091176906, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9026876677674278, post=0.9026876677674278, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8844163891707904, post=0.8844163891707904, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7055414637608481, post=0.7055414637608481, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0332359496240537, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5267520939081929, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2830879705542286, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8841730621878392, post=0.8841730621878392, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.368076013948904, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.049616411669757, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6429041698785778, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2522179000740035, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.838635520342553, post=0.838635520342553, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3339471546526664, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6350896859099272, post=0.6350896859099272, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9222886725280107, post=0.9222886725280107, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7882687570510092, post=0.7882687570510092, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6339276930689723, post=0.6339276930689723, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6633178575026755, post=0.6633178575026755, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.083022562103687, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6518218185368817, post=0.6518218185368817, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1688120677603078, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1110434544680823, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5614421487102148, post=0.5614421487102148, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.2538764197955596, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0630031964890085, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4322969563704404, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8112313664901465, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=43.694431786448774, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.926737023931187, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5442227832680147, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4789204011896007, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2143948329654783, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.222458440093838, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4218350079959237, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8545595531471708, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.524707597309629, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.5225662683763375, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.290592346375, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9781009000789073, post=0.9781009000789073, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5690416346144433, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9954480340922038, post=0.9954480340922038, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1115485376698893, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8590194660285949, post=0.8590194660285949, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7188145567056328, post=0.7188145567056328, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8099608359464421, post=0.8099608359464421, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7319204419604138, post=0.7319204419604138, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6325273224428963, post=0.6325273224428963, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8921905945091229, post=0.8921905945091229, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.013469227433287, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5779979153730822, post=0.5779979153730822, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2117458475748908, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1077183456116682, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.6036550934223204, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7343649762057968, post=0.7343649762057968, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.8880597253261198, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7866770501246236, post=0.7866770501246236, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5897826611545384, post=0.5897826611545384, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3890738676655168, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1935402690932315, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7050666702481273, post=0.7050666702481273, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7334857995310533, post=0.7334857995310533, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7320793876983088, post=0.7320793876983088, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8823511048840134, post=0.8823511048840134, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9975352310230768, post=0.9975352310230768, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.4870947957246999, post=0.4870947957246999, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5475549830084128, post=0.5475549830084128, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6241810439923641, post=0.6241810439923641, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=162.6926202133182, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7323775602949762, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2144.315508501489, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8709143948852636, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.4835974478176603, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5474553416376167, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=15.214995185382444, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8095347876398762, post=0.8095347876398762, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=16.549821024039336, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2315318041685526, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2909294711407897, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7647984383149143, post=0.7647984383149143, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6216984330448249, post=0.6216984330448249, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6763760148920085, post=0.6763760148920085, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5459920840388197, post=0.5459920840388197, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7376660806541798, post=0.7376660806541798, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7332911914579904, post=0.7332911914579904, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6125310938591527, post=0.6125310938591527, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=21.329448505180725, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1822495586049995, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=91.70793696908136, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.2826365130031476, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.96071000318335, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0475037807314431, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7335580499797334, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.564528337059907, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2200325795029094, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3226595451012004, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.167259945338291, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1999130475807218, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9494725268800182, post=0.9494725268800182, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3531923114341688, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.305922877039742, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2152930407095477, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8179430574100208, post=0.8179430574100208, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5656208152486644, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0706467489426301, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.05156142154151, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4674310646567537, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1289721934980115, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0483949359832625, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.1482432884520772, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1132187139782403, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8544167196416963, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3738788889296367, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.9495726518311387, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9740614918616701, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0121023268400864, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.0397025956690547, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9310654882293148, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=7.730641706709073, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.02539866318937, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3899515643016978, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5390168778681925, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.756391140702119, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3015413555062623, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=29.790283626295945, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=6.407813500137084, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4818274068731405, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=33.12392760646184, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2420615846166683, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9085575519675537, post=0.9085575519675537, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3657617600877516, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.644433906457237, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.4962021980349824, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.360027682709849, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5122526739005087, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.813061791534217, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6095182484697035, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8643897693996849, post=0.8643897693996849, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7467127124887929, post=0.7467127124887929, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1547513476981446, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8307221909631732, post=0.8307221909631732, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.787343825642892, post=0.787343825642892, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.164718443119432, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6573155925243086, post=0.6573155925243086, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.467628537841047, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.574669252513539, post=0.574669252513539, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9731388044021311, post=0.9731388044021311, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4800107544430925, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=63.28358213295234, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.742044053520485, post=0.742044053520485, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.570861907690347, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6846769415817396, post=0.6846769415817396, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.48452754848706153, post=0.48452754848706153, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8276947271222644, post=0.8276947271222644, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.676747574772182, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.8360017666220947, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=6.0387753989606034, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.14971929979989, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6741406784331754, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.2256145400133858, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.298539208423563, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0823784229193874, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=13.663592357192, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8083992691938975, post=0.8083992691938975, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4865656699242433, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7823002812655808, post=0.7823002812655808, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7595314115968684, post=0.7595314115968684, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.774364186012063, post=0.774364186012063, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7330341272385069, post=0.7330341272385069, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1641034112692055, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9633775141648425, post=0.9633775141648425, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=9.982932211874175, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3504458980266516, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1159208893748152, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0046523472166904, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2466709151595103, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9653151437828782, post=0.9653151437828782, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2507600381018726, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.608149257741815, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.248523364498115, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9548736852723464, post=0.9548736852723464, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.275945195294676, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7213097063999933, post=0.7213097063999933, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1403816172508052, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0835754723028437, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6102034244055545, post=0.6102034244055545, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2723231208044286, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0379264185041643, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7096335641445979, post=0.7096335641445979, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2965069443869426, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.053614147927365, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.914703633355431, post=0.914703633355431, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3896567585013087, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.487103289690657, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0223143143623485, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5238040665372177, post=0.5238040665372177, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.862991733248425, post=0.862991733248425, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.923829673459326, post=0.923829673459326, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7050796043824291, post=0.7050796043824291, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7613914764805986, post=0.7613914764805986, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6031679800264694, post=0.6031679800264694, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.4330392849315689, post=0.4330392849315689, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.007875077871784, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9338605491532127, post=0.9338605491532127, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.44717374632535906, post=0.44717374632535906, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9931912788855504, post=0.9931912788855504, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9809058381579584, post=0.9809058381579584, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1777127138995795, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.797180752906973, post=0.797180752906973, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7833040319873951, post=0.7833040319873951, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9717074136276694, post=0.9717074136276694, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7921326085923599, post=0.7921326085923599, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9592373391957055, post=0.9592373391957055, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5360635110072833, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.267425339811685, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3698165465828314, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0354467020469216, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0036109275411738, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5808145247597152, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.216146132845573, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8051191487010115, post=0.8051191487010115, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3241280943860405, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9780186287562599, post=0.9780186287562599, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0978016154749723, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.875920260615635, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6507658692153179, post=0.6507658692153179, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.769424132079641, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2634299752773002, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6344387589047524, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.7968607362927416, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5376803882771068, post=0.5376803882771068, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4431327259886166, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6377582372958132, post=0.6377582372958132, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2944198717032482, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1407738679909047, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2530618837210352, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0974151237879206, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.291936779492048, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4008081470807032, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0116349115577872, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9023074848764688, post=0.9023074848764688, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5383167299564218, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2080460020426158, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8930212544435373, post=0.8930212544435373, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0363276349701713, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0039444259331507, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7652338157445354, post=0.7652338157445354, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8928743701362765, post=0.8928743701362765, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8137508081177246, post=0.8137508081177246, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8480647285089725, post=0.8480647285089725, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.5283032765347717, post=0.5283032765347717, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7873682017767926, post=0.7873682017767926, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6897500239085698, post=0.6897500239085698, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6283967934147848, post=0.6283967934147848, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7951722371763054, post=0.7951722371763054, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6718619811105242, post=0.6718619811105242, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.431172667833766, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1696234881379162, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=22.790902394016648, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6980220847912502, post=0.6980220847912502, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9404766510737547, post=0.9404766510737547, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.6228009159984235, post=0.6228009159984235, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=84.59629544563403, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.201694678686854, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.796959853796912, post=0.796959853796912, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9456105983870373, post=0.9456105983870373, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7055737768930003, post=0.7055737768930003, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0183064202988943, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=453.4563443706571, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0372385805142086, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=6.704523114136328, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4838337764854301, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2730393518656917, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.025403703878643, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0478132797315673, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5832565272257075, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8715690376745042, post=0.8715690376745042, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.131007473065067, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.124524704878474, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=9.726890368469997, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6182315423279083, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.8984233114408635, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3271872407406813, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2448677561128132, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.6017638349094683, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1815754013345916, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2752985548637132, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8500186329089613, post=0.8500186329089613, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.233007083519778, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1858104934333604, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0377560770605365, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8652365449830823, post=0.8652365449830823, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.9800129068826693, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.8222501655339998, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=9.82841260819735, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9938942573042617, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4571547059637926, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.5345274817037344, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=6.907680449639802, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5180911420719136, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5785634404345885, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3141185680497973, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.593262720461772, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.4377537026850407, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6627661441792956, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.1970702468748082, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=182.67361177110394, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.885886636609937, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.370289196284588, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.5136416180737755, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.65251669228611, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.405131312999151, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.456448916450334, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=7.41117418342732, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=27.912754919696322, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=79.62331667667299, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=23.997251989078745, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=33.43977978501522, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8414908971092832, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=27.164199561057725, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.356817675212472, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=5.167694707338741, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=4.369861746200697, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2910085611539683, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=8.228068475641397, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0090551427296166, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=8.678171981777759, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=22.536613005978737, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.053836080426983, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3825381163021362, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5679262164039065, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1667779063370927, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.424361266488005, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9346324298109766, post=0.9346324298109766, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0521683170755431, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7558141887080965, post=0.7558141887080965, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1855228427920992, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=3.8017825212319964, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5021708198003785, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.035127056357943, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2177063312410723, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8445433666055241, post=0.8445433666055241, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0997973428791563, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0448752134368309, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=967.1414387254845, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.8183675698199135, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9929161399992521, post=0.9929161399992521, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9035142185251361, post=0.9035142185251361, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3066816793928757, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7677198284087404, post=0.7677198284087404, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3602815433400135, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.1614414379219595, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0191929866254532, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8945503066252752, post=0.8945503066252752, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9038341153836852, post=0.9038341153836852, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.437972032749881, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.018096674553791, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0007221587070885, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3567486966817293, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.6092609253981107, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5020086032656597, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.348479000438651, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.543061072569258, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.050125371169388, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9839595038892794, post=0.9839595038892794, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.3386005383717132, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.7193802268122572, post=0.7193802268122572, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0725017905942824, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9470611980909865, post=0.9470611980909865, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.5267174258532359, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.9917712802897308, post=0.9917712802897308, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=8.334532028452514, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.932176189057253, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.2313708403532915, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.4032464057717302, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.410900922140554, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9787764382057087, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.9789321626637555, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=14.6863337926303, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.482283232667814, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.0224948882048976, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.346467439130919, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=24.777179629067827, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.2841005946413244, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=0.8520903395074823, post=0.8520903395074823, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=1.0575724387102317, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.1935243756809593, post=1.0, max_norm=1.0
+[GradClip] force_manual=False, configured_grad_clip=1.0, plugin_grad_clip=1.0
+[GradClip plugin] pre=2.2443305749408347, post=1.0, max_norm=1.0

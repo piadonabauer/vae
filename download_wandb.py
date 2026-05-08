@@ -84,32 +84,80 @@
 
 
 
-import pandas as pd
+# import pandas as pd
 
-# Load cleaned CSV
-csv_file = "/home/piado/projects/aip-lindell/piado/vae/fixed_seq_metrics.csv"
-df = pd.read_csv(csv_file)
+# # Load cleaned CSV
+# csv_file = "/home/piado/projects/aip-lindell/piado/vae/fixed_seq_metrics.csv"
+# df = pd.read_csv(csv_file)
 
-# Drop rows where all fixed_seq metrics are NaN
-fixed_cols = [c for c in df.columns if c.startswith("fixed_seq")]
-df = df.dropna(how="all", subset=fixed_cols)
+# # Drop rows where all fixed_seq metrics are NaN
+# fixed_cols = [c for c in df.columns if c.startswith("fixed_seq")]
+# df = df.dropna(how="all", subset=fixed_cols)
 
-# Function to compute best frames
-def best_frames(df, metric, split, higher_is_better=True):
-    cols = sorted([c for c in df.columns if f"{split}/{metric}_frame" in c])
-    means = df[cols].mean()
+# # Function to compute best frames
+# def best_frames(df, metric, split, higher_is_better=True):
+#     cols = sorted([c for c in df.columns if f"{split}/{metric}_frame" in c])
+#     means = df[cols].mean()
     
-    # Sort frames
-    best = means.sort_values(ascending=not higher_is_better)
-    print(f"\nBest {split} frames for {metric.upper()}:")
-    print(best.head(5))   # top 5 frames
-    print("Worst 5 frames:")
-    print(best.tail(5))
+#     # Sort frames
+#     best = means.sort_values(ascending=not higher_is_better)
+#     print(f"\nBest {split} frames for {metric.upper()}:")
+#     print(best.head(5))   # top 5 frames
+#     print("Worst 5 frames:")
+#     print(best.tail(5))
 
-metrics = ["psnr", "ssim", "mse"]
-splits = ["train", "val"]
+# metrics = ["psnr", "ssim", "mse"]
+# splits = ["train", "val"]
 
-for metric in metrics:
-    for split in splits:
-        higher = True if metric in ["psnr", "ssim"] else False
-        best_frames(df, metric, split, higher_is_better=higher)
+# for metric in metrics:
+#     for split in splits:
+#         higher = True if metric in ["psnr", "ssim"] else False
+#         best_frames(df, metric, split, higher_is_better=higher)
+
+import wandb
+import os
+
+# Your project path
+entity = "pia-uni"
+project = "wan_multiview_vae"
+
+# List of run IDs
+run_ids = [
+    # "cwmfsx6b",
+    # "gpuc7wf0",
+    # "18hdry13",
+    # "hi5odsjr",
+    # "aym5w393",
+    # "thpqjz2x",
+    # "secf6qjt",
+    # "1813ph7s",
+    # "ljg9x9be",
+    # "nbvmyxje",
+    # "my0tzjp6",
+    # "vrb8rwdn"
+    "r64oa1jt",
+    "8xc811c3"
+]
+
+# Initialize API
+api = wandb.Api()
+
+# Output directory
+output_dir = "/home/piado/projects/aip-lindell/piado/vae/wandb_outputs/cross-att-128"
+os.makedirs(output_dir, exist_ok=True)
+
+for run_id in run_ids:
+    run_path = f"{entity}/{project}/{run_id}"
+    print(f"Downloading run: {run_path}")
+    
+    run = api.run(run_path)
+    
+    run_dir = os.path.join(output_dir, run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    
+    # Download all files from the run
+    for file in run.files():
+        print(f"  Downloading {file.name}")
+        file.download(root=run_dir, replace=True)
+
+print("Done!")
