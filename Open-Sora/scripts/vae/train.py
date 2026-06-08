@@ -13,6 +13,7 @@ import subprocess
 import time
 import warnings
 from contextlib import nullcontext
+from torch.profiler import ProfilerActivity, profile, record_function
 from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
@@ -82,7 +83,7 @@ from opensora.datasets.pin_memory_cache import PinMemoryCache
 from opensora.models.vae.losses import DiscriminatorLoss, GeneratorLoss, VAELoss
 from opensora.models.vae.stylegan2_disc_loader import build_stylegan2_ada_discriminator_from_state_dict
 from opensora.models.vae.utils import DiagonalGaussianDistribution
-from opensora.models.vae.wan_video_vae import build_multiview_wan_video_vae  # Register multi-view VAE model
+from opensora.models.vae.wan_video_vae import build_multiview_wan_video_vae, ProfileTimer  # Register multi-view VAE model
 from opensora.registry import DATASETS, MODELS, build_module
 from opensora.utils.ckpt import CheckpointIO, model_sharding, record_model_param_shape, rm_checkpoints
 from opensora.utils.config import config_to_name, create_experiment_workspace, parse_configs
@@ -354,6 +355,21 @@ def collect_trainable_param_stats(model, include_weight_stats: bool = True, opti
     return out
 
 
+def unwrap_model_safe(model):
+    """Return the underlying nn.Module for wrapped or plain models."""
+    if hasattr(model, "unwrap"):
+        try:
+            model = model.unwrap()
+        except Exception:
+            pass
+    if hasattr(model, "module"):
+        model = model.module
+    # torch.compile wraps the original module as _orig_mod
+    while hasattr(model, "_orig_mod"):
+        model = model._orig_mod
+    return model
+
+
 def _iter_optimizer_grad_tensors(optimizer):
     """Yield unique gradient tensors visible to the optimizer.
 
@@ -467,7 +483,7 @@ def apply_pytorch_determinism(cfg) -> bool:
         except Exception:
             pass
         try:
-            torch.use_deterministic_algorithms(True, warn_only=True)
+            torch.use_deterministic_algorithms(True, warn_only=False)
         except TypeError:
             try:
                 torch.use_deterministic_algorithms(True)
@@ -497,7 +513,7 @@ def downsample_video_tensor(x: torch.Tensor, target_h: int = 64, target_w: int =
             idx = torch.linspace(0, t - 1, target_t, device=x.device).long()
             x = x.index_select(3, idx)
             t = target_t
-        x_flat = x.view(b * v * t, c, h, w)
+        x_flat = x.contiguous().view(b * v * t, c, h, w)
         x_flat = F.interpolate(x_flat, size=(target_h, target_w), mode="bilinear", align_corners=False)
         x = x_flat.view(b, v, c, t, target_h, target_w)
     elif x.dim() == 5:
@@ -506,7 +522,7 @@ def downsample_video_tensor(x: torch.Tensor, target_h: int = 64, target_w: int =
             idx = torch.linspace(0, t - 1, target_t, device=x.device).long()
             x = x.index_select(2, idx)
             t = target_t
-        x_perm = x.permute(0, 2, 1, 3, 4)  # [B, T, C, H, W]
+        x_perm = x.permute(0, 2, 1, 3, 4).contiguous()  # [B, T, C, H, W]
         x_flat = x_perm.reshape(b * t, c, h, w)
         x_flat = F.interpolate(x_flat, size=(target_h, target_w), mode="bilinear", align_corners=False)
         x_perm = x_flat.view(b, t, c, target_h, target_w)
@@ -631,9 +647,11 @@ def compute_metrics(x_orig, x_rec):
     Returns:
         Dictionary with metric names and values (both per-sample and averaged)
     """
-    # Ensure values are in [0, 1] range for proper metric computation
-    x_orig = torch.clamp(x_orig, 0, 1)
-    x_rec = torch.clamp(x_rec, 0, 1)
+    # Ensure values are in [0, 1] range for proper metric computation.
+    # nan_to_num first: clamp() does NOT fix NaN (NaN stays NaN after clamp).
+    # Replacing NaN/inf with 0 gives a valid but very-bad-PSNR signal rather than silently NaN.
+    x_orig = torch.nan_to_num(x_orig.float(), nan=0.0, posinf=1.0, neginf=0.0).clamp(0, 1)
+    x_rec = torch.nan_to_num(x_rec.float(), nan=0.0, posinf=1.0, neginf=0.0).clamp(0, 1)
     
     # Ensure temporal dimensions match before flattening; some sequences can be shorter.
     if x_orig.dim() == 6 and x_rec.dim() == 6:  # Multi-view: [B, V, C, T, H, W]
@@ -644,8 +662,9 @@ def compute_metrics(x_orig, x_rec):
         x_orig_use = x_orig[:, :, :, :t, :, :]
         x_rec_use = x_rec[:, :, :, :t, :, :]
         b, v, c, _, h, w = x_orig_use.shape
-        x_orig_flat = x_orig_use.view(b * v, c, t, h, w)
-        x_rec_flat = x_rec_use.view(b * v, c, t, h, w)
+        # reshape (not view): torch.compile outputs may be non-contiguous
+        x_orig_flat = x_orig_use.reshape(b * v, c, t, h, w)
+        x_rec_flat = x_rec_use.reshape(b * v, c, t, h, w)
     else:  # Single-view: [B, C, T, H, W] (or already flattened)
         if x_orig.dim() == 5 and x_rec.dim() == 5:
             b_o, c_o, t_o, h_o, w_o = x_orig.shape
@@ -714,8 +733,8 @@ def compute_metrics_per_frame(x_orig, x_rec, max_val=1.0):
         x_rec_use = x_rec[:, :, :, :t, :, :]
         b, v, c, _, h, w = x_orig_use.shape
         # Flatten batch and view: [B, V, C, T, H, W] -> [B*V, C, T, H, W]
-        x_orig_flat = x_orig_use.view(b * v, c, t, h, w)
-        x_rec_flat = x_rec_use.view(b * v, c, t, h, w)
+        x_orig_flat = x_orig_use.reshape(b * v, c, t, h, w)
+        x_rec_flat = x_rec_use.reshape(b * v, c, t, h, w)
     elif x_orig.dim() == 5 and x_rec.dim() == 5:  # [B, C, T, H, W]
         b_o, c_o, t_o, h_o, w_o = x_orig.shape
         b_r, c_r, t_r, h_r, w_r = x_rec.shape
@@ -825,14 +844,12 @@ def create_visualization_grid(x_orig, x_rec, num_samples=4, num_frames=None, val
     num_frames = min(num_frames, t)
     frame_indices = np.linspace(0, t - 1, num_frames).astype(int)
 
-    # Row labels:
+    # Row labels: one input row per view, then one reconstruction row per view.
     if is_multiview and num_views >= 2:
-        row_labels = [
-            "View 1 – input",
-            "View 2 – input",
-            "View 1 – reconstr.",
-            "View 2 – reconstr.",
-        ]
+        row_labels = (
+            [f"View {v + 1} – input" for v in range(num_views)]
+            + [f"View {v + 1} – reconstr." for v in range(num_views)]
+        )
     else:
         row_labels = ["Input", "Reconstruction"]
 
@@ -1400,10 +1417,11 @@ def main():
     # clip_optimizer_grad_norm_global_) cannot reach those tensors and silently does nothing.
     # Therefore zero2 must use plugin-internal clipping (force_manual=False).
     # zero1 shards only optimizer states, not gradients, so param.grad is visible → manual works.
+    # plugin="none" (no ColossalAI plugin): plain optimizer, param.grad is always visible → manual.
     force_manual_global_grad_clip = bool(
         cfg.get(
             "force_manual_global_grad_clip",
-            configured_grad_clip > 0 and plugin_type in ("zero1", "zero1-seq"),
+            configured_grad_clip > 0 and plugin_type in ("none", "zero1", "zero1-seq"),
         )
     )
     plugin_grad_clip = 0.0 if force_manual_global_grad_clip else configured_grad_clip
@@ -1435,6 +1453,15 @@ def main():
 
     # == init logger ==
     logger = create_logger(exp_dir)
+    if cfg.get("profile_timing", False):
+        cfg.wandb = False
+        if cfg.get("profile_step", False):
+            logger.info("profile_timing enabled: disabling profile_step (Kineto trace)")
+            cfg.profile_step = False
+        logger.info(
+            "profile_timing enabled: wandb disabled; will profile once at global_step=%s",
+            int(cfg.get("profile_timing_step", 50)),
+        )
     if cfg.get("deterministic", True):
         logger.info(
             "Determinism mode: cuBLAS workspace, cudnn deterministic, TF32 disabled, "
@@ -1552,6 +1579,18 @@ def main():
     # ======================================================
     logger.info("Building models...")
 
+    # Auto-detect view_in from the first dataset sample when not explicitly set (or set to 0).
+    # This makes the config portable: the model always matches the actual data shape.
+    if not cfg.model.get("view_in"):
+        try:
+            _sample_video = dataset[0]["video"]  # [V, C, T, H, W]
+            if _sample_video.dim() == 5:
+                _detected_views = int(_sample_video.shape[0])
+                cfg.model["view_in"] = _detected_views
+                logger.info("Auto-detected model.view_in=%d from first dataset sample", _detected_views)
+        except Exception as _e:
+            logger.warning("Could not auto-detect view_in from dataset: %s", _e)
+
     # == build vae model ==
     model = build_module(cfg.model, MODELS, device_map=device, torch_dtype=dtype).train()
     log_model_params(model)
@@ -1563,9 +1602,19 @@ def main():
 
     if cfg.get("grad_checkpoint", False):
         set_grad_checkpoint(model)
+
+    _optimize = cfg.get("optimization", False)
+    if _optimize:
+        # 1. Gradient checkpointing: trade compute for memory, allows bigger batches.
+        if not cfg.get("grad_checkpoint", False):
+            logger.info("[optimization] grad_checkpoint: ON (was not set in config)")
+            set_grad_checkpoint(model)
+
     vae_loss_fn = VAELoss(**cfg.vae_loss_config, device=device, dtype=dtype)
 
     # == build EMA model ==
+    # EMA is deepcopied BEFORE channels-last conversion: model_sharding calls
+    # param.data.view(-1) which requires contiguous tensors.
     if cfg.get("ema_decay", None) is not None:
         ema = deepcopy(model).cpu().eval().requires_grad_(False)
         ema_shape_dict = record_model_param_shape(ema)
@@ -1573,6 +1622,14 @@ def main():
     else:
         ema = ema_shape_dict = None
         logger.info("No EMA model created.")
+
+    if _optimize:
+        # 2. channels_last_3d is disabled: it causes .view() failures throughout the codebase
+        #    whenever a data tensor (not just a weight) ends up with non-contiguous strides,
+        #    and it requires restoring strides after every checkpoint save to keep torch.compile
+        #    happy. The ~32ms/step saving is not worth the fragility. torch.compile alone
+        #    (step 1) gives the main speedup.
+        logger.info("[optimization] channels_last_3d: disabled (fragile with view() ops and compile cache)")
 
     def _freeze_first_child_modules(module, num_children: int):
         """Freeze parameters in the first N immediate child modules."""
@@ -1659,6 +1716,17 @@ def main():
     if is_log_process(plugin_type, plugin_config):
         logger.info("VAE trainable params (optimizer): %s", f"{total_trainable:,}")
 
+    # 3. torch.compile: fuses small ops, eliminates Python/autograd overhead.
+    #    Applied before booster.boost() so ColossalAI wraps the compiled graph.
+    #    First run is slow (compilation); subsequent steps get the full speedup.
+    if _optimize:
+        _compile_mode = cfg.get("optimization_compile_mode", "reduce-overhead")
+        logger.info("[optimization] torch.compile: mode=%s (first step will be slow)", _compile_mode)
+        try:
+            model = torch.compile(model, mode=_compile_mode)
+        except Exception as _e:
+            logger.warning("[optimization] torch.compile failed, continuing without it: %s", _e)
+
     # =======================================================
     # 4. distributed training preparation with colossalai
     # =======================================================
@@ -1678,6 +1746,20 @@ def main():
             optimizer=disc_optimizer,
             lr_scheduler=disc_lr_scheduler,
         )
+    optimizer_has_booster_backward = hasattr(optimizer, "backward")
+    if is_log_process(plugin_type, plugin_config) and not optimizer_has_booster_backward:
+        logger.warning(
+            "Optimizer %s has no `.backward`; using booster.backward(loss=...) compatibility path.",
+            optimizer.__class__.__name__,
+        )
+    disc_optimizer_has_booster_backward = False
+    if use_discriminator:
+        disc_optimizer_has_booster_backward = hasattr(disc_optimizer, "backward")
+        if is_log_process(plugin_type, plugin_config) and not disc_optimizer_has_booster_backward:
+            logger.warning(
+                "Discriminator optimizer %s has no `.backward`; using booster.backward(loss=...) compatibility path.",
+                disc_optimizer.__class__.__name__,
+            )
     torch.set_default_dtype(torch.float)
     logger.info("Boosted model for distributed training")
 
@@ -1783,10 +1865,24 @@ def main():
                     else start_step // num_steps_per_epoch
                 )
                 start_step = start_step % num_steps_per_epoch
-            sampler.set_step(start_step)
+            if sampler is not None and hasattr(sampler, "set_step"):
+                sampler.set_step(start_step)
+            elif sampler is not None:
+                logger.warning(
+                    "Sampler %s has no set_step(); resume will continue from epoch boundary without sampler micro-step offset.",
+                    sampler.__class__.__name__,
+                )
 
         start_epoch = start_epoch if start_epoch is not None else ret[0]
         start_step = start_step if start_step is not None else ret[1]
+
+        # If the resumed step is at or beyond the end of an epoch, roll over to the next epoch.
+        # This happens when a checkpoint was saved at the last step of an epoch (step == num_steps_per_epoch).
+        if start_step >= num_steps_per_epoch:
+            start_epoch += start_step // num_steps_per_epoch
+            start_step = start_step % num_steps_per_epoch
+            if sampler is not None and hasattr(sampler, "set_step"):
+                sampler.set_step(start_step)
 
         if (
             use_discriminator
@@ -1818,7 +1914,16 @@ def main():
                 set_warmup_steps(disc_lr_scheduler, cfg.disc_lr_scheduler.warmup_steps)
 
     # == sharding EMA model ==
+    # model_sharding calls param.data.view(-1) which requires contiguous tensors.
+    # channels_last_3d conversion (applied earlier for optimization) makes 5D tensors
+    # non-contiguous in the default stride order, so we make them contiguous first.
     if ema is not None:
+        for _p in ema.parameters():
+            if not _p.data.is_contiguous():
+                _p.data = _p.data.contiguous()
+        for _b in ema.buffers():
+            if not _b.is_contiguous():
+                _b.data = _b.data.contiguous()
         model_sharding(ema)
         ema = ema.to(device)
 
@@ -1945,6 +2050,30 @@ def main():
         logger.info("Wandb run URL: %s", run_url)
 
     # =======================================================
+    # 5b. warm up torch.compile eval graph before the training loop
+    # =======================================================
+    # torch.compile caches one graph per (function, mode). The train graph is compiled on
+    # the first training forward. The eval graph (.eval() mode) is a *different* graph and
+    # would compile on the first full_eval call — causing a multi-minute stall mid-training.
+    # We trigger that compilation now, before the loop, so it's out of the way.
+    if _optimize and cfg.get("full_eval_every", 0) > 0:
+        logger.info("[optimization] Warming up torch.compile eval graph (one-time, before training loop)...")
+        _sample = dataset[0]["video"].unsqueeze(0).to(device, dtype)
+        _sample = apply_train_bucket_spatiotemporal(_sample, cfg)
+        if cfg.get("vae_target_range") == "[-1,1]" or cfg.model.get("type") == "multiview_wan_video_vae":
+            _sample = _sample * 2.0 - 1.0
+        _inner = unwrap_model_safe(model)
+        _inner.eval()
+        with torch.no_grad():
+            try:
+                model(_sample)
+                logger.info("[optimization] Eval graph warm-up done.")
+            except Exception as _we:
+                logger.warning("[optimization] Eval graph warm-up failed (non-fatal): %s", _we)
+        _inner.train()
+        del _sample, _inner
+
+    # =======================================================
     # 6. training loop
     # =======================================================
     first_training_global_step = start_epoch * num_steps_per_epoch + start_step
@@ -1977,6 +2106,8 @@ def main():
     last_saved_ckpt_epoch = -1
     early_stop_requested = False
     _psnr_stop_log_once = False
+    _profile_timing_done = False
+    _profile_timing_step = int(cfg.get("profile_timing_step", 50))
     # One-time average wall time over first 10 steps; set log_step_time False to disable.
     _log_step_time_once = cfg.get("log_step_time", True)
     _step_time_bench_done = False
@@ -2056,7 +2187,8 @@ def main():
                     # We time this separately to see if we're GPU-starved (waiting for data)
                     data_load_start = time.time()
                     batch, step, pinned_video = batch_, step_, pinned_video_
-                    if (step + 1) % accumulation_steps == 1:
+                    global_step = epoch * num_steps_per_epoch + step
+                    if (global_step + 1) % accumulation_steps == 1:
                         current_update_sample_ids = []
                     step_sample_ids = _extract_batch_sample_ids(batch)
                     if step_sample_ids is not None:
@@ -2070,7 +2202,7 @@ def main():
                     timing_stats["data_load"].append(data_load_time)
 
                     # == log config ==
-                    global_step = epoch * num_steps_per_epoch + step
+                    # global_step already computed above (needed before accumulation checks)
                     actual_update_step = (global_step + 1) // accumulation_steps
                     log_step += 1
                     acc_step += 1
@@ -2134,16 +2266,55 @@ def main():
                     elif log_latent_shapes_every and hasattr(model, "debug_shapes"):
                         model.debug_shapes = False
 
+                    # Full-step profiler: fires once on step 5 (warmed up) when profile_step=True.
+                    # Use profile_step=True instead of profile=True — they cannot run simultaneously
+                    # because profile=True already holds a live Kineto session over the whole epoch.
+                    _do_full_profile = cfg.get("profile_step", False) and global_step == 14
+                    _do_profile_timing = (
+                        cfg.get("profile_timing", False)
+                        and not _profile_timing_done
+                        and global_step == _profile_timing_step
+                    )
+                    if _do_profile_timing and coordinator.is_master():
+                        ProfileTimer.enable(reset=True)
+                        logger.info(
+                            "[ProfileTiming] Profiling global_step=%s (CUDA-synchronized block timers)",
+                            global_step,
+                        )
+                    _prof = None
+                    if _do_full_profile:
+                        _prof = profile(
+                            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                            record_shapes=True,
+                            profile_memory=True,
+                            with_stack=True,
+                        )
+                        _prof.__enter__()
+
                     # == forward pass ==
                     # Initialize loss_dict and vae_loss at the start of each step to ensure they're always available
                     loss_dict = {}  # loss at every step
                     vae_loss = torch.tensor(0.0, device=device, dtype=dtype)  # total VAE loss
-                    
+
+                    # channels-last input: convert 5-D inputs directly; for 6-D
+                    # multiview [B,V,C,T,H,W] convert each view slice since the
+                    # model slices them to 5-D before any conv anyway.
+                    if _optimize:
+                        if x.dim() == 5:
+                            x = x.contiguous(memory_format=torch.channels_last_3d)
+                        elif x.dim() == 6:
+                            b, v, c, t, h, w = x.shape
+                            x = x.reshape(b * v, c, t, h, w).contiguous(
+                                memory_format=torch.channels_last_3d
+                            ).reshape(b, v, c, t, h, w)
+
                     # The forward pass (encode + decode) is usually the most expensive operation
                     # We time it carefully to see if it's the bottleneck
                     forward_start = time.time()
-                    with Timer("model", log=True) if cfg.get("profile", False) else nullcontext():
-                        x_rec, posterior, z = model(x)
+                    _forward_ctx = ProfileTimer.block("train.forward") if _do_profile_timing else nullcontext()
+                    with _forward_ctx:
+                        with record_function("forward") if _do_full_profile else nullcontext():
+                            x_rec, posterior, z = model(x)
                     forward_time = time.time() - forward_start
                     timing_stats["forward"].append(forward_time)
 
@@ -2262,36 +2433,38 @@ def main():
                     # == loss computation ==
                     # Loss computation includes reconstruction, KL divergence, and perceptual loss
                     # Perceptual loss can be expensive (uses VGG features), so we time it
-                    loss_start = time.time()
-                    # Reset vae_loss (it was initialized at the start of the step)
-                    vae_loss = torch.tensor(0.0, device=device, dtype=dtype)
-                    # loss_dict is already initialized at the start of the step
+                    _loss_ctx = ProfileTimer.block("train.loss") if _do_profile_timing else nullcontext()
+                    with _loss_ctx:
+                        loss_start = time.time()
+                        # Reset vae_loss (it was initialized at the start of the step)
+                        vae_loss = torch.tensor(0.0, device=device, dtype=dtype)
+                        # loss_dict is already initialized at the start of the step
 
-                    ret = vae_loss_fn(x_loss, x_rec_loss, posterior_loss)
+                        ret = vae_loss_fn(x_loss, x_rec_loss, posterior_loss)
 
-                    # View consistency loss: encourage reconstructions to stay coherent
-                    # across all view pairs (all-to-all).
-                    view_loss = 0.0
-                    if is_multiview and x_rec.shape[1] > 1:
-                        # Compute pairwise MSE over all distinct view pairs.
-                        view_losses = []
-                        num_views = x_rec.shape[1]
-                        for i in range(num_views):
-                            for j in range(i + 1, num_views):
-                                view_losses.append(F.mse_loss(x_rec[:, i], x_rec[:, j]))
-                        view_loss = sum(view_losses) / len(view_losses)
-                    
-                    # Add view consistency loss to total loss
-                    view_consistency_weight = cfg.vae_loss_config.get("view_consistency_weight", 0.01)
-                    vae_loss = vae_loss + view_consistency_weight * view_loss
-                    loss_dict["view_loss"] = view_loss.item()
+                        # View consistency loss: encourage reconstructions to stay coherent
+                        # across all view pairs (all-to-all).
+                        view_loss = 0.0
+                        if is_multiview and x_rec.shape[1] > 1:
+                            # Compute pairwise MSE over all distinct view pairs.
+                            view_losses = []
+                            num_views = x_rec.shape[1]
+                            for i in range(num_views):
+                                for j in range(i + 1, num_views):
+                                    view_losses.append(F.mse_loss(x_rec[:, i], x_rec[:, j]))
+                            view_loss = sum(view_losses) / len(view_losses)
+                        
+                        # Add view consistency loss to total loss
+                        view_consistency_weight = cfg.vae_loss_config.get("view_consistency_weight", 0.01)
+                        vae_loss = vae_loss + view_consistency_weight * view_loss
+                        loss_dict["view_loss"] = view_loss.item()
 
-                    nll_loss = ret["nll_loss"]
-                    kl_loss = ret["kl_loss"]
-                    recon_loss = ret["recon_loss"]
-                    perceptual_loss = ret["perceptual_loss"]
-                    vae_loss += nll_loss + kl_loss
-                    loss_time = time.time() - loss_start
+                        nll_loss = ret["nll_loss"]
+                        kl_loss = ret["kl_loss"]
+                        recon_loss = ret["recon_loss"]
+                        perceptual_loss = ret["perceptual_loss"]
+                        vae_loss += nll_loss + kl_loss
+                        loss_time = time.time() - loss_start
                     timing_stats["loss_compute"].append(loss_time)
 
                     # == generator loss ==
@@ -2364,12 +2537,18 @@ def main():
                     ctx = (
                         booster.no_sync(model, optimizer)
                         if cfg.get("plugin", "zero2") in ("zero1", "zero1-seq")
-                        and (step + 1) % accumulation_steps != 0
+                        and (global_step + 1) % accumulation_steps != 0
                         else nullcontext()
                     )
-                    with Timer("backward", log=True) if cfg.get("profile", False) else nullcontext():
-                        with ctx:
-                            booster.backward(loss=vae_loss / accumulation_steps, optimizer=optimizer)
+                    _backward_ctx = ProfileTimer.block("train.backward") if _do_profile_timing else nullcontext()
+                    with _backward_ctx:
+                        with Timer("backward", log=True) if cfg.get("profile", False) else nullcontext():
+                            with ctx:
+                                loss_scaled = vae_loss / accumulation_steps
+                                if optimizer_has_booster_backward:
+                                    booster.backward(loss=loss_scaled, optimizer=optimizer)
+                                else:
+                                    loss_scaled.backward()
                     backward_time = time.time() - backward_start
                     timing_stats["backward"].append(backward_time)
 
@@ -2378,7 +2557,7 @@ def main():
                     # falls back to optimizer.get_grad_norm().
                     pending_train_stats = None
                     pre_clip_global_grad_norm = None
-                    if (step + 1) % accumulation_steps == 0:
+                    if (global_step + 1) % accumulation_steps == 0:
                         should_log_train_debug = (
                             coordinator.is_master()
                             and actual_update_step >= debug_stats_start_step
@@ -2407,67 +2586,104 @@ def main():
                     # or complex optimizers (e.g., Adam with many parameters)
                     optimizer_start = time.time()
                     post_clip_global_grad_norm = None
-                    with Timer("optimizer", log=True) if cfg.get("profile", False) else nullcontext():
-                        if (step + 1) % accumulation_steps == 0:
-                            print(f"[GradClip] force_manual={force_manual_global_grad_clip}, configured_grad_clip={configured_grad_clip}, plugin_grad_clip={plugin_grad_clip}")
-                            if force_manual_global_grad_clip and configured_grad_clip > 0:
-                                # Manual clipping path (zero1 / non-ZeRO): param.grad is visible,
-                                # so torch.clip_grad_norm_ + clip_optimizer_grad_norm_global_ work.
-                                _ = torch.nn.utils.clip_grad_norm_(
-                                    model.parameters(),
-                                    max_norm=configured_grad_clip,
-                                )
-                                (
-                                    _manual_pre_clip_norm,
-                                    _manual_post_clip_norm,
-                                    _,
-                                ) = clip_optimizer_grad_norm_global_(
-                                    optimizer,
-                                    max_norm=configured_grad_clip,
-                                    dp_group=get_data_parallel_group(),
-                                )
-                                if _manual_pre_clip_norm is not None:
-                                    pre_clip_global_grad_norm = _manual_pre_clip_norm
-                                if _manual_post_clip_norm is not None:
-                                    post_clip_global_grad_norm = _manual_post_clip_norm
-                                print(f"[GradClip manual] pre={pre_clip_global_grad_norm}, post={post_clip_global_grad_norm}")
+                    _optimizer_ctx = ProfileTimer.block("train.optimizer") if _do_profile_timing else nullcontext()
+                    with _optimizer_ctx:
+                        with Timer("optimizer", log=True) if cfg.get("profile", False) else nullcontext():
+                            if (global_step + 1) % accumulation_steps == 0:
+                                #print(f"[GradClip] force_manual={force_manual_global_grad_clip}, configured_grad_clip={configured_grad_clip}, plugin_grad_clip={plugin_grad_clip}")
+                                if force_manual_global_grad_clip and configured_grad_clip > 0:
+                                    # Manual clipping path (zero1 / non-ZeRO): param.grad is visible,
+                                    # so torch.clip_grad_norm_ + clip_optimizer_grad_norm_global_ work.
+                                    _ = torch.nn.utils.clip_grad_norm_(
+                                        model.parameters(),
+                                        max_norm=configured_grad_clip,
+                                    )
+                                    (
+                                        _manual_pre_clip_norm,
+                                        _manual_post_clip_norm,
+                                        _,
+                                    ) = clip_optimizer_grad_norm_global_(
+                                        optimizer,
+                                        max_norm=configured_grad_clip,
+                                        dp_group=get_data_parallel_group(),
+                                    )
+                                    if _manual_pre_clip_norm is not None:
+                                        pre_clip_global_grad_norm = _manual_pre_clip_norm
+                                    if _manual_post_clip_norm is not None:
+                                        post_clip_global_grad_norm = _manual_post_clip_norm
+                                    #print(f"[GradClip manual] pre={pre_clip_global_grad_norm}, post={post_clip_global_grad_norm}")
 
-                            optimizer.step()
+                                optimizer.step()
 
-                            if not force_manual_global_grad_clip and configured_grad_clip > 0:
-                                # Plugin-internal clipping path (ZeRO2+): ColossalAI's step() calls
-                                # _compute_grad_norm (all-reduce), stores it in _current_grad_norm,
-                                # then calls _unscale_and_clip_grads — all before returning.
-                                # So get_grad_norm() immediately after step() gives the CURRENT
-                                # step's pre-clip norm. Post-clip is analytically min(pre, max_norm).
-                                _plugin_pre = _safe_optimizer_get_grad_norm(optimizer)
-                                if _plugin_pre is not None:
-                                    pre_clip_global_grad_norm = _plugin_pre
-                                    post_clip_global_grad_norm = min(_plugin_pre, float(configured_grad_clip))
-                                    if pending_train_stats is not None:
-                                        pending_train_stats["grad_l2_norm"] = _plugin_pre
-                                        pending_train_stats["global_grad_norm"] = _plugin_pre
-                                        pending_train_stats["grad_stats_source"] = (
-                                            "optimizer_get_grad_norm (plugin-internal clip; pre-clip from step)"
-                                        )
-                                print(f"[GradClip plugin] pre={pre_clip_global_grad_norm}, post={post_clip_global_grad_norm}, max_norm={configured_grad_clip}")
+                                if not force_manual_global_grad_clip and configured_grad_clip > 0:
+                                    # Plugin-internal clipping path (ZeRO2+): ColossalAI's step() calls
+                                    # _compute_grad_norm (all-reduce), stores it in _current_grad_norm,
+                                    # then calls _unscale_and_clip_grads — all before returning.
+                                    # So get_grad_norm() immediately after step() gives the CURRENT
+                                    # step's pre-clip norm. Post-clip is analytically min(pre, max_norm).
+                                    _plugin_pre = _safe_optimizer_get_grad_norm(optimizer)
+                                    if _plugin_pre is not None:
+                                        pre_clip_global_grad_norm = _plugin_pre
+                                        post_clip_global_grad_norm = min(_plugin_pre, float(configured_grad_clip))
+                                        if pending_train_stats is not None:
+                                            pending_train_stats["grad_l2_norm"] = _plugin_pre
+                                            pending_train_stats["global_grad_norm"] = _plugin_pre
+                                            pending_train_stats["grad_stats_source"] = (
+                                                "optimizer_get_grad_norm (plugin-internal clip; pre-clip from step)"
+                                            )
+                                    print(f"[GradClip plugin] pre={pre_clip_global_grad_norm}, post={post_clip_global_grad_norm}, max_norm={configured_grad_clip}")
 
-                            if lr_scheduler is not None:
-                                lr_scheduler.step(
-                                    actual_update_step,
-                                )
-                            # == update EMA ==
-                            # EMA update is usually fast but we include it in optimizer timing
-                            if ema is not None:
-                                update_ema(
-                                    ema,
-                                    model.unwrap(),
-                                    optimizer=optimizer,
-                                    decay=cfg.get("ema_decay", 0.9999),
-                                )
-                            optimizer.zero_grad()
+                                if lr_scheduler is not None:
+                                    lr_scheduler.step(
+                                        actual_update_step,
+                                    )
+                                # == update EMA ==
+                                # EMA update is usually fast but we include it in optimizer timing
+                                if ema is not None:
+                                    update_ema(
+                                        ema,
+                                        unwrap_model_safe(model),
+                                        optimizer=optimizer,
+                                        decay=cfg.get("ema_decay", 0.9999),
+                                        sharded=plugin_type not in ("none",),
+                                    )
+                                optimizer.zero_grad()
                     optimizer_time = time.time() - optimizer_start
                     timing_stats["optimizer"].append(optimizer_time)
+
+                    # -- user-friendly block timing report (once, after warmup) --
+                    if _do_profile_timing and coordinator.is_master():
+                        if x.is_cuda:
+                            torch.cuda.synchronize()
+                        ProfileTimer.disable()
+                        summary = ProfileTimer.summarize()
+                        report = ProfileTimer.format_report(summary, step=global_step)
+                        print(report)
+                        logger.info("\n%s", report)
+                        json_path, txt_path = ProfileTimer.save_report(summary, exp_dir, step=global_step)
+                        print(f"[ProfileTiming] Saved → {json_path}")
+                        print(f"[ProfileTiming] Saved → {txt_path}")
+                        _profile_timing_done = True
+
+                    # -- full-step profiler report (step 5 only) --
+                    if _do_full_profile and _prof is not None:
+                        if x.is_cuda:
+                            torch.cuda.synchronize()
+                        _prof.__exit__(None, None, None)
+                        sort_key = "cuda_time_total" if x.is_cuda else "cpu_time_total"
+                        print(
+                            f"\n{'='*80}\n"
+                            f"[Profiler] Full training step — top 30 ops by {sort_key}\n"
+                            f"{'='*80}\n"
+                            + _prof.key_averages(group_by_input_shape=True).table(
+                                sort_by=sort_key, row_limit=30
+                            )
+                        )
+                        trace_path = "/home/piado/projects/aip-lindell/piado/vae/tmp/train_step_profile.json"
+                        _prof.export_chrome_trace(trace_path)
+                        print(f"[Profiler] Chrome trace saved → {trace_path}")
+                        print(f"[Profiler] Open with chrome://tracing or https://ui.perfetto.dev")
+                        _prof = None  # prevent accidental re-use
 
                     # -- logging --
                     log_loss("all", vae_loss, loss_dict, use_video)
@@ -2478,7 +2694,7 @@ def main():
                     if use_discriminator:
                         log_loss("gen_w", generator_loss, loss_dict, use_video)
                         log_loss("gen", g_loss, loss_dict, use_video)
-                    if (step + 1) % accumulation_steps == 0 and pending_train_stats is not None:
+                    if (global_step + 1) % accumulation_steps == 0 and pending_train_stats is not None:
                         flat_update_sample_ids = [
                             sid for microbatch_ids in current_update_sample_ids for sid in microbatch_ids
                         ]
@@ -2634,12 +2850,16 @@ def main():
                         ctx = (
                             booster.no_sync(discriminator, disc_optimizer)
                             if cfg.get("plugin", "zero2") in ("zero1", "zero1-seq")
-                            and (step + 1) % accumulation_steps != 0
+                            and (global_step + 1) % accumulation_steps != 0
                             else nullcontext()
                         )
                         with ctx:
-                            booster.backward(loss=disc_loss / accumulation_steps, optimizer=disc_optimizer)
-                        if (step + 1) % accumulation_steps == 0:
+                            disc_loss_scaled = disc_loss / accumulation_steps
+                            if disc_optimizer_has_booster_backward:
+                                booster.backward(loss=disc_loss_scaled, optimizer=disc_optimizer)
+                            else:
+                                disc_loss_scaled.backward()
+                        if (global_step + 1) % accumulation_steps == 0:
                             disc_optimizer.step()
                             disc_optimizer.zero_grad()
                             if disc_lr_scheduler is not None:
@@ -2780,14 +3000,13 @@ def main():
                                         "epoch": epoch,
                                         "epoch_float": epoch_float,
                                         "lr": optimizer.param_groups[0]["lr"],
-                                        "train/use_video": int(use_video),
                                         # Average losses over log_every steps
                                         "loss/total": avg_loss["all"],
                                         "loss/nll": avg_loss.get("nll", 0.0),
                                         "loss/nll_rec": avg_loss.get("nll_rec", 0.0),
                                         "loss/nll_per": avg_loss.get("nll_per", 0.0),
                                         "loss/kl": avg_loss.get("kl", 0.0),
-                                        "global_grad_norm": optimizer.get_grad_norm(),
+                                        "global_grad_norm": _safe_optimizer_get_grad_norm(optimizer),
                                     }
                                 
                                 # Discriminator / GAN losses (only when enabled)
@@ -2816,11 +3035,11 @@ def main():
                                     wandb_log_dict["train_batch/ssim"] = loss_dict["ssim"]
                                     wandb_log_dict["train_batch/mse"] = loss_dict["mse"]
                                 
-                                # Add visualizations if available (train + val so both appear in Media)
+                                # Add train/test reconstruction visualizations as separate media keys.
                                 if "reconstruction_samples" in loss_dict:
-                                    wandb_log_dict["reconstructions"] = loss_dict["reconstruction_samples"]
+                                    wandb_log_dict["train_reconstructions"] = loss_dict["reconstruction_samples"]
                                 if "val_reconstruction_samples" in loss_dict:
-                                    wandb_log_dict["val_reconstructions"] = loss_dict["val_reconstruction_samples"]
+                                    wandb_log_dict["test_reconstructions"] = loss_dict["val_reconstruction_samples"]
                                 
                                 wandb.log(wandb_log_dict, step=actual_update_step)
 
@@ -2957,17 +3176,21 @@ def main():
         if save_ckpt and coordinator.is_master():
             if epoch_psnr_count <= 0:
                 logger.warning(
-                    "Skipping epoch-end checkpoint at epoch %s (no train PSNR samples available).",
+                    "No train PSNR samples at epoch %s (NaN output or eval not reached yet); "
+                    "saving checkpoint anyway.",
                     epoch,
                 )
             elif train_psnr_bad_for_ckpt:
                 logger.warning(
-                    "Skipping epoch-end checkpoint at epoch %s due to low epoch-mean train PSNR (%.3f < %.3f).",
+                    "Low epoch-mean train PSNR at epoch %s (%.3f < %.3f); "
+                    "saving checkpoint anyway (use early-stop guard to halt training).",
                     epoch,
                     epoch_psnr_mean,
                     train_psnr_guard_threshold,
                 )
-            else:
+            # Always save — PSNR quality is logged above but never blocks the save.
+            # The early-stop guard (train_psnr_guard) is the right place to halt bad training.
+            if save_ckpt:
                 gc.collect()
                 use_async_io = False
                 save_dir = checkpoint_io.save(

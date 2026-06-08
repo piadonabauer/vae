@@ -1,0 +1,38 @@
+=== wan_blur_diagnostic task 6/6 idx=5 ===
+wandb_expr_name=blur_diag_no_ema_eval
+experiment_name (outputs dir)=blur_diag_no_ema_eval__job3747917_t6
+Config: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py
+Common overrides: --profile_timing False --profile_step False
+Experiment overrides: --eval_use_ema False
+Mon May 25 07:05:47 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.159.03             Driver Version: 580.159.03     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    Off |   00000000:E3:00.0 Off |                    0 |
+| N/A   29C    P8             34W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_ADDR=127.0.0.1 MASTER_PORT=27923
+DYNAMO_BACKEND=no
+wandb=True (config default; profile_timing forced False in this script)
+Launch attempt 1/3 on port 27923
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/128-res train_target_hw=(128, 128) train_target_frames=9 bucket_config={'128px_ar1:1': {9: (1.0, 1)}}
+changing outputs/blur_diag_no_ema_eval__job3747917_t6 to share
+PTVideoDataset: Found 400 .pt file(s)
+PTVideoDataset: Found 9 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 241 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+[step_time] Average wall time over first 10 training steps: 100.2115 s

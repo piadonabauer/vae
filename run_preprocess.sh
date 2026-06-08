@@ -24,7 +24,7 @@ source "$VAE_DIR/snth/bin/activate"
 
 # --output-root is the *parent*; the script always appends "<image-size>-res" (here: 128-res).
 NERSEMBLE_ROOT="${NERSEMBLE_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames}"
 # Large temp for tar extract; override with TEMP_DIR=... (Compute Canada: often same as $SCRATCH).
 TEMP_DIR="${TEMP_DIR:-${SCRATCH:-/scratch/${USER}}}"
 
@@ -36,7 +36,7 @@ srun python3 /home/piado/projects/aip-lindell/piado/vae/data/processing/preproce
   --frames 9 \
   --images-subdir images_fgr \
   --disable-background-removal \
-  --camera-serials 222200036 220700191 222200037 222200047 \
+  --camera-serials 222200042 222200046 222200036 220700191 222200037 222200047 222200049 221501007 \
   --only-sequences EMO-1-shout+laugh \
   --temp-dir "$TEMP_DIR" \
   --skip-existing

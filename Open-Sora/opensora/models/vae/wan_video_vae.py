@@ -23,6 +23,7 @@ from diffsynth.models.wan_video_vae import (
     LoRAAttentionBlock,
     LoRAConv2d,
     LoRAConv3d,
+    ProfileTimer,
     WanVideoVAE,
 )
 
@@ -574,10 +575,13 @@ class MultiviewWanVideoVAE(nn.Module):
             z = self.crossview_vae.reparameterize(mu, logvar)
 
             # Decode once per view using view-conditioned embeddings
+            # VIEW_EMBEDDINGS 3: loop over views
             recons = []
-            for v_idx in range(V):
-                rec_v = self.crossview_vae.decode(z, scale, view_idx=v_idx)
-                recons.append(rec_v)
+            with ProfileTimer.block("decode.all_views"):
+                for v_idx in range(V):
+                    with ProfileTimer.block(f"decode.view_{v_idx}"):
+                        rec_v = self.crossview_vae.decode(z, scale, view_idx=v_idx)
+                    recons.append(rec_v)
 
             # Stack → [B, V, C, T, H, W]
             x_rec = torch.stack(recons, dim=1)

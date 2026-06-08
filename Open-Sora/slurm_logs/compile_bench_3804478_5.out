@@ -1,0 +1,682 @@
+════════════════════════════════════════════════════════════════════
+  torch.compile benchmark — task 5/5: compile_max_autotune_no_cg
+  SLURM array job: 3804478_5  node: kn007
+  GPU:     NVIDIA L40S
+════════════════════════════════════════════════════════════════════
+  Experiment-specific overrides : --optimization True --optimization_compile_mode max-autotune-no-cudagraphs
+  Common overrides (all tasks)  :
+    --data_preset single_sequence  --batch_size 1  --accumulation_steps 1
+    --epochs 70  --log_every 1  --log_bottleneck_every 1
+    --wandb False  --save_ckpt False  --eval_every 999999
+    --final_eval False  --profile_step False  --deterministic True
+  Log  → /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/compile_benchmark/compile_max_autotune_no_cg.log
+  GPU  → /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/compile_benchmark/compile_max_autotune_no_cg_gpu.csv
+
+Fri May 29 04:55:50 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.159.03             Driver Version: 580.159.03     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    Off |   00000000:E3:00.0 Off |                    0 |
+| N/A   28C    P8             33W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_PORT=24483
+
+[T+30.380] chgrp: changing group of 'outputs/benchmark_compile_max_autotune_no_cg/config.txt': Operation not permitted
+[T+30.381] chgrp: changing group of 'outputs/benchmark_compile_max_autotune_no_cg/eval_metrics.jsonl': Operation not permitted
+[T+30.381] chgrp: changing group of 'outputs/benchmark_compile_max_autotune_no_cg/log.txt': Operation not permitted
+[T+30.382] chgrp: changing group of 'outputs/benchmark_compile_max_autotune_no_cg/loss_config.json': Operation not permitted
+[T+30.382] chgrp: changing group of 'outputs/benchmark_compile_max_autotune_no_cg/train_debug_stats.jsonl': Operation not permitted
+[T+30.383] chgrp: changing group of 'outputs/benchmark_compile_max_autotune_no_cg': Operation not permitted
+[T+30.385] [[34m2026-05-29 04:56:21[0m] Experiment directory created at outputs/benchmark_compile_max_autotune_no_cg
+[T+30.385] [[34m2026-05-29 04:56:21[0m] profile_timing enabled: wandb disabled; will profile once at global_step=50
+[T+30.386] [[34m2026-05-29 04:56:21[0m] Determinism mode: cuBLAS workspace, cudnn deterministic, TF32 disabled, torch.use_deterministic_algorithms(warn_only=True); data workers use seed+worker_id; epoch Python RNG uses seed+rank. Multi-GPU ZeRO and BF16 may still break bit-for-bit replay.
+[T+30.386] [[34m2026-05-29 04:56:21[0m] Using explicit global grad clipping (max_norm=2.0) with DP all-reduce; plugin-internal clipping disabled to avoid ZeRO shard-local clipping ambiguity.
+[T+30.392] [[34m2026-05-29 04:56:21[0m] Training configuration:
+[T+30.392]  {'DATA_ROOT': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.392]  '_gen_loss_config': None,
+[T+30.392]  '_optim_discriminator': None,
+[T+30.392]  '_resolved': {'bucket_key': '128px_ar1:1',
+[T+30.392]                'data_root': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.392]                'load_from_128_for_64_high_t': False,
+[T+30.392]                'train_target_frames': 9,
+[T+30.392]                'train_target_hw': (128, 128)},
+[T+30.392]  '_val_participants': [97, 175, 226, 18, 30, 38, 85, 124, 227, 240],
+[T+30.392]  'accumulation_steps': 1,
+[T+30.392]  'all_people_expression_sequence': 'EMO-1-shout+laugh',
+[T+30.392]  'batch_size': 1,
+[T+30.392]  'bucket_config': {'128px_ar1:1': {9: (1.0, 1)}},
+[T+30.392]  'config_path': '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py',
+[T+30.392]  'data_preset': 'single_sequence',
+[T+30.392]  'dataset': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res/p017/EMO-1-shout+laugh/frames.pt',
+[T+30.392]              'repeat': 1,
+[T+30.392]              'type': 'pt_video'},
+[T+30.392]  'dataset_presets': {'__default__': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.392]                                      'participants': [17,
+[T+30.392]                                                       18,
+[T+30.392]                                                       30,
+[T+30.392]                                                       31,
+[T+30.392]                                                       32,
+[T+30.392]                                                       33,
+[T+30.392]                                                       35,
+[T+30.392]                                                       36,
+[T+30.392]                                                       37],
+[T+30.392]                                      'repeat': 1,
+[T+30.392]                                      'scan_subdirs': True,
+[T+30.392]                                      'type': 'pt_video'},
+[T+30.392]                      'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.392]                                     'exclude_participants': [97,
+[T+30.392]                                                              175,
+[T+30.392]                                                              226,
+[T+30.392]                                                              18,
+[T+30.392]                                                              30,
+[T+30.392]                                                              38,
+[T+30.392]                                                              85,
+[T+30.392]                                                              124,
+[T+30.392]                                                              227,
+[T+30.392]                                                              240],
+[T+30.392]                                     'expected_views': 2,
+[T+30.392]                                     'participants': None,
+[T+30.392]                                     'repeat': 1,
+[T+30.392]                                     'scan_subdirs': True,
+[T+30.392]                                     'skip_mismatched_views': True,
+[T+30.392]                                     'type': 'pt_video'},
+[T+30.392]                      'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.392]                                                    'exclude_participants': [97,
+[T+30.392]                                                                             175,
+[T+30.392]                                                                             226,
+[T+30.392]                                                                             18,
+[T+30.392]                                                                             30,
+[T+30.392]                                                                             38,
+[T+30.392]                                                                             85,
+[T+30.392]                                                                             124,
+[T+30.392]                                                                             227,
+[T+30.392]                                                                             240],
+[T+30.392]                                                    'expression_sequence': 'EMO-1-shout+laugh',
+[T+30.392]                                                    'participants': None,
+[T+30.392]                                                    'repeat': 1,
+[T+30.392]                                                    'scan_subdirs': True,
+[T+30.392]                                                    'skip_mismatched_views': True,
+[T+30.392]                                                    'type': 'pt_video'},
+[T+30.392]                      'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.392]                                     'exclude_sequences': ['EMO-4-disgust+happy',
+[T+30.392]                                                           'SEN-10-port_strong_smokey'],
+[T+30.392]                                     'participants': [18],
+[T+30.392]                                     'repeat': 1,
+[T+30.392]                                     'scan_subdirs': True,
+[T+30.392]                                     'type': 'pt_video'},
+[T+30.392]                      'single_sequence': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res/p017/EMO-1-shout+laugh/frames.pt',
+[T+30.392]                                          'repeat': 1,
+[T+30.392]                                          'type': 'pt_video'},
+[T+30.392]                      'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.392]                                      'participants': [17,
+[T+30.392]                                                       31,
+[T+30.392]                                                       32,
+[T+30.392]                                                       33,
+[T+30.393]                                                       35,
+[T+30.393]                                                       36,
+[T+30.393]                                                       37],
+[T+30.393]                                      'repeat': 1,
+[T+30.393]                                      'scan_subdirs': True,
+[T+30.393]                                      'type': 'pt_video'}},
+[T+30.393]  'debug_stats_every': 1,
+[T+30.393]  'debug_stats_start_step': 0,
+[T+30.393]  'debug_stats_weight_every': 50,
+[T+30.393]  'deterministic': True,
+[T+30.393]  'disc_learning_rate': None,
+[T+30.393]  'disc_multiview_mode': 'joint_4d',
+[T+30.393]  'disc_per_frame_2d': False,
+[T+30.393]  'discriminator': None,
+[T+30.393]  'discriminator_choice': 'none',
+[T+30.393]  'dtype': 'bf16',
+[T+30.393]  'dynamo_backend': 'no',
+[T+30.393]  'ema_decay': 0.9999,
+[T+30.393]  'epochs': 70,
+[T+30.393]  'eval_batch_size': 1,
+[T+30.393]  'eval_every': 999999,
+[T+30.393]  'eval_num_samples': 0,
+[T+30.393]  'eval_use_ema': True,
+[T+30.393]  'experiment_name': 'benchmark_compile_max_autotune_no_cg',
+[T+30.393]  'final_eval': False,
+[T+30.393]  'final_eval_num_samples': 0,
+[T+30.393]  'fixed_seq_eval_every_epochs': 0,
+[T+30.393]  'full_eval_every': 999999,
+[T+30.393]  'gan_log_adaptive_grad_metrics': False,
+[T+30.393]  'gen_disc_weight': None,
+[T+30.393]  'grad_checkpoint': True,
+[T+30.393]  'grad_clip': 2.0,
+[T+30.393]  'keep_n_latest': 5,
+[T+30.393]  'kl_loss_weight': 1e-06,
+[T+30.393]  'learning_rate': 0.0001,
+[T+30.393]  'log_bottleneck_every': 1,
+[T+30.393]  'log_every': 1,
+[T+30.393]  'log_latent_shapes_every': 0,
+[T+30.393]  'log_memory': False,
+[T+30.393]  'log_step_time': True,
+[T+30.393]  'log_training_design_summary': False,
+[T+30.393]  'log_training_param_overview': True,
+[T+30.393]  'logvar_init': 0.0,
+[T+30.393]  'lr_scheduler': {'decay_factor': 0.5,
+[T+30.393]                   'decay_steps': 5000,
+[T+30.393]                   'min_lr': 5e-06,
+[T+30.393]                   'use_exponential_decay': True,
+[T+30.393]                   'warmup_steps': 100},
+[T+30.393]  'mixed_image_ratio': 0.0,
+[T+30.393]  'mixed_strategy': None,
+[T+30.393]  'model': {'freeze_temporal': True,
+[T+30.393]            'from_pretrained': '/home/piado/scratch/Wan2.1_VAE.pth',
+[T+30.393]            'from_scratch': False,
+[T+30.393]            'full_finetune_decoder': False,
+[T+30.393]            'fusion_mode': 'cross_attention',
+[T+30.393]            'lora_rank': 32,
+[T+30.393]            'train_spatial': True,
+[T+30.393]            'type': 'multiview_wan_video_vae',
+[T+30.393]            'use_crossview_encoder': True,
+[T+30.393]            'use_lora': True,
+[T+30.393]            'use_lora_after': True,
+[T+30.393]            'use_lora_before': False,
+[T+30.393]            'use_view_embedding': False,
+[T+30.393]            'use_view_group_fusion': False,
+[T+30.393]            'use_viewwise_decoder_lora': False,
+[T+30.393]            'view_compression': 2,
+[T+30.393]            'view_in': 0,
+[T+30.393]            'view_mixing_strategy': 'embedding',
+[T+30.393]            'z_dim': 16},
+[T+30.393]  'nersemble_processed_base': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames',
+[T+30.393]  'num_bucket_build_workers': 1,
+[T+30.393]  'num_reconstruction_vis_samples': 3,
+[T+30.393]  'num_workers': 8,
+[T+30.393]  'optim': {'betas': (0.9, 0.98),
+[T+30.393]            'cls': 'AdamW',
+[T+30.393]            'eps': 1e-08,
+[T+30.393]            'lr': 0.0001,
+[T+30.393]            'weight_decay': 0.0},
+[T+30.393]  'optimization': True,
+[T+30.393]  'optimization_compile_mode': 'max-autotune-no-cudagraphs',
+[T+30.393]  'outputs': 'outputs',
+[T+30.393]  'perceptual_loss_weight': 1.5,
+[T+30.393]  'persistent_workers': True,
+[T+30.393]  'pin_memory_cache_pre_alloc_numels': None,
+[T+30.393]  'plugin': 'none',
+[T+30.393]  'plugin_config': {'overlap_allgather': False, 'reduce_bucket_size_in_m': 128},
+[T+30.393]  'prefetch_factor': 4,
+[T+30.393]  'profile_step': False,
+[T+30.393]  'profile_timing': True,
+[T+30.393]  'profile_timing_step': 50,
+[T+30.393]  'save_ckpt': False,
+[T+30.393]  'seed': 42,
+[T+30.393]  'sweep_gen_disc_weight': None,
+[T+30.393]  'train_psnr_guard': False,
+[T+30.393]  'train_psnr_guard_consecutive': 5,
+[T+30.393]  'train_psnr_guard_min_epochs': 0,
+[T+30.393]  'train_psnr_guard_start_epoch': 0,
+[T+30.393]  'train_psnr_guard_threshold': 15.0,
+[T+30.393]  'train_target_frames': 9,
+[T+30.393]  'train_target_hw': (128, 128),
+[T+30.393]  'update_warmup_steps': False,
+[T+30.393]  'vae_loss_config': {'kl_loss_weight': 1e-06,
+[T+30.393]                      'logvar_init': 0.0,
+[T+30.393]                      'perceptual_loss_weight': 1.5,
+[T+30.393]                      'view_consistency_weight': 0.0},
+[T+30.393]  'vae_loss_preset': 'default',
+[T+30.393]  'vae_target_range': '[-1,1]',
+[T+30.393]  'val_dataset': None,
+[T+30.393]  'val_dataset_presets': {'__default__': None,
+[T+30.393]                          'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.393]                                         'expected_views': 2,
+[T+30.393]                                         'participants': [97,
+[T+30.393]                                                          175,
+[T+30.393]                                                          226,
+[T+30.393]                                                          18,
+[T+30.393]                                                          30,
+[T+30.393]                                                          38,
+[T+30.393]                                                          85,
+[T+30.393]                                                          124,
+[T+30.393]                                                          227,
+[T+30.393]                                                          240],
+[T+30.393]                                         'repeat': 1,
+[T+30.393]                                         'scan_subdirs': True,
+[T+30.393]                                         'skip_mismatched_views': True,
+[T+30.393]                                         'type': 'pt_video'},
+[T+30.393]                          'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.393]                                                        'expression_sequence': 'EMO-1-shout+laugh',
+[T+30.393]                                                        'participants': [97,
+[T+30.393]                                                                         175,
+[T+30.393]                                                                         226,
+[T+30.393]                                                                         18,
+[T+30.393]                                                                         30,
+[T+30.393]                                                                         38,
+[T+30.393]                                                                         85,
+[T+30.393]                                                                         124,
+[T+30.393]                                                                         227,
+[T+30.393]                                                                         240],
+[T+30.393]                                                        'repeat': 1,
+[T+30.393]                                                        'scan_subdirs': True,
+[T+30.393]                                                        'skip_mismatched_views': True,
+[T+30.393]                                                        'type': 'pt_video'},
+[T+30.393]                          'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.393]                                         'include_only_sequences': ['EMO-4-disgust+happy',
+[T+30.393]                                                                    'SEN-10-port_strong_smokey'],
+[T+30.393]                                         'participants': [17],
+[T+30.393]                                         'repeat': 1,
+[T+30.393]                                         'scan_subdirs': True,
+[T+30.393]                                         'type': 'pt_video'},
+[T+30.393]                          'single_sequence': None,
+[T+30.393]                          'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+[T+30.393]                                          'participants': [18, 30],
+[T+30.393]                                          'repeat': 1,
+[T+30.393]                                          'scan_subdirs': True,
+[T+30.393]                                          'type': 'pt_video'}},
+[T+30.393]  'view_consistency_weight': 0.0,
+[T+30.393]  'view_flatten_in_disc': False,
+[T+30.393]  'view_flatten_in_loss': False,
+[T+30.393]  'wandb': False,
+[T+30.393]  'wandb_expr_name': 'benchmark_compile_max_autotune_no_cg',
+[T+30.393]  'wandb_min_steps_before_init': 10,
+[T+30.393]  'wandb_project': 'wan_multiview_vae'}
+[T+30.397] [[34m2026-05-29 04:56:21[0m] Building dataset...
+[T+30.443] [[34m2026-05-29 04:56:21[0m] Dataset contains 1 samples.
+[T+30.444] [[34m2026-05-29 04:56:21[0m] Fixed per-frame eval sequence name: EMO-1-shout+laugh (train idx=0, val idx=None)
+[T+30.445] [[34m2026-05-29 04:56:21[0m] Building models...
+[T+30.560] [[34m2026-05-29 04:56:21[0m] Auto-detected model.view_in=8 from first dataset sample
+[T+33.176] [[34m2026-05-29 04:56:24[0m] [MultiviewWanVideoVAE] Number of parameters: 180.50 M
+[T+33.176] [[34m2026-05-29 04:56:24[0m] [MultiviewWanVideoVAE] Number of trainable parameters: 94.40 M
+[T+33.177] [[34m2026-05-29 04:56:24[0m] [VAE] param overview: total=180.50 M trainable=94.40 M (52.30% of weights) frozen=86.10 M
+[T+33.177] [[34m2026-05-29 04:56:24[0m] [VAE] LoRA trainable: 998.59 K (1.0% of trainable); heuristic attention/cross-fusion LoRA: 998.59 K (100.0% of LoRA); other LoRA: 0
+[T+33.177] [[34m2026-05-29 04:56:24[0m] [VAE] base trainable (non-LoRA): 93.43 M (99.0% of trainable)
+[T+35.278] [[34m2026-05-29 04:56:26[0m] EMA model created.
+[T+35.278] [[34m2026-05-29 04:56:26[0m] [optimization] channels_last_3d: disabled (fragile with view() ops and compile cache)
+[T+35.281] [[34m2026-05-29 04:56:26[0m] VAE trainable params (optimizer): 98,985,776
+[T+35.281] [[34m2026-05-29 04:56:26[0m] [optimization] torch.compile: mode=max-autotune-no-cudagraphs (first step will be slow)
+[T+35.313] [[34m2026-05-29 04:56:26[0m] Preparing for distributed training...
+[T+35.313] [[34m2026-05-29 04:56:26[0m] Optimizer AdamW has no `.backward`; using booster.backward(loss=...) compatibility path.
+[T+35.313] [[34m2026-05-29 04:56:26[0m] Boosted model for distributed training
+[T+35.313] [[34m2026-05-29 04:56:26[0m] Training for 70 epochs with 1 steps per epoch
+[T+35.381] [[34m2026-05-29 04:56:26[0m] [optimization] Warming up torch.compile eval graph (one-time, before training loop)...
+[T+161.437] [[34m2026-05-29 04:58:32[0m] [AttentionMultiViewVideoVan] latent shape: (1, 16, 9, 16, 16)  (B=1, z_dim=16, T'=9, H'=16, W'=16)
+[T+1101.497] [[34m2026-05-29 05:14:12[0m] [optimization] Eval graph warm-up done.
+[T+1101.501] [rank0]:[W529 05:14:12.135722588 ProcessGroupNCCL.cpp:5138] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+[T+1101.707] [wan_multiview] effective data: epochs=70 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res train_target_hw=(128, 128) train_target_frames=9 bucket_config={'128px_ar1:1': {9: (1.0, 1)}}
+[T+1101.707] changing outputs/benchmark_compile_max_autotune_no_cg to share
+[T+1101.707] PTVideoDataset: Found 1 .pt file(s)
+[T+1101.707] [MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+[T+1101.707]   -> 194 ckpt keys; 255 missing, 90 unexpected
+[T+1101.707] modulated mixed image ratio: 0.0
+[T+4004.941] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=0][[34m2026-05-29 06:02:35[0m] Step 1 | Loss: 1.882812 | Timing: time/data_load: 0.000s, time/forward: 1296.873s, time/loss_compute: 0.173s, time/discriminator: 0.000s, time/backward: 1284.362s, time/optimizer: 0.306s, time/total_step: 2902.239s
+[T+4004.941] train:   0%|          | 0/1 [48:22<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.82, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [48:22<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.82, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4004.948] [BOTTLENECK] step 1 | total_step 2902.239s | time/data_load: 0.000s (0%) | time/forward: 1296.873s (45%) | time/loss_compute: 0.173s (0%) | time/backward: 1284.362s (44%) | time/optimizer: 0.306s (0%) | time/total_step: 2902.239s (100%)
+[T+4004.948]   -> at this rate 1000 steps ≈ 48370.7 min
+[T+4008.522] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=1][[34m2026-05-29 06:02:39[0m] Step 2 | Loss: 1.882812 | Timing: time/data_load: 0.000s, time/forward: 0.668s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.194s, time/optimizer: 0.048s, time/total_step: 3.535s
+[T+4008.523] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.82, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.82, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4008.525] [BOTTLENECK] step 2 | total_step 3.535s | time/data_load: 0.000s (0%) | time/forward: 0.668s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.194s (34%) | time/optimizer: 0.048s (1%) | time/total_step: 3.535s (100%)
+[T+4008.525]   -> at this rate 1000 steps ≈ 58.9 min
+[T+4012.031] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=2][[34m2026-05-29 06:02:42[0m] Step 3 | Loss: 1.882812 | Timing: time/data_load: 0.000s, time/forward: 0.667s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.130s, time/optimizer: 0.047s, time/total_step: 3.462s
+[T+4012.032] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.82, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.82, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4012.034] [BOTTLENECK] step 3 | total_step 3.462s | time/data_load: 0.000s (0%) | time/forward: 0.667s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.130s (33%) | time/optimizer: 0.047s (1%) | time/total_step: 3.462s (100%)
+[T+4012.034]   -> at this rate 1000 steps ≈ 57.7 min
+[T+4015.573] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=3][[34m2026-05-29 06:02:46[0m] Step 4 | Loss: 1.875000 | Timing: time/data_load: 0.000s, time/forward: 0.637s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.166s, time/optimizer: 0.048s, time/total_step: 3.489s
+[T+4015.574] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4015.576] [BOTTLENECK] step 4 | total_step 3.489s | time/data_load: 0.000s (0%) | time/forward: 0.637s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.166s (33%) | time/optimizer: 0.048s (1%) | time/total_step: 3.489s (100%)
+[T+4015.576]   -> at this rate 1000 steps ≈ 58.1 min
+[T+4019.213] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=4][[34m2026-05-29 06:02:50[0m] Step 5 | Loss: 1.875000 | Timing: time/data_load: 0.000s, time/forward: 0.721s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.142s, time/optimizer: 0.047s, time/total_step: 3.560s
+[T+4019.214] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.88, nll=1.88, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4019.216] [BOTTLENECK] step 5 | total_step 3.560s | time/data_load: 0.000s (0%) | time/forward: 0.721s (20%) | time/loss_compute: 0.028s (1%) | time/backward: 1.142s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.560s (100%)
+[T+4019.216]   -> at this rate 1000 steps ≈ 59.3 min
+[T+4022.757] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=5][[34m2026-05-29 06:02:53[0m] Step 6 | Loss: 1.867188 | Timing: time/data_load: 0.000s, time/forward: 0.679s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.124s, time/optimizer: 0.047s, time/total_step: 3.503s
+[T+4022.757] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.87, nll=1.87, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.87, nll=1.87, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4022.760] [BOTTLENECK] step 6 | total_step 3.503s | time/data_load: 0.000s (0%) | time/forward: 0.679s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.124s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.503s (100%)
+[T+4022.760]   -> at this rate 1000 steps ≈ 58.4 min
+[T+4026.329] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=6][[34m2026-05-29 06:02:57[0m] Step 7 | Loss: 1.867188 | Timing: time/data_load: 0.000s, time/forward: 0.658s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.134s, time/optimizer: 0.047s, time/total_step: 3.520s
+[T+4026.330] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.87, nll=1.87, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.87, nll=1.87, nll_rec=0.66, nll_per=0.81, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4026.332] [BOTTLENECK] step 7 | total_step 3.520s | time/data_load: 0.000s (0%) | time/forward: 0.658s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.134s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.520s (100%)
+[T+4026.332]   -> at this rate 1000 steps ≈ 58.7 min
+[T+4030.013] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=7][[34m2026-05-29 06:03:00[0m] Step 8 | Loss: 1.859375 | Timing: time/data_load: 0.000s, time/forward: 0.669s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.143s, time/optimizer: 0.047s, time/total_step: 3.606s
+[T+4030.013] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.86, nll=1.86, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.86, nll=1.86, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4030.016] [BOTTLENECK] step 8 | total_step 3.606s | time/data_load: 0.000s (0%) | time/forward: 0.669s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.143s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.606s (100%)
+[T+4030.016]   -> at this rate 1000 steps ≈ 60.1 min
+[T+4033.711] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=8][[34m2026-05-29 06:03:04[0m] Step 9 | Loss: 1.851562 | Timing: time/data_load: 0.000s, time/forward: 0.659s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.161s, time/optimizer: 0.047s, time/total_step: 3.634s
+[T+4033.712] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.85, nll=1.85, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.85, nll=1.85, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4033.714] [BOTTLENECK] step 9 | total_step 3.634s | time/data_load: 0.000s (0%) | time/forward: 0.659s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.161s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.634s (100%)
+[T+4033.714]   -> at this rate 1000 steps ≈ 60.6 min
+[T+4037.358] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=9][[34m2026-05-29 06:03:08[0m] [step_time] Average wall time over first 10 training steps: 293.4129 s
+[T+4037.358]                                                      train:   0%|          | 0/1 [00:03<?, ?it/s, epoch=9][[34m2026-05-29 06:03:08[0m] Step 10 | Loss: 1.851562 | Timing: time/data_load: 0.000s, time/forward: 0.644s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.137s, time/optimizer: 0.047s, time/total_step: 3.581s
+[T+4037.358] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.85, nll=1.84, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.85, nll=1.84, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4037.361] [step_time] Average wall time over first 10 training steps: 293.4129 s
+[T+4037.361] [BOTTLENECK] step 10 | total_step 3.581s | time/data_load: 0.000s (0%) | time/forward: 0.644s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.137s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.581s (100%)
+[T+4037.361]   -> at this rate 1000 steps ≈ 59.7 min
+[T+4041.001] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=10][[34m2026-05-29 06:03:11[0m] Step 11 | Loss: 1.851562 | Timing: time/data_load: 0.000s, time/forward: 0.640s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.115s, time/optimizer: 0.047s, time/total_step: 3.575s
+[T+4041.002] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.85, nll=1.84, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.85, nll=1.84, nll_rec=0.65, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4041.004] [BOTTLENECK] step 11 | total_step 3.575s | time/data_load: 0.000s (0%) | time/forward: 0.640s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.115s (31%) | time/optimizer: 0.047s (1%) | time/total_step: 3.575s (100%)
+[T+4041.004]   -> at this rate 1000 steps ≈ 59.6 min
+[T+4044.591] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=11][[34m2026-05-29 06:03:15[0m] Step 12 | Loss: 1.843750 | Timing: time/data_load: 0.000s, time/forward: 0.638s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.120s, time/optimizer: 0.047s, time/total_step: 3.550s
+[T+4044.592] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.84, nll=1.84, nll_rec=0.64, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.84, nll=1.84, nll_rec=0.64, nll_per=0.80, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4044.594] [BOTTLENECK] step 12 | total_step 3.550s | time/data_load: 0.000s (0%) | time/forward: 0.638s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.120s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.550s (100%)
+[T+4044.594]   -> at this rate 1000 steps ≈ 59.2 min
+[T+4048.127] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=12][[34m2026-05-29 06:03:19[0m] Step 13 | Loss: 1.843750 | Timing: time/data_load: 0.000s, time/forward: 0.634s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.109s, time/optimizer: 0.047s, time/total_step: 3.502s
+[T+4048.127] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.84, nll=1.84, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.84, nll=1.84, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4048.130] [BOTTLENECK] step 13 | total_step 3.502s | time/data_load: 0.000s (0%) | time/forward: 0.634s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.109s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.502s (100%)
+[T+4048.130]   -> at this rate 1000 steps ≈ 58.4 min
+[T+4051.697] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=13][[34m2026-05-29 06:03:22[0m] Step 14 | Loss: 1.835938 | Timing: time/data_load: 0.000s, time/forward: 0.656s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.113s, time/optimizer: 0.047s, time/total_step: 3.511s
+[T+4051.697] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.84, nll=1.84, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.84, nll=1.84, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4051.700] [BOTTLENECK] step 14 | total_step 3.511s | time/data_load: 0.000s (0%) | time/forward: 0.656s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.113s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.511s (100%)
+[T+4051.700]   -> at this rate 1000 steps ≈ 58.5 min
+[T+4055.194] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=14][[34m2026-05-29 06:03:26[0m] Step 15 | Loss: 1.828125 | Timing: time/data_load: 0.000s, time/forward: 0.633s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.114s, time/optimizer: 0.046s, time/total_step: 3.446s
+[T+4055.195] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.83, nll=1.83, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.83, nll=1.83, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4055.197] [BOTTLENECK] step 15 | total_step 3.446s | time/data_load: 0.000s (0%) | time/forward: 0.633s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.114s (32%) | time/optimizer: 0.046s (1%) | time/total_step: 3.446s (100%)
+[T+4055.197]   -> at this rate 1000 steps ≈ 57.4 min
+[T+4058.746] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=15][[34m2026-05-29 06:03:29[0m] Step 16 | Loss: 1.828125 | Timing: time/data_load: 0.000s, time/forward: 0.665s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.114s, time/optimizer: 0.046s, time/total_step: 3.487s
+[T+4058.747] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.83, nll=1.83, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.83, nll=1.83, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4058.750] [BOTTLENECK] step 16 | total_step 3.487s | time/data_load: 0.000s (0%) | time/forward: 0.665s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.114s (32%) | time/optimizer: 0.046s (1%) | time/total_step: 3.487s (100%)
+[T+4058.750]   -> at this rate 1000 steps ≈ 58.1 min
+[T+4062.237] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=16][[34m2026-05-29 06:03:33[0m] Step 17 | Loss: 1.820312 | Timing: time/data_load: 0.000s, time/forward: 0.630s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.112s, time/optimizer: 0.047s, time/total_step: 3.439s
+[T+4062.238] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.82, nll=1.82, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.82, nll=1.82, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4062.240] [BOTTLENECK] step 17 | total_step 3.439s | time/data_load: 0.000s (0%) | time/forward: 0.630s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.112s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.439s (100%)
+[T+4062.240]   -> at this rate 1000 steps ≈ 57.3 min
+[T+4065.800] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=17][[34m2026-05-29 06:03:36[0m] Step 18 | Loss: 1.820312 | Timing: time/data_load: 0.000s, time/forward: 0.637s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.128s, time/optimizer: 0.047s, time/total_step: 3.496s
+[T+4065.800] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.82, nll=1.82, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.82, nll=1.82, nll_rec=0.64, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4065.803] [BOTTLENECK] step 18 | total_step 3.496s | time/data_load: 0.000s (0%) | time/forward: 0.637s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.128s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.496s (100%)
+[T+4065.803]   -> at this rate 1000 steps ≈ 58.3 min
+[T+4069.377] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=18][[34m2026-05-29 06:03:40[0m] Step 19 | Loss: 1.812500 | Timing: time/data_load: 0.000s, time/forward: 0.637s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.137s, time/optimizer: 0.047s, time/total_step: 3.548s
+[T+4069.378] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.81, nll=1.81, nll_rec=0.63, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.81, nll=1.81, nll_rec=0.63, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4069.381] [BOTTLENECK] step 19 | total_step 3.548s | time/data_load: 0.000s (0%) | time/forward: 0.637s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.137s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.548s (100%)
+[T+4069.381]   -> at this rate 1000 steps ≈ 59.1 min
+[T+4073.025] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=19][[34m2026-05-29 06:03:43[0m] Step 20 | Loss: 1.812500 | Timing: time/data_load: 0.000s, time/forward: 0.681s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.120s, time/optimizer: 0.047s, time/total_step: 3.580s
+[T+4073.025] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.81, nll=1.81, nll_rec=0.63, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.81, nll=1.81, nll_rec=0.63, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4073.028] [BOTTLENECK] step 20 | total_step 3.580s | time/data_load: 0.000s (0%) | time/forward: 0.681s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.120s (31%) | time/optimizer: 0.047s (1%) | time/total_step: 3.580s (100%)
+[T+4073.028]   -> at this rate 1000 steps ≈ 59.7 min
+[T+4076.688] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=20][[34m2026-05-29 06:03:47[0m] Step 21 | Loss: 1.812500 | Timing: time/data_load: 0.000s, time/forward: 0.685s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.150s, time/optimizer: 0.047s, time/total_step: 3.628s
+[T+4076.689] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.81, nll=1.80, nll_rec=0.63, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.81, nll=1.80, nll_rec=0.63, nll_per=0.79, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4076.691] [BOTTLENECK] step 21 | total_step 3.628s | time/data_load: 0.000s (0%) | time/forward: 0.685s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.150s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.628s (100%)
+[T+4076.691]   -> at this rate 1000 steps ≈ 60.5 min
+[T+4080.366] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=21][[34m2026-05-29 06:03:51[0m] Step 22 | Loss: 1.804688 | Timing: time/data_load: 0.000s, time/forward: 0.671s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.163s, time/optimizer: 0.047s, time/total_step: 3.614s
+[T+4080.367] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.80, nll=1.80, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.80, nll=1.80, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4080.369] [BOTTLENECK] step 22 | total_step 3.614s | time/data_load: 0.000s (0%) | time/forward: 0.671s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.163s (32%) | time/optimizer: 0.047s (1%) | time/total_step: 3.614s (100%)
+[T+4080.370]   -> at this rate 1000 steps ≈ 60.2 min
+[T+4083.991] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=22][[34m2026-05-29 06:03:54[0m] Step 23 | Loss: 1.796875 | Timing: time/data_load: 0.000s, time/forward: 0.660s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.141s, time/optimizer: 0.048s, time/total_step: 3.556s
+[T+4083.991] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.80, nll=1.80, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.80, nll=1.80, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4083.994] [BOTTLENECK] step 23 | total_step 3.556s | time/data_load: 0.000s (0%) | time/forward: 0.660s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.141s (32%) | time/optimizer: 0.048s (1%) | time/total_step: 3.556s (100%)
+[T+4083.994]   -> at this rate 1000 steps ≈ 59.3 min
+[T+4087.664] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=23][[34m2026-05-29 06:03:58[0m] Step 24 | Loss: 1.789062 | Timing: time/data_load: 0.000s, time/forward: 0.647s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.134s, time/optimizer: 0.047s, time/total_step: 3.620s
+[T+4087.664] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.79, nll=1.79, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.79, nll=1.79, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4087.667] [BOTTLENECK] step 24 | total_step 3.620s | time/data_load: 0.000s (0%) | time/forward: 0.647s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.134s (31%) | time/optimizer: 0.047s (1%) | time/total_step: 3.620s (100%)
+[T+4087.667]   -> at this rate 1000 steps ≈ 60.3 min
+[T+4091.540] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=24][[34m2026-05-29 06:04:02[0m] Step 25 | Loss: 1.789062 | Timing: time/data_load: 0.000s, time/forward: 0.753s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.166s, time/optimizer: 0.048s, time/total_step: 3.808s
+[T+4091.540] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.79, nll=1.78, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.79, nll=1.78, nll_rec=0.62, nll_per=0.78, kl=0.00, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4091.543] [BOTTLENECK] step 25 | total_step 3.808s | time/data_load: 0.000s (0%) | time/forward: 0.753s (20%) | time/loss_compute: 0.028s (1%) | time/backward: 1.166s (31%) | time/optimizer: 0.048s (1%) | time/total_step: 3.808s (100%)
+[T+4091.543]   -> at this rate 1000 steps ≈ 63.5 min
+[T+4095.326] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=25][[34m2026-05-29 06:04:06[0m] Step 26 | Loss: 1.789062 | Timing: time/data_load: 0.000s, time/forward: 0.676s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.117s, time/optimizer: 0.047s, time/total_step: 3.720s
+[T+4095.327] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.79, nll=1.78, nll_rec=0.61, nll_per=0.78, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.79, nll=1.78, nll_rec=0.61, nll_per=0.78, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4095.329] [BOTTLENECK] step 26 | total_step 3.720s | time/data_load: 0.000s (0%) | time/forward: 0.676s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.117s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.720s (100%)
+[T+4095.329]   -> at this rate 1000 steps ≈ 62.0 min
+[T+4099.044] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=26][[34m2026-05-29 06:04:09[0m] Step 27 | Loss: 1.781250 | Timing: time/data_load: 0.000s, time/forward: 0.651s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.142s, time/optimizer: 0.047s, time/total_step: 3.674s
+[T+4099.044] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.78, nll=1.77, nll_rec=0.61, nll_per=0.78, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.78, nll=1.77, nll_rec=0.61, nll_per=0.78, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4099.047] [BOTTLENECK] step 27 | total_step 3.674s | time/data_load: 0.000s (0%) | time/forward: 0.651s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.142s (31%) | time/optimizer: 0.047s (1%) | time/total_step: 3.674s (100%)
+[T+4099.047]   -> at this rate 1000 steps ≈ 61.2 min
+[T+4102.759] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=27][[34m2026-05-29 06:04:13[0m] Step 28 | Loss: 1.773438 | Timing: time/data_load: 0.000s, time/forward: 0.667s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.124s, time/optimizer: 0.047s, time/total_step: 3.649s
+[T+4102.760] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.77, nll=1.77, nll_rec=0.61, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.77, nll=1.77, nll_rec=0.61, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4102.762] [BOTTLENECK] step 28 | total_step 3.649s | time/data_load: 0.000s (0%) | time/forward: 0.667s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.124s (31%) | time/optimizer: 0.047s (1%) | time/total_step: 3.649s (100%)
+[T+4102.762]   -> at this rate 1000 steps ≈ 60.8 min
+[T+4106.419] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=28][[34m2026-05-29 06:04:17[0m] Step 29 | Loss: 1.773438 | Timing: time/data_load: 0.000s, time/forward: 0.661s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.114s, time/optimizer: 0.047s, time/total_step: 3.631s
+[T+4106.420] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.77, nll=1.77, nll_rec=0.61, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.77, nll=1.77, nll_rec=0.61, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4106.422] [BOTTLENECK] step 29 | total_step 3.631s | time/data_load: 0.000s (0%) | time/forward: 0.661s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.114s (31%) | time/optimizer: 0.047s (1%) | time/total_step: 3.631s (100%)
+[T+4106.422]   -> at this rate 1000 steps ≈ 60.5 min
+[T+4110.146] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=29][[34m2026-05-29 06:04:21[0m] Step 30 | Loss: 1.765625 | Timing: time/data_load: 0.000s, time/forward: 0.652s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.121s, time/optimizer: 0.047s, time/total_step: 3.688s
+[T+4110.146] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.77, nll=1.76, nll_rec=0.61, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.77, nll=1.76, nll_rec=0.61, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4110.149] [BOTTLENECK] step 30 | total_step 3.688s | time/data_load: 0.000s (0%) | time/forward: 0.652s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.121s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.688s (100%)
+[T+4110.149]   -> at this rate 1000 steps ≈ 61.5 min
+[T+4113.900] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=30][[34m2026-05-29 06:04:24[0m] Step 31 | Loss: 1.757812 | Timing: time/data_load: 0.000s, time/forward: 0.648s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.121s, time/optimizer: 0.047s, time/total_step: 3.709s
+[T+4113.900] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.76, nll=1.75, nll_rec=0.60, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.76, nll=1.75, nll_rec=0.60, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4113.903] [BOTTLENECK] step 31 | total_step 3.709s | time/data_load: 0.000s (0%) | time/forward: 0.648s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.121s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.709s (100%)
+[T+4113.903]   -> at this rate 1000 steps ≈ 61.8 min
+[T+4117.801] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=31][[34m2026-05-29 06:04:28[0m] Step 32 | Loss: 1.757812 | Timing: time/data_load: 0.000s, time/forward: 0.745s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.141s, time/optimizer: 0.048s, time/total_step: 3.837s
+[T+4117.802] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.76, nll=1.75, nll_rec=0.60, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.76, nll=1.75, nll_rec=0.60, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4117.804] [BOTTLENECK] step 32 | total_step 3.837s | time/data_load: 0.000s (0%) | time/forward: 0.745s (19%) | time/loss_compute: 0.028s (1%) | time/backward: 1.141s (30%) | time/optimizer: 0.048s (1%) | time/total_step: 3.837s (100%)
+[T+4117.804]   -> at this rate 1000 steps ≈ 63.9 min
+[T+4121.577] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=32][[34m2026-05-29 06:04:32[0m] Step 33 | Loss: 1.750000 | Timing: time/data_load: 0.000s, time/forward: 0.655s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.119s, time/optimizer: 0.048s, time/total_step: 3.723s
+[T+4121.577] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.75, nll=1.74, nll_rec=0.59, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.75, nll=1.74, nll_rec=0.59, nll_per=0.77, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4121.580] [BOTTLENECK] step 33 | total_step 3.723s | time/data_load: 0.000s (0%) | time/forward: 0.655s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.119s (30%) | time/optimizer: 0.048s (1%) | time/total_step: 3.723s (100%)
+[T+4121.580]   -> at this rate 1000 steps ≈ 62.1 min
+[T+4125.392] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=33][[34m2026-05-29 06:04:36[0m] Step 34 | Loss: 1.742188 | Timing: time/data_load: 0.000s, time/forward: 0.663s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.139s, time/optimizer: 0.047s, time/total_step: 3.750s
+[T+4125.393] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.74, nll=1.73, nll_rec=0.59, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.74, nll=1.73, nll_rec=0.59, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4125.395] [BOTTLENECK] step 34 | total_step 3.750s | time/data_load: 0.000s (0%) | time/forward: 0.663s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.139s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.750s (100%)
+[T+4125.395]   -> at this rate 1000 steps ≈ 62.5 min
+[T+4129.206] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=34][[34m2026-05-29 06:04:40[0m] Step 35 | Loss: 1.742188 | Timing: time/data_load: 0.000s, time/forward: 0.653s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.157s, time/optimizer: 0.047s, time/total_step: 3.756s
+[T+4129.206] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.74, nll=1.73, nll_rec=0.59, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.74, nll=1.73, nll_rec=0.59, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4129.209] [BOTTLENECK] step 35 | total_step 3.756s | time/data_load: 0.000s (0%) | time/forward: 0.653s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.157s (31%) | time/optimizer: 0.047s (1%) | time/total_step: 3.756s (100%)
+[T+4129.209]   -> at this rate 1000 steps ≈ 62.6 min
+[T+4132.993] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=35][[34m2026-05-29 06:04:43[0m] Step 36 | Loss: 1.734375 | Timing: time/data_load: 0.000s, time/forward: 0.637s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.120s, time/optimizer: 0.047s, time/total_step: 3.742s
+[T+4132.993] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.73, nll=1.73, nll_rec=0.59, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.73, nll=1.73, nll_rec=0.59, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4132.996] [BOTTLENECK] step 36 | total_step 3.742s | time/data_load: 0.000s (0%) | time/forward: 0.637s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.120s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.742s (100%)
+[T+4132.996]   -> at this rate 1000 steps ≈ 62.4 min
+[T+4136.879] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=36][[34m2026-05-29 06:04:47[0m] Step 37 | Loss: 1.726562 | Timing: time/data_load: 0.000s, time/forward: 0.690s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.137s, time/optimizer: 0.047s, time/total_step: 3.829s
+[T+4136.880] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.73, nll=1.72, nll_rec=0.58, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.73, nll=1.72, nll_rec=0.58, nll_per=0.76, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4136.882] [BOTTLENECK] step 37 | total_step 3.829s | time/data_load: 0.000s (0%) | time/forward: 0.690s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.137s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.829s (100%)
+[T+4136.882]   -> at this rate 1000 steps ≈ 63.8 min
+[T+4140.740] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=37][[34m2026-05-29 06:04:51[0m] Step 38 | Loss: 1.718750 | Timing: time/data_load: 0.000s, time/forward: 0.658s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.131s, time/optimizer: 0.047s, time/total_step: 3.804s
+[T+4140.741] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.72, nll=1.71, nll_rec=0.58, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.72, nll=1.71, nll_rec=0.58, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4140.743] [BOTTLENECK] step 38 | total_step 3.804s | time/data_load: 0.000s (0%) | time/forward: 0.658s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.131s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.804s (100%)
+[T+4140.743]   -> at this rate 1000 steps ≈ 63.4 min
+[T+4144.589] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=38][[34m2026-05-29 06:04:55[0m] Step 39 | Loss: 1.710938 | Timing: time/data_load: 0.000s, time/forward: 0.678s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.131s, time/optimizer: 0.046s, time/total_step: 3.806s
+[T+4144.589] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.71, nll=1.70, nll_rec=0.57, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.71, nll=1.70, nll_rec=0.57, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4144.592] [BOTTLENECK] step 39 | total_step 3.806s | time/data_load: 0.000s (0%) | time/forward: 0.678s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.131s (30%) | time/optimizer: 0.046s (1%) | time/total_step: 3.806s (100%)
+[T+4144.592]   -> at this rate 1000 steps ≈ 63.4 min
+[T+4148.432] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=39][[34m2026-05-29 06:04:59[0m] Step 40 | Loss: 1.703125 | Timing: time/data_load: 0.000s, time/forward: 0.641s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.123s, time/optimizer: 0.047s, time/total_step: 3.782s
+[T+4148.433] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.70, nll=1.70, nll_rec=0.57, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.70, nll=1.70, nll_rec=0.57, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4148.436] [BOTTLENECK] step 40 | total_step 3.782s | time/data_load: 0.000s (0%) | time/forward: 0.641s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.123s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.782s (100%)
+[T+4148.436]   -> at this rate 1000 steps ≈ 63.0 min
+[T+4152.383] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=40][[34m2026-05-29 06:05:03[0m] Step 41 | Loss: 1.695312 | Timing: time/data_load: 0.000s, time/forward: 0.665s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.161s, time/optimizer: 0.048s, time/total_step: 3.905s
+[T+4152.383] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.70, nll=1.69, nll_rec=0.57, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.70, nll=1.69, nll_rec=0.57, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4152.385] [BOTTLENECK] step 41 | total_step 3.905s | time/data_load: 0.000s (0%) | time/forward: 0.665s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.161s (30%) | time/optimizer: 0.048s (1%) | time/total_step: 3.905s (100%)
+[T+4152.385]   -> at this rate 1000 steps ≈ 65.1 min
+[T+4156.340] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=41][[34m2026-05-29 06:05:07[0m] Step 42 | Loss: 1.687500 | Timing: time/data_load: 0.000s, time/forward: 0.703s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.147s, time/optimizer: 0.047s, time/total_step: 3.899s
+[T+4156.340] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.69, nll=1.68, nll_rec=0.56, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.69, nll=1.68, nll_rec=0.56, nll_per=0.75, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4156.343] [BOTTLENECK] step 42 | total_step 3.899s | time/data_load: 0.000s (0%) | time/forward: 0.703s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.147s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.899s (100%)
+[T+4156.343]   -> at this rate 1000 steps ≈ 65.0 min
+[T+4160.233] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=42][[34m2026-05-29 06:05:11[0m] Step 43 | Loss: 1.679688 | Timing: time/data_load: 0.000s, time/forward: 0.641s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.134s, time/optimizer: 0.047s, time/total_step: 3.842s
+[T+4160.233] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.68, nll=1.67, nll_rec=0.56, nll_per=0.74, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.68, nll=1.67, nll_rec=0.56, nll_per=0.74, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4160.235] [BOTTLENECK] step 43 | total_step 3.842s | time/data_load: 0.000s (0%) | time/forward: 0.641s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.134s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.842s (100%)
+[T+4160.235]   -> at this rate 1000 steps ≈ 64.0 min
+[T+4164.141] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=43][[34m2026-05-29 06:05:15[0m] Step 44 | Loss: 1.671875 | Timing: time/data_load: 0.000s, time/forward: 0.642s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.117s, time/optimizer: 0.047s, time/total_step: 3.842s
+[T+4164.142] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.67, nll=1.66, nll_rec=0.55, nll_per=0.74, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.67, nll=1.66, nll_rec=0.55, nll_per=0.74, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4164.144] [BOTTLENECK] step 44 | total_step 3.842s | time/data_load: 0.000s (0%) | time/forward: 0.642s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.117s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.842s (100%)
+[T+4164.144]   -> at this rate 1000 steps ≈ 64.0 min
+[T+4168.062] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=44][[34m2026-05-29 06:05:18[0m] Step 45 | Loss: 1.664062 | Timing: time/data_load: 0.000s, time/forward: 0.647s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.134s, time/optimizer: 0.047s, time/total_step: 3.881s
+[T+4168.062] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.66, nll=1.66, nll_rec=0.55, nll_per=0.74, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.66, nll=1.66, nll_rec=0.55, nll_per=0.74, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4168.064] [BOTTLENECK] step 45 | total_step 3.881s | time/data_load: 0.000s (0%) | time/forward: 0.647s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.134s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.881s (100%)
+[T+4168.064]   -> at this rate 1000 steps ≈ 64.7 min
+[T+4171.980] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=45][[34m2026-05-29 06:05:22[0m] Step 46 | Loss: 1.656250 | Timing: time/data_load: 0.000s, time/forward: 0.657s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.125s, time/optimizer: 0.047s, time/total_step: 3.883s
+[T+4171.980] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.66, nll=1.65, nll_rec=0.55, nll_per=0.73, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.66, nll=1.65, nll_rec=0.55, nll_per=0.73, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4171.982] [BOTTLENECK] step 46 | total_step 3.883s | time/data_load: 0.000s (0%) | time/forward: 0.657s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.125s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.883s (100%)
+[T+4171.982]   -> at this rate 1000 steps ≈ 64.7 min
+[T+4175.918] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=46][[34m2026-05-29 06:05:26[0m] Step 47 | Loss: 1.648438 | Timing: time/data_load: 0.000s, time/forward: 0.657s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.125s, time/optimizer: 0.047s, time/total_step: 3.888s
+[T+4175.919] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.65, nll=1.64, nll_rec=0.54, nll_per=0.73, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.65, nll=1.64, nll_rec=0.54, nll_per=0.73, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4175.921] [BOTTLENECK] step 47 | total_step 3.888s | time/data_load: 0.000s (0%) | time/forward: 0.657s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.125s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.888s (100%)
+[T+4175.922]   -> at this rate 1000 steps ≈ 64.8 min
+[T+4179.851] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=47][[34m2026-05-29 06:05:30[0m] Step 48 | Loss: 1.640625 | Timing: time/data_load: 0.000s, time/forward: 0.646s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.120s, time/optimizer: 0.047s, time/total_step: 3.872s
+[T+4179.851] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.64, nll=1.63, nll_rec=0.54, nll_per=0.73, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.64, nll=1.63, nll_rec=0.54, nll_per=0.73, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4179.854] [BOTTLENECK] step 48 | total_step 3.872s | time/data_load: 0.000s (0%) | time/forward: 0.646s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.120s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.872s (100%)
+[T+4179.854]   -> at this rate 1000 steps ≈ 64.5 min
+[T+4183.796] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=48][[34m2026-05-29 06:05:34[0m] Step 49 | Loss: 1.625000 | Timing: time/data_load: 0.000s, time/forward: 0.644s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.128s, time/optimizer: 0.047s, time/total_step: 3.893s
+[T+4183.797] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.62, nll=1.62, nll_rec=0.54, nll_per=0.72, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.62, nll=1.62, nll_rec=0.54, nll_per=0.72, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4183.799] [BOTTLENECK] step 49 | total_step 3.893s | time/data_load: 0.000s (0%) | time/forward: 0.644s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.128s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.893s (100%)
+[T+4183.799]   -> at this rate 1000 steps ≈ 64.9 min
+[T+4187.835] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=49][[34m2026-05-29 06:05:38[0m] Step 50 | Loss: 1.617188 | Timing: time/data_load: 0.000s, time/forward: 0.653s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.128s, time/optimizer: 0.048s, time/total_step: 3.974s
+[T+4187.836] train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.62, nll=1.61, nll_rec=0.53, nll_per=0.72, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.62, nll=1.61, nll_rec=0.53, nll_per=0.72, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4187.839] [BOTTLENECK] step 50 | total_step 3.974s | time/data_load: 0.000s (0%) | time/forward: 0.653s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.128s (28%) | time/optimizer: 0.048s (1%) | time/total_step: 3.974s (100%)
+[T+4187.839]   -> at this rate 1000 steps ≈ 66.2 min
+[T+4187.905] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=50][[34m2026-05-29 06:05:38[0m] [ProfileTiming] Profiling global_step=50 (CUDA-synchronized block timers)
+[T+4189.979] [[34m2026-05-29 06:05:40[0m] 
+[T+4189.979] ================================================================================
+[T+4189.979] VAE block timing profile (step 50)
+[T+4189.979] ================================================================================
+[T+4189.979] CUDA-synchronized timers. Nested blocks are INSIDE their parent (e.g. attention.view.sdpa is part of train.forward, not extra time).
+[T+4189.979] 
+[T+4189.979] STEP BREAKDOWN (top-level, non-overlapping)
+[T+4189.979] ------------------------------------------
+[T+4189.979] block                          mean_ms  pct_step
+[T+4189.979] train.forward                  674.896     34.1%
+[T+4189.979] train.loss                      27.805      1.4%
+[T+4189.979] train.backward                1228.160     62.1%
+[T+4189.979] train.optimizer                 47.805      2.4%
+[T+4189.979] STEP TOTAL (approx)           1978.666
+[T+4189.979] 
+[T+4189.979] FORWARD BREAKDOWN (% of train.forward = 674.9 ms)
+[T+4189.979] ------------------------------------------
+[T+4189.979] block                          mean_ms  total_ms  count   pct_fwd
+[T+4189.979] forward unaccounted            674.896                     100.0%
+[T+4189.979] 
+[T+4189.979] ALL TIMED BLOCKS (raw, sorted by mean_ms)
+[T+4189.979] ------------------------------------------
+[T+4189.979] block                                        mean_ms  total_ms  count
+[T+4189.979] train.backward                              1228.160  1228.160      1
+[T+4189.979] train.forward                                674.896   674.896      1
+[T+4189.979] train.optimizer                               47.805    47.805      1
+[T+4189.979] train.loss                                    27.805    27.805      1
+[T+4191.882] [[34m2026-05-29 06:05:42[0m] Step 51 | Loss: 1.601562 | Timing: time/data_load: 0.000s, time/forward: 0.675s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.228s, time/optimizer: 0.048s, time/total_step: 3.978s
+[T+4191.882] train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.60, nll=1.59, nll_rec=0.52, nll_per=0.71, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.60, nll=1.59, nll_rec=0.52, nll_per=0.71, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4191.884] ================================================================================
+[T+4191.884] VAE block timing profile (step 50)
+[T+4191.884] ================================================================================
+[T+4191.884] CUDA-synchronized timers. Nested blocks are INSIDE their parent (e.g. attention.view.sdpa is part of train.forward, not extra time).
+[T+4191.884] 
+[T+4191.884] STEP BREAKDOWN (top-level, non-overlapping)
+[T+4191.884] ------------------------------------------
+[T+4191.884] block                          mean_ms  pct_step
+[T+4191.884] train.forward                  674.896     34.1%
+[T+4191.884] train.loss                      27.805      1.4%
+[T+4191.884] train.backward                1228.160     62.1%
+[T+4191.884] train.optimizer                 47.805      2.4%
+[T+4191.884] STEP TOTAL (approx)           1978.666
+[T+4191.884] 
+[T+4191.884] FORWARD BREAKDOWN (% of train.forward = 674.9 ms)
+[T+4191.884] ------------------------------------------
+[T+4191.884] block                          mean_ms  total_ms  count   pct_fwd
+[T+4191.884] forward unaccounted            674.896                     100.0%
+[T+4191.884] 
+[T+4191.884] ALL TIMED BLOCKS (raw, sorted by mean_ms)
+[T+4191.884] ------------------------------------------
+[T+4191.884] block                                        mean_ms  total_ms  count
+[T+4191.884] train.backward                              1228.160  1228.160      1
+[T+4191.884] train.forward                                674.896   674.896      1
+[T+4191.884] train.optimizer                               47.805    47.805      1
+[T+4191.884] train.loss                                    27.805    27.805      1
+[T+4191.884] [ProfileTiming] Saved → outputs/benchmark_compile_max_autotune_no_cg/profile_timing_step50.json
+[T+4191.884] [ProfileTiming] Saved → outputs/benchmark_compile_max_autotune_no_cg/profile_timing_step50.txt
+[T+4191.884] [BOTTLENECK] step 51 | total_step 3.978s | time/data_load: 0.000s (0%) | time/forward: 0.675s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.228s (31%) | time/optimizer: 0.048s (1%) | time/total_step: 3.978s (100%)
+[T+4191.884]   -> at this rate 1000 steps ≈ 66.3 min
+[T+4195.865] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=51][[34m2026-05-29 06:05:46[0m] Step 52 | Loss: 1.593750 | Timing: time/data_load: 0.000s, time/forward: 0.690s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.138s, time/optimizer: 0.047s, time/total_step: 3.952s
+[T+4195.865] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.59, nll=1.59, nll_rec=0.52, nll_per=0.71, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.59, nll=1.59, nll_rec=0.52, nll_per=0.71, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4195.868] [BOTTLENECK] step 52 | total_step 3.952s | time/data_load: 0.000s (0%) | time/forward: 0.690s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.138s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.952s (100%)
+[T+4195.868]   -> at this rate 1000 steps ≈ 65.9 min
+[T+4199.848] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=52][[34m2026-05-29 06:05:50[0m] Step 53 | Loss: 1.585938 | Timing: time/data_load: 0.000s, time/forward: 0.658s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.129s, time/optimizer: 0.047s, time/total_step: 3.921s
+[T+4199.848] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.59, nll=1.58, nll_rec=0.51, nll_per=0.71, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.59, nll=1.58, nll_rec=0.51, nll_per=0.71, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4199.851] [BOTTLENECK] step 53 | total_step 3.921s | time/data_load: 0.000s (0%) | time/forward: 0.658s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.129s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.921s (100%)
+[T+4199.851]   -> at this rate 1000 steps ≈ 65.4 min
+[T+4203.807] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=53][[34m2026-05-29 06:05:54[0m] Step 54 | Loss: 1.570312 | Timing: time/data_load: 0.000s, time/forward: 0.664s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.125s, time/optimizer: 0.047s, time/total_step: 3.921s
+[T+4203.808] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.57, nll=1.56, nll_rec=0.51, nll_per=0.70, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.57, nll=1.56, nll_rec=0.51, nll_per=0.70, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4203.810] [BOTTLENECK] step 54 | total_step 3.921s | time/data_load: 0.000s (0%) | time/forward: 0.664s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.125s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.921s (100%)
+[T+4203.810]   -> at this rate 1000 steps ≈ 65.4 min
+[T+4207.820] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=54][[34m2026-05-29 06:05:58[0m] Step 55 | Loss: 1.570312 | Timing: time/data_load: 0.000s, time/forward: 0.648s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.171s, time/optimizer: 0.047s, time/total_step: 3.961s
+[T+4207.820] train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.57, nll=1.56, nll_rec=0.51, nll_per=0.70, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.57, nll=1.56, nll_rec=0.51, nll_per=0.70, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4207.823] [BOTTLENECK] step 55 | total_step 3.961s | time/data_load: 0.000s (0%) | time/forward: 0.648s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.171s (30%) | time/optimizer: 0.047s (1%) | time/total_step: 3.961s (100%)
+[T+4207.823]   -> at this rate 1000 steps ≈ 66.0 min
+[T+4211.812] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=55][[34m2026-05-29 06:06:02[0m] Step 56 | Loss: 1.546875 | Timing: time/data_load: 0.000s, time/forward: 0.653s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.132s, time/optimizer: 0.047s, time/total_step: 3.930s
+[T+4211.812] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.55, nll=1.54, nll_rec=0.50, nll_per=0.70, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.55, nll=1.54, nll_rec=0.50, nll_per=0.70, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4211.815] [BOTTLENECK] step 56 | total_step 3.930s | time/data_load: 0.000s (0%) | time/forward: 0.653s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.132s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.930s (100%)
+[T+4211.815]   -> at this rate 1000 steps ≈ 65.5 min
+[T+4215.772] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=56][[34m2026-05-29 06:06:06[0m] Step 57 | Loss: 1.539062 | Timing: time/data_load: 0.000s, time/forward: 0.624s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.142s, time/optimizer: 0.047s, time/total_step: 3.902s
+[T+4215.773] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.54, nll=1.53, nll_rec=0.49, nll_per=0.69, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.54, nll=1.53, nll_rec=0.49, nll_per=0.69, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4215.775] [BOTTLENECK] step 57 | total_step 3.902s | time/data_load: 0.000s (0%) | time/forward: 0.624s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.142s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.902s (100%)
+[T+4215.775]   -> at this rate 1000 steps ≈ 65.0 min
+[T+4219.720] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=57][[34m2026-05-29 06:06:10[0m] Step 58 | Loss: 1.515625 | Timing: time/data_load: 0.000s, time/forward: 0.635s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.127s, time/optimizer: 0.046s, time/total_step: 3.896s
+[T+4219.720] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.52, nll=1.51, nll_rec=0.48, nll_per=0.68, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.52, nll=1.51, nll_rec=0.48, nll_per=0.68, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4219.723] [BOTTLENECK] step 58 | total_step 3.896s | time/data_load: 0.000s (0%) | time/forward: 0.635s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.127s (29%) | time/optimizer: 0.046s (1%) | time/total_step: 3.896s (100%)
+[T+4219.723]   -> at this rate 1000 steps ≈ 64.9 min
+[T+4223.716] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=58][[34m2026-05-29 06:06:14[0m] Step 59 | Loss: 1.507812 | Timing: time/data_load: 0.000s, time/forward: 0.647s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.127s, time/optimizer: 0.047s, time/total_step: 3.928s
+[T+4223.717] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.51, nll=1.50, nll_rec=0.48, nll_per=0.68, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.51, nll=1.50, nll_rec=0.48, nll_per=0.68, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4223.720] [BOTTLENECK] step 59 | total_step 3.928s | time/data_load: 0.000s (0%) | time/forward: 0.647s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.127s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.928s (100%)
+[T+4223.720]   -> at this rate 1000 steps ≈ 65.5 min
+[T+4227.724] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=59][[34m2026-05-29 06:06:18[0m] Step 60 | Loss: 1.484375 | Timing: time/data_load: 0.000s, time/forward: 0.662s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.134s, time/optimizer: 0.047s, time/total_step: 3.951s
+[T+4227.724] train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.48, nll=1.48, nll_rec=0.47, nll_per=0.67, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.48, nll=1.48, nll_rec=0.47, nll_per=0.67, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4227.726] [BOTTLENECK] step 60 | total_step 3.951s | time/data_load: 0.000s (0%) | time/forward: 0.662s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.134s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.951s (100%)
+[T+4227.726]   -> at this rate 1000 steps ≈ 65.9 min
+[T+4231.844] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=60][[34m2026-05-29 06:06:22[0m] Step 61 | Loss: 1.468750 | Timing: time/data_load: 0.000s, time/forward: 0.737s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.162s, time/optimizer: 0.047s, time/total_step: 4.061s
+[T+4231.845] train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.47, nll=1.46, nll_rec=0.47, nll_per=0.66, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.47, nll=1.46, nll_rec=0.47, nll_per=0.66, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4231.847] [BOTTLENECK] step 61 | total_step 4.061s | time/data_load: 0.000s (0%) | time/forward: 0.737s (18%) | time/loss_compute: 0.028s (1%) | time/backward: 1.162s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 4.061s (100%)
+[T+4231.847]   -> at this rate 1000 steps ≈ 67.7 min
+[T+4235.909] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=61][[34m2026-05-29 06:06:26[0m] Step 62 | Loss: 1.453125 | Timing: time/data_load: 0.000s, time/forward: 0.688s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.132s, time/optimizer: 0.047s, time/total_step: 4.005s
+[T+4235.910] train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.45, nll=1.45, nll_rec=0.46, nll_per=0.66, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.45, nll=1.45, nll_rec=0.46, nll_per=0.66, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4235.913] [BOTTLENECK] step 62 | total_step 4.005s | time/data_load: 0.000s (0%) | time/forward: 0.688s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.132s (28%) | time/optimizer: 0.047s (1%) | time/total_step: 4.005s (100%)
+[T+4235.913]   -> at this rate 1000 steps ≈ 66.7 min
+[T+4239.907] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=62][[34m2026-05-29 06:06:30[0m] Step 63 | Loss: 1.437500 | Timing: time/data_load: 0.000s, time/forward: 0.649s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.138s, time/optimizer: 0.047s, time/total_step: 3.950s
+[T+4239.908] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.44, nll=1.43, nll_rec=0.46, nll_per=0.65, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.44, nll=1.43, nll_rec=0.46, nll_per=0.65, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4239.910] [BOTTLENECK] step 63 | total_step 3.950s | time/data_load: 0.000s (0%) | time/forward: 0.649s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.138s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.950s (100%)
+[T+4239.910]   -> at this rate 1000 steps ≈ 65.8 min
+[T+4243.892] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=63][[34m2026-05-29 06:06:34[0m] Step 64 | Loss: 1.421875 | Timing: time/data_load: 0.000s, time/forward: 0.649s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.132s, time/optimizer: 0.047s, time/total_step: 3.956s
+[T+4243.892] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.42, nll=1.41, nll_rec=0.45, nll_per=0.64, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.42, nll=1.41, nll_rec=0.45, nll_per=0.64, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4243.894] [BOTTLENECK] step 64 | total_step 3.956s | time/data_load: 0.000s (0%) | time/forward: 0.649s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.132s (29%) | time/optimizer: 0.047s (1%) | time/total_step: 3.956s (100%)
+[T+4243.894]   -> at this rate 1000 steps ≈ 65.9 min
+[T+4247.860] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=64][[34m2026-05-29 06:06:38[0m] Step 65 | Loss: 1.406250 | Timing: time/data_load: 0.000s, time/forward: 0.634s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.118s, time/optimizer: 0.048s, time/total_step: 3.906s
+[T+4247.860] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.41, nll=1.40, nll_rec=0.44, nll_per=0.64, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.41, nll=1.40, nll_rec=0.44, nll_per=0.64, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4247.863] [BOTTLENECK] step 65 | total_step 3.906s | time/data_load: 0.000s (0%) | time/forward: 0.634s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.118s (29%) | time/optimizer: 0.048s (1%) | time/total_step: 3.906s (100%)
+[T+4247.863]   -> at this rate 1000 steps ≈ 65.1 min
+[T+4251.841] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=65][[34m2026-05-29 06:06:42[0m] Step 66 | Loss: 1.390625 | Timing: time/data_load: 0.000s, time/forward: 0.655s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.112s, time/optimizer: 0.046s, time/total_step: 3.931s
+[T+4251.841] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.39, nll=1.38, nll_rec=0.43, nll_per=0.63, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.39, nll=1.38, nll_rec=0.43, nll_per=0.63, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4251.844] [BOTTLENECK] step 66 | total_step 3.931s | time/data_load: 0.000s (0%) | time/forward: 0.655s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.112s (28%) | time/optimizer: 0.046s (1%) | time/total_step: 3.931s (100%)
+[T+4251.844]   -> at this rate 1000 steps ≈ 65.5 min
+[T+4255.826] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=66][[34m2026-05-29 06:06:46[0m] Step 67 | Loss: 1.367188 | Timing: time/data_load: 0.000s, time/forward: 0.652s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.115s, time/optimizer: 0.047s, time/total_step: 3.919s
+[T+4255.827] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.37, nll=1.36, nll_rec=0.43, nll_per=0.62, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.37, nll=1.36, nll_rec=0.43, nll_per=0.62, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4255.829] [BOTTLENECK] step 67 | total_step 3.919s | time/data_load: 0.000s (0%) | time/forward: 0.652s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.115s (28%) | time/optimizer: 0.047s (1%) | time/total_step: 3.919s (100%)
+[T+4255.829]   -> at this rate 1000 steps ≈ 65.3 min
+[T+4259.784] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=67][[34m2026-05-29 06:06:50[0m] Step 68 | Loss: 1.359375 | Timing: time/data_load: 0.000s, time/forward: 0.649s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.112s, time/optimizer: 0.046s, time/total_step: 3.906s
+[T+4259.785] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.36, nll=1.34, nll_rec=0.42, nll_per=0.61, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.36, nll=1.34, nll_rec=0.42, nll_per=0.61, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4259.788] [BOTTLENECK] step 68 | total_step 3.906s | time/data_load: 0.000s (0%) | time/forward: 0.649s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.112s (28%) | time/optimizer: 0.046s (1%) | time/total_step: 3.906s (100%)
+[T+4259.788]   -> at this rate 1000 steps ≈ 65.1 min
+[T+4263.771] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=68][[34m2026-05-29 06:06:54[0m] Step 69 | Loss: 1.343750 | Timing: time/data_load: 0.000s, time/forward: 0.639s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.111s, time/optimizer: 0.047s, time/total_step: 3.911s
+[T+4263.772] train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.34, nll=1.33, nll_rec=0.41, nll_per=0.61, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:03<?, ?it/s, all=1.34, nll=1.33, nll_rec=0.41, nll_per=0.61, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4263.774] [BOTTLENECK] step 69 | total_step 3.911s | time/data_load: 0.000s (0%) | time/forward: 0.639s (16%) | time/loss_compute: 0.028s (1%) | time/backward: 1.111s (28%) | time/optimizer: 0.047s (1%) | time/total_step: 3.911s (100%)
+[T+4263.775]   -> at this rate 1000 steps ≈ 65.2 min
+[T+4267.809] train:   0%|          | 0/1 [00:00<?, ?it/s]train:   0%|          | 0/1 [00:00<?, ?it/s, epoch=69][[34m2026-05-29 06:06:58[0m] Step 70 | Loss: 1.320312 | Timing: time/data_load: 0.000s, time/forward: 0.696s, time/loss_compute: 0.028s, time/discriminator: 0.000s, time/backward: 1.128s, time/optimizer: 0.047s, time/total_step: 3.979s
+[T+4267.810] train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.32, nll=1.31, nll_rec=0.41, nll_per=0.60, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]train:   0%|          | 0/1 [00:04<?, ?it/s, all=1.32, nll=1.31, nll_rec=0.41, nll_per=0.60, kl=0.01, gen=0.00, gen_w=0.00, disc=0.00, debug=0.00]
+[T+4267.810] [[34m2026-05-29 06:06:58[0m] Skipping final checkpoint save (save_ckpt=False).
+[T+4267.810] [[34m2026-05-29 06:06:58[0m] Training complete!
+[T+4268.234] [BOTTLENECK] step 70 | total_step 3.979s | time/data_load: 0.000s (0%) | time/forward: 0.696s (17%) | time/loss_compute: 0.028s (1%) | time/backward: 1.128s (28%) | time/optimizer: 0.047s (1%) | time/total_step: 3.979s (100%)
+[T+4268.234]   -> at this rate 1000 steps ≈ 66.3 min
+[T+4296.439] [rank0]:[W529 06:07:27.073229994 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+Training finished (exit code: 0) — parsing results…
+  compile_load_time_s    = None s
+  step10_avg_time_s      = 293.4129 s  (avg of first 10 steps, incl. compile)
+  step50_total_step_s    = 3.974 s
+  Confirmed settings (echoed by training script):
+    ✓ 'dynamo_backend': 'no',
+    ✓ [[34m2026-05-29 04:56:26[0m] [optimization] channels_last_3d: disabled (fragile with view() ops and compile cache)
+    ✓ [[34m2026-05-29 04:56:26[0m] VAE trainable params (optimizer): 98,985,776
+    ✓ [[34m2026-05-29 04:56:26[0m] [optimization] torch.compile: mode=max-autotune-no-cudagraphs (first step will be slow)
+  [parse] GPU error: unsupported format string passed to NoneType.__format__
+  → /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/compile_benchmark/compile_max_autotune_no_cg_result.json
+
+════════════════════════════════════════════════════════════════════
+  All 5 runs complete — final summary
+════════════════════════════════════════════════════════════════════
+Experiment                        Load+Compile (s)  Step10 avg (s)  Step50 iter (s)    GPU avg%    GPU min%    GPU max%
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+no_compile                                   44.95          5.5095           5.658       29.8%          0%        100%
+compile_default                                N/A        243.8371           3.586        3.6%          0%        100%
+compile_reduce_overhead                        N/A        261.9031           2.887        3.3%          0%        100%
+compile_max_autotune                           N/A        143.0288            1.53        5.7%          0%        100%
+compile_max_autotune_no_cg                     N/A        293.4129           3.974        4.6%          0%        100%
+
+Full JSON: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/compile_benchmark/summary.json

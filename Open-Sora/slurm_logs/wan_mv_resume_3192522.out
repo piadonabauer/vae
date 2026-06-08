@@ -1,8 +1,0 @@
-[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/128-res train_target_hw=(128, 128) train_target_frames=9 bucket_config={'128px_ar1:1': {9: (1.0, 1)}}
-changing outputs/260416_170156-_home_piado_projects_aip-lindell_piado_vae_Open-Sora_vae_train_wan_multiview_finetune_lpdefault_per1.5_kl1e-06_vc0.0_discnone_gdwna to share
-PTVideoDataset: Found 405 .pt file(s)
-PTVideoDataset: Found 10 .pt file(s)
-[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
-  -> 194 ckpt keys; 228 missing, 90 unexpected
-modulated mixed image ratio: 0.0
-[step_time] Average wall time over first 10 training steps: 3.2900 s

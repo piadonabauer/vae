@@ -776,18 +776,63 @@ def process_sequence(
     _ensure_nersemble_pkg_on_path()
     from nersemble_data.data.nersemble_data import NeRSembleParticipantDataManager  # type: ignore
 
-    pm = NeRSembleParticipantDataManager(str(nersemble_root), participant_id)
-    seq_images_default = Path(pm.get_sequence_images_dir(sequence_name))
-    seq_path = seq_images_default.parent / images_subdir
-    if not seq_path.exists():
-        raise FileNotFoundError(f"Sequence images folder not found: {seq_path}")
-
     serials = camera_serials_for_upper_views(
         nersemble_root,
         participant_id,
         upper_views,
         explicit_serials=explicit_camera_serials,
     )
+    pm = NeRSembleParticipantDataManager(str(nersemble_root), participant_id)
+    seq_images_default = Path(pm.get_sequence_images_dir(sequence_name))
+
+    # Resolve sequence image dir robustly for both extracted and temp-extracted tar layouts.
+    # Some tar exports differ in where sequence folders are rooted.
+    seq_candidates: List[Path] = []
+    seq_candidates.append(
+        seq_images_default if images_subdir == "images" else (seq_images_default.parent / images_subdir)
+    )
+    seq_candidates.append(seq_images_default)
+
+    try:
+        from nersemble_data.data.nersemble_data import resolve_participant_subdir  # type: ignore
+
+        p_dir = resolve_participant_subdir(str(nersemble_root), participant_id)
+    except Exception:
+        p_dir = f"{participant_id:03d}"
+
+    participant_root = Path(nersemble_root) / p_dir
+    seq_candidates.extend(
+        [
+            participant_root / "sequences" / sequence_name / images_subdir,
+            participant_root / sequence_name / images_subdir,
+            participant_root / "sequences" / sequence_name / "images",
+            participant_root / sequence_name / "images",
+        ]
+    )
+
+    seq_path: Path | None = None
+    for cand in seq_candidates:
+        if cand.exists():
+            seq_path = cand
+            break
+
+    if seq_path is None:
+        # Last resort: search for one requested camera file and infer folder.
+        search_serials = list(serials) if len(serials) > 0 else ["220700191"]
+        for serial in search_serials:
+            found = list(participant_root.rglob(f"cam_{serial}.mp4"))
+            if found:
+                seq_path = found[0].parent
+                print(
+                    f"[preprocess] WARNING: inferred sequence folder from discovered cam_{serial}.mp4: {seq_path}"
+                )
+                break
+
+    if seq_path is None:
+        raise FileNotFoundError(
+            f"Sequence images folder not found for p{participant_id:03d} {sequence_name}. "
+            f"Tried: {[str(p) for p in seq_candidates]}"
+        )
 
     participant_dir = output_root / f"p{participant_id:03d}"
     print(f"participant_dir: {participant_dir}")
@@ -815,9 +860,21 @@ def process_sequence(
     views: List[torch.Tensor] = []
     test_strip_written = False
     for serial in serials:
-        cam_video_in = seq_path / f"cam_{serial}.mp4"
-        if not cam_video_in.exists():
-            print(f"[preprocess] WARNING: Camera video not found: {cam_video_in}")
+        # Some extracted layouts point seq_path to the sequence root while others
+        # point directly to the images folder. Try both robustly.
+        cam_candidates = [
+            seq_path / f"cam_{serial}.mp4",
+            seq_path / images_subdir / f"cam_{serial}.mp4",
+            seq_path / "images" / f"cam_{serial}.mp4",
+            seq_path / "images_fgr" / f"cam_{serial}.mp4",
+        ]
+        cam_video_in = next((p for p in cam_candidates if p.exists()), None)
+        if cam_video_in is None:
+            print(
+                "[preprocess] WARNING: Camera video not found (tried: "
+                + ", ".join(str(p) for p in cam_candidates)
+                + ")"
+            )
             continue
         cam_video_out = seq_dir / f"cam_{serial}_processed.mp4"
 
@@ -916,7 +973,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--image-size",
         type=int,
         default=None,
-        help="Final spatial resolution (image_size x image_size).",
+        help="Final spatial resolution (image_size x image_size). Use --image-sizes for multiple.",
+    )
+    p.add_argument(
+        "--image-sizes",
+        type=int,
+        nargs="+",
+        default=None,
+        metavar="PX",
+        dest="image_sizes",
+        help=(
+            "One or more target resolutions processed in a single tar extraction pass "
+            "(e.g. --image-sizes 256 512 1024 2048). Each resolution is saved under "
+            "<output-root>/<px>-res/. Takes precedence over --image-size when both are given."
+        ),
     )
     p.add_argument(
         "--images-subdir",
@@ -1010,20 +1080,35 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mode = "array" if "SLURM_ARRAY_TASK_ID" in os.environ else "local"
     print(f"[preprocess] Mode: {mode}, Device: {device}")
-    if args.output_root is not None:
-        output_root = Path(args.output_root)
+
+    base_output_root = (
+        Path(args.output_root)
+        if args.output_root is not None
+        else (ARRAY_OUTPUT_ROOT if mode == "array" else DEFAULT_LOCAL_OUTPUT)
+    )
+
+    # Resolve list of (image_size, output_root) pairs.
+    # --image-sizes takes precedence; fall back to --image-size; fall back to [None] (no resize).
+    if args.image_sizes:
+        resolved_sizes = sorted(set(args.image_sizes))
+    elif args.image_size is not None:
+        resolved_sizes = [args.image_size]
     else:
-        output_root = ARRAY_OUTPUT_ROOT if mode == "array" else DEFAULT_LOCAL_OUTPUT
-    folder_name = f"{args.image_size}-res" if args.image_size else "default-res"
-    output_root = output_root / folder_name
-    output_root.mkdir(parents=True, exist_ok=True)
-    print(f"[preprocess] Output root: {output_root}")
+        resolved_sizes = [None]
+
+    size_roots: list[tuple[int | None, Path]] = []
+    for sz in resolved_sizes:
+        folder_name = f"{sz}-res" if sz is not None else "default-res"
+        out = base_output_root / folder_name
+        out.mkdir(parents=True, exist_ok=True)
+        size_roots.append((sz, out))
+        print(f"[preprocess] Output root ({folder_name}): {out}")
     if args.from_tars:
-        print(
-            "[preprocess] Tar mode: temp extract per sequence -> frames.pt (no persistent extract tree)"
-        )
+        print("[preprocess] Tar mode: temp extract per sequence -> frames.pt (no persistent extract tree)")
     if args.skip_existing:
         print("[preprocess] Skip-existing: on")
+    if len(size_roots) > 1:
+        print(f"[preprocess] Multi-resolution pass: {[sz for sz, _ in size_roots]}")
     if args.camera_serials:
         deduped_serials = list(dict.fromkeys(args.camera_serials))
         if len(deduped_serials) != len(args.camera_serials):
@@ -1070,7 +1155,8 @@ def main():
         for t, pid in tar_items:
             try:
                 sequences = list_sequences_in_tar(t, pid, images_subdir=args.images_subdir)
-            except OSError:
+            except OSError as _tar_err:
+                print(f"[preprocess] Cannot open {t.name}: {type(_tar_err).__name__}: {_tar_err}")
                 skipped_names.append(t.name)
                 continue
             if args.only_sequences:
@@ -1115,27 +1201,28 @@ def main():
                             explicit_camera_serials=args.camera_serials,
                             images_subdir=args.images_subdir,
                         )
-                        out_path = process_sequence(
-                            nersemble_root=nersemble_local,
-                            participant_id=pid,
-                            sequence_name=seq,
-                            converter=converter,
-                            output_root=output_root,
-                            image_size=args.image_size,
-                            upper_views=args.upper_views,
-                            skip_existing=args.skip_existing,
-                            target_frames=args.frames,
-                            save_merged_pt=True,
-                            write_mp4_per_camera=False,
-                            test_dump_dir=test_dump_dir,
-                            explicit_camera_serials=args.camera_serials,
-                            images_subdir=args.images_subdir,
-                            remove_bg=remove_bg,
-                        )
+                        for img_sz, out_root in size_roots:
+                            out_path = process_sequence(
+                                nersemble_root=nersemble_local,
+                                participant_id=pid,
+                                sequence_name=seq,
+                                converter=converter,
+                                output_root=out_root,
+                                image_size=img_sz,
+                                upper_views=args.upper_views,
+                                skip_existing=args.skip_existing,
+                                target_frames=args.frames,
+                                save_merged_pt=True,
+                                write_mp4_per_camera=False,
+                                test_dump_dir=test_dump_dir,
+                                explicit_camera_serials=args.camera_serials,
+                                images_subdir=args.images_subdir,
+                                remove_bg=remove_bg,
+                            )
+                            print(f"[preprocess] Saved ({img_sz}px): {out_path}")
                 except Exception as e:
                     print(f"[preprocess] ERROR: p{pid:03d} {seq}: {e}")
                     continue
-                print(f"[preprocess] Saved: {out_path}")
         return
 
     data_folder, ParticipantManager = build_nersemble_managers(args.nersemble_root)
@@ -1169,27 +1256,27 @@ def main():
             print(f"[preprocess] Processing p{pid:03d} {seq}")
             try:
                 nersemble_root = args.nersemble_root
-                out_path = process_sequence(
-                    nersemble_root=nersemble_root,
-                    participant_id=pid,
-                    sequence_name=seq,
-                    converter=converter,
-                    output_root=output_root,
-                    image_size=args.image_size,
-                    upper_views=args.upper_views,
-                    skip_existing=args.skip_existing,
-                    target_frames=args.frames,
-                    save_merged_pt=False,
-                    write_mp4_per_camera=True,
-                    test_dump_dir=test_dump_dir,
-                    explicit_camera_serials=args.camera_serials,
-                    images_subdir=args.images_subdir,
-                    remove_bg=remove_bg,
-                )
+                for img_sz, out_root in size_roots:
+                    out_path = process_sequence(
+                        nersemble_root=nersemble_root,
+                        participant_id=pid,
+                        sequence_name=seq,
+                        converter=converter,
+                        output_root=out_root,
+                        image_size=img_sz,
+                        upper_views=args.upper_views,
+                        skip_existing=args.skip_existing,
+                        target_frames=args.frames,
+                        save_merged_pt=False,
+                        write_mp4_per_camera=True,
+                        test_dump_dir=test_dump_dir,
+                        explicit_camera_serials=args.camera_serials,
+                        images_subdir=args.images_subdir,
+                        remove_bg=remove_bg,
+                    )
             except Exception as e:
                 print(f"[preprocess] ERROR: p{pid:03d} {seq}: {e}")
                 continue
-            print(f"[preprocess] Saved: {out_path}")
 
 
 if __name__ == "__main__":

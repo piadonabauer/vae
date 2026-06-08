@@ -143,6 +143,14 @@ def create_colossalai_plugin(
     return plugin
 
 
+def _ema_param_name(name: str) -> str:
+    """Strip torch.compile wrapper prefix so EMA keys match the uncompiled deepcopy."""
+    prefix = "_orig_mod."
+    if name.startswith(prefix):
+        return name[len(prefix) :]
+    return name
+
+
 @torch.no_grad()
 def update_ema(
     ema_model: torch.nn.Module, model: torch.nn.Module, optimizer=None, decay: float = 0.9999, sharded: bool = True
@@ -159,23 +167,60 @@ def update_ema(
     """
     ema_params = OrderedDict(ema_model.named_parameters())
     model_params = OrderedDict(model.named_parameters())
+    warned_missing = False
+    warned_mismatch = False
+
+    working_to_master_map = None
+    if sharded and optimizer is not None and hasattr(optimizer, "get_working_to_master_map"):
+        try:
+            working_to_master_map = optimizer.get_working_to_master_map()
+        except Exception:
+            working_to_master_map = None
 
     for name, param in model_params.items():
-        if name == "pos_embed":
+        ema_name = _ema_param_name(name)
+        if ema_name not in ema_params:
+            if not warned_missing:
+                warnings.warn(
+                    f"EMA update: parameter {name!r} missing in ema_model; skipping unmatched params.",
+                    RuntimeWarning,
+                )
+                warned_missing = True
+            continue
+        if ema_name == "pos_embed":
             continue
         if not param.requires_grad:
             continue
+
+        ema_param = ema_params[ema_name]
         if not sharded:
             param_data = param.data
-            ema_params[name].mul_(decay).add_(param_data, alpha=1 - decay)
         else:
-            if param.data.dtype != torch.float32:
+            if param.data.dtype != torch.float32 and working_to_master_map is not None:
                 param_id = id(param)
-                master_param = optimizer.get_working_to_master_map()[param_id]
-                param_data = master_param.data
+                master_param = working_to_master_map.get(param_id, None)
+                param_data = master_param.data if master_param is not None else param.data
             else:
                 param_data = param.data
-            ema_params[name].mul_(decay).add_(param_data, alpha=1 - decay)
+
+        # channels_last_3d / compile can change strides; EMA is kept contiguous NCHW.
+        if param_data.device != ema_param.device:
+            param_data = param_data.to(device=ema_param.device, non_blocking=True)
+        param_data = param_data.contiguous()
+
+        if ema_param.shape != param_data.shape:
+            if ema_param.numel() != param_data.numel():
+                if not warned_mismatch:
+                    warnings.warn(
+                        "EMA update: parameter shape mismatch between ema_model and model; "
+                        "skipping mismatched tensors.",
+                        RuntimeWarning,
+                    )
+                    warned_mismatch = True
+                continue
+            param_data = param_data.view(ema_param.shape)
+
+        ema_param.mul_(decay).add_(param_data, alpha=1 - decay)
 
 
 def dropout_condition(prob: float, txt: torch.Tensor, null_txt: torch.Tensor) -> torch.Tensor:

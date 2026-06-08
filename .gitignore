@@ -19,3 +19,7 @@ snth/
 Thumbs.db
 .vscode/
 .idea/
+
+
+tmp/
+.tmp/

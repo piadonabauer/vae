@@ -1,0 +1,3 @@
+ERROR: DATA_ROOT not found: /datasets/lindell-proj/neumayr/nersemble_v2/processed/2-frames/128-res
+  Expected layout: /datasets/lindell-proj/neumayr/nersemble_v2/processed/<V>-frames/128-res
+  (override with VIEW_PROFILE_DATA_ROOT=... if needed)

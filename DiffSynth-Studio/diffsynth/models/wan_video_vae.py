@@ -1,12 +1,283 @@
 from einops import rearrange, repeat
 
+import json
+import logging
 import math
+import time
+from contextlib import contextmanager
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.profiler import profile, record_function, ProfilerActivity
 from tqdm import tqdm
 
+logger = logging.getLogger(__name__)
+
 CACHE_T = 2
+
+
+class ProfileTimer:
+    """
+    Lightweight CUDA-synchronized block timer for user-friendly profiling.
+
+    Enable once per profiled step; call summarize() to get a readable report.
+    """
+
+    enabled = False
+    records: dict[str, list[float]] = {}
+
+    @classmethod
+    def enable(cls, *, reset: bool = True) -> None:
+        if reset:
+            cls.records = {}
+        cls.enabled = True
+
+    @classmethod
+    def disable(cls) -> None:
+        cls.enabled = False
+
+    @classmethod
+    @contextmanager
+    def block(cls, name: str):
+        if not cls.enabled:
+            yield
+            return
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            ms = (time.perf_counter() - t0) * 1000.0
+            cls.records.setdefault(name, []).append(ms)
+
+    @classmethod
+    def summarize(cls) -> dict:
+        rows = []
+        for name, times in cls.records.items():
+            if not times:
+                continue
+            mean_ms = sum(times) / len(times)
+            rows.append(
+                {
+                    "name": name,
+                    "ms_mean": round(mean_ms, 3),
+                    "ms_min": round(min(times), 3),
+                    "ms_max": round(max(times), 3),
+                    "ms_total": round(sum(times), 3),
+                    "count": len(times),
+                    "attention": name.startswith("attention."),
+                }
+            )
+        rows.sort(key=lambda r: r["ms_mean"], reverse=True)
+        return {
+            "blocks": rows,
+            "attention_blocks": [r for r in rows if r["attention"]],
+            "other_blocks": [r for r in rows if not r["attention"]],
+        }
+
+    @classmethod
+    def _row(cls, rows: list[dict], name: str) -> dict | None:
+        for row in rows:
+            if row["name"] == name:
+                return row
+        return None
+
+    @classmethod
+    def _pct(cls, part: float, whole: float) -> str:
+        if whole <= 0:
+            return "  n/a"
+        return f"{100.0 * part / whole:5.1f}%"
+
+    @classmethod
+    def format_report(cls, summary: dict, *, step: int | None = None) -> str:
+        rows = summary["blocks"]
+        lines: list[str] = []
+
+        title = "VAE block timing profile"
+        if step is not None:
+            title += f" (step {step})"
+        lines.append("=" * 80)
+        lines.append(title)
+        lines.append("=" * 80)
+        lines.append(
+            "CUDA-synchronized timers. Nested blocks are INSIDE their parent "
+            "(e.g. attention.view.sdpa is part of train.forward, not extra time)."
+        )
+        lines.append("")
+
+        # ── Top-level step (non-overlapping) ─────────────────────────────────
+        top_names = ["train.forward", "train.loss", "train.backward", "train.optimizer"]
+        top_rows = [cls._row(rows, n) for n in top_names]
+        top_rows = [r for r in top_rows if r is not None]
+        step_total = sum(r["ms_mean"] for r in top_rows)
+
+        lines.append("STEP BREAKDOWN (top-level, non-overlapping)")
+        lines.append("-" * 42)
+        lines.append(f"{'block':<28} {'mean_ms':>9} {'pct_step':>9}")
+        for row in top_rows:
+            lines.append(
+                f"{row['name']:<28} {row['ms_mean']:>9.3f} {cls._pct(row['ms_mean'], step_total):>9}"
+            )
+        lines.append(f"{'STEP TOTAL (approx)':<28} {step_total:>9.3f}")
+        lines.append("")
+
+        # ── Forward breakdown (% of train.forward only) ───────────────────────
+        fwd = cls._row(rows, "train.forward")
+        if fwd:
+            fwd_ms = fwd["ms_mean"]
+            lines.append(f"FORWARD BREAKDOWN (% of train.forward = {fwd_ms:.1f} ms)")
+            lines.append("-" * 42)
+            lines.append(f"{'block':<28} {'mean_ms':>9} {'total_ms':>9} {'count':>6} {'pct_fwd':>9}")
+
+            forward_blocks = [
+                "encode.downsample_all_views",
+                "encode.fusion.cross_attention",
+                "encode.fusion.tree_merge",
+                "encode.middle",
+                "encode.head",
+                "encode.latent_conv",
+                "decode.view_condition",
+                "decode.conv2",
+                "decode.body.conv1",
+                "decode.body.middle",
+                "decode.body.upsamples",
+                "decode.body.head",
+                "decode.temporal_loop",
+                "decode.decoder",  # legacy combined timer if still present
+            ]
+            accounted = 0.0
+            for name in forward_blocks:
+                row = cls._row(rows, name)
+                if row is None:
+                    continue
+                # Use total_ms when block runs multiple times (per view / per frame).
+                contrib = row["ms_total"] if row["count"] > 1 else row["ms_mean"]
+                accounted += contrib
+                lines.append(
+                    f"{name:<28} {row['ms_mean']:>9.3f} {row['ms_total']:>9.3f} "
+                    f"{row['count']:>6} {cls._pct(contrib, fwd_ms):>9}"
+                )
+            unaccounted = max(0.0, fwd_ms - accounted)
+            lines.append(
+                f"{'forward unaccounted':<28} {unaccounted:>9.3f} {'':>9} {'':>6} "
+                f"{cls._pct(unaccounted, fwd_ms):>9}"
+            )
+            lines.append("")
+
+        # ── Decoder detail (inside decode.temporal_loop / per-view) ───────────
+        temporal = cls._row(rows, "decode.temporal_loop")
+        all_views = cls._row(rows, "decode.all_views")
+        view_rows = [r for r in rows if r["name"].startswith("decode.view_")]
+        ups_rows = [r for r in rows if r["name"].startswith("decode.ups.L")]
+        if temporal or all_views or view_rows or ups_rows:
+            if all_views is not None:
+                parent_ms = all_views["ms_total"]
+                parent_label = "decode.all_views"
+            elif temporal is not None:
+                parent_ms = temporal["ms_total"]
+                parent_label = "decode.temporal_loop"
+            else:
+                parent_ms = sum(r["ms_total"] for r in view_rows)
+                parent_label = "decode views"
+            lines.append(
+                f"DECODER DETAIL (% of {parent_label} total = {parent_ms:.1f} ms)"
+            )
+            lines.append("-" * 42)
+            lines.append(f"{'block':<32} {'mean_ms':>9} {'total_ms':>9} {'count':>6} {'pct_dec':>9}")
+
+            decoder_detail = [
+                "decode.all_views",
+                "decode.view_0",
+                "decode.view_1",
+                "decode.view_2",
+                "decode.view_3",
+                "decode.temporal.decoder",
+                "decode.temporal.cat",
+                "decode.body.middle.resblocks",
+                "decode.body.middle.attn",
+            ]
+            for name in decoder_detail:
+                row = cls._row(rows, name)
+                if row is None:
+                    continue
+                contrib = row["ms_total"] if row["count"] > 1 else row["ms_mean"]
+                lines.append(
+                    f"{name:<32} {row['ms_mean']:>9.3f} {row['ms_total']:>9.3f} "
+                    f"{row['count']:>6} {cls._pct(contrib, parent_ms):>9}"
+                )
+
+            # Upsample stages: L0 = coarsest latent grid, L3 = finest before head.
+            stage_ids = sorted(
+                {name.split(".")[2] for name in (r["name"] for r in ups_rows)}
+            )
+            for stage in stage_ids:
+                stage_rows = [r for r in ups_rows if f".{stage}." in r["name"]]
+                stage_rows.sort(key=lambda r: r["name"])
+                for row in stage_rows:
+                    short = row["name"].split(".", 3)[-1]  # resblock / attn / resample
+                    label = f"  {stage}.{short}"
+                    lines.append(
+                        f"{label:<32} {row['ms_mean']:>9.3f} {row['ms_total']:>9.3f} "
+                        f"{row['count']:>6} {cls._pct(row['ms_total'], parent_ms):>9}"
+                    )
+            lines.append("")
+
+        # ── View-attention fusion (inside cross_attention) ────────────────────
+        view_attn = [r for r in rows if r["name"].startswith("attention.view.")]
+        if view_attn:
+            cross = cls._row(rows, "encode.fusion.cross_attention")
+            parent_ms = cross["ms_mean"] if cross else sum(r["ms_mean"] for r in view_attn)
+            lines.append(f"VIEW FUSION ATTENTION (inside encode.fusion.cross_attention, ~{parent_ms:.1f} ms)")
+            lines.append("-" * 42)
+            lines.append(f"{'block':<28} {'mean_ms':>9} {'pct_parent':>10}")
+            for row in view_attn:
+                lines.append(
+                    f"{row['name']:<28} {row['ms_mean']:>9.3f} "
+                    f"{cls._pct(row['ms_mean'], parent_ms):>10}"
+                )
+            lines.append("")
+
+        # ── All AttentionBlock SDPA calls (encoder middle / decoder upsamples) ─
+        block_sdpa = cls._row(rows, "attention.block.sdpa")
+        if block_sdpa:
+            lines.append("OTHER ATTENTION (AttentionBlock.sdpa in encoder/decoder stacks)")
+            lines.append("-" * 42)
+            lines.append(
+                f"attention.block.sdpa   mean={block_sdpa['ms_mean']:.3f} ms/call  "
+                f"total={block_sdpa['ms_total']:.3f} ms  count={block_sdpa['count']} calls"
+            )
+            if fwd:
+                lines.append(
+                    f"  → {cls._pct(block_sdpa['ms_total'], fwd['ms_mean'])} of train.forward"
+                )
+            lines.append("")
+
+        # ── Raw dump for reference ────────────────────────────────────────────
+        lines.append("ALL TIMED BLOCKS (raw, sorted by mean_ms)")
+        lines.append("-" * 42)
+        lines.append(f"{'block':<42} {'mean_ms':>9} {'total_ms':>9} {'count':>6}")
+        for row in rows:
+            lines.append(
+                f"{row['name']:<42} {row['ms_mean']:>9.3f} {row['ms_total']:>9.3f} {row['count']:>6}"
+            )
+
+        return "\n".join(lines)
+
+    @classmethod
+    def save_report(cls, summary: dict, out_dir: str | Path, *, step: int | None = None) -> tuple[Path, Path]:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f"_step{step}" if step is not None else ""
+        json_path = out_dir / f"profile_timing{suffix}.json"
+        txt_path = out_dir / f"profile_timing{suffix}.txt"
+        payload = {"step": step, **summary}
+        json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        txt_path.write_text(cls.format_report(summary, step=step), encoding="utf-8")
+        return json_path, txt_path
 
 
 def check_is_instance(model, module_class):
@@ -329,12 +600,13 @@ class AttentionBlock(nn.Module):
             0, 1, 3, 2).contiguous().chunk(3, dim=-1)
 
         # apply attention
-        x = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            #attn_mask=block_causal_mask(q, block_size=h * w)
-        )
+        with ProfileTimer.block("attention.block.sdpa"):
+            x = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                #attn_mask=block_causal_mask(q, block_size=h * w)
+            )
         x = x.squeeze(1).permute(0, 2, 1).reshape(b * t, c, h, w)
 
         # output
@@ -830,68 +1102,87 @@ class Decoder3d(nn.Module):
 
         _dbg("input_z", x)
         ## conv1
-        if feat_cache is not None:
-            idx = feat_idx[0]
-            cache_x = x[:, :, -CACHE_T:, :, :].clone()
-            if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                # cache last frame of last two chunk
-                cache_x = torch.cat([
-                    feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                        cache_x.device), cache_x
-                ],
-                                    dim=2)
-            x = self.conv1(x, feat_cache[idx])
-            feat_cache[idx] = cache_x
-            feat_idx[0] += 1
-        else:
-            x = self.conv1(x)
-        _dbg("after initial CausalConv3d conv1", x)
-
-        ## middle
-        for layer in self.middle:
-            if check_is_instance(layer, ResidualBlock) and feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
-            else:
-                x = layer(x)
-            if isinstance(layer, ResidualBlock):
-                _dbg("middle ResidualBlock", x)
-            elif isinstance(layer, AttentionBlock):
-                _dbg("middle AttentionBlock (bottleneck attn)", x)
-
-        ## upsamples
-        block_idx = 0
-        for layer in self.upsamples:
+        with ProfileTimer.block("decode.body.conv1"):
             if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
-            else:
-                x = layer(x)
-            if isinstance(layer, ResidualBlock):
-                block_idx += 1
-                _dbg(f"after Upsample ResidualBlock #{block_idx}", x)
-            elif isinstance(layer, AttentionBlock):
-                _dbg("after Upsample AttentionBlock", x)
-            elif isinstance(layer, Resample):
-                _dbg("after Upsample block (Resample)", x)
-
-        ## head
-        for layer in self.head:
-            if check_is_instance(layer, CausalConv3d) and feat_cache is not None:
                 idx = feat_idx[0]
                 cache_x = x[:, :, -CACHE_T:, :, :].clone()
                 if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                     # cache last frame of last two chunk
                     cache_x = torch.cat([
                         feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
-                        cache_x.device), cache_x
-                ],
+                            cache_x.device), cache_x
+                    ],
                                         dim=2)
-                x = layer(x, feat_cache[idx])
+                x = self.conv1(x, feat_cache[idx])
                 feat_cache[idx] = cache_x
                 feat_idx[0] += 1
             else:
-                x = layer(x)
-            if isinstance(layer, CausalConv3d):
-                _dbg("after final CausalConv3d head", x)
+                x = self.conv1(x)
+        _dbg("after initial CausalConv3d conv1", x)
+
+        ## middle
+        with ProfileTimer.block("decode.body.middle"):
+            for layer in self.middle:
+                block_name = (
+                    "decode.body.middle.attn"
+                    if isinstance(layer, AttentionBlock)
+                    else "decode.body.middle.resblocks"
+                )
+                with ProfileTimer.block(block_name):
+                    if check_is_instance(layer, ResidualBlock) and feat_cache is not None:
+                        x = layer(x, feat_cache, feat_idx)
+                    else:
+                        x = layer(x)
+                if isinstance(layer, ResidualBlock):
+                    _dbg("middle ResidualBlock", x)
+                elif isinstance(layer, AttentionBlock):
+                    _dbg("middle AttentionBlock (bottleneck attn)", x)
+
+        ## upsamples — per resolution stage (L0 = coarsest, +resample → L1, …)
+        stage_idx = 0
+        with ProfileTimer.block("decode.body.upsamples"):
+            block_idx = 0
+            for layer in self.upsamples:
+                if isinstance(layer, Resample):
+                    block_name = f"decode.ups.L{stage_idx}.resample"
+                    stage_idx += 1
+                elif isinstance(layer, AttentionBlock):
+                    block_name = f"decode.ups.L{stage_idx}.attn"
+                else:
+                    block_name = f"decode.ups.L{stage_idx}.resblock"
+                with ProfileTimer.block(block_name):
+                    if feat_cache is not None:
+                        x = layer(x, feat_cache, feat_idx)
+                    else:
+                        x = layer(x)
+                if isinstance(layer, ResidualBlock):
+                    block_idx += 1
+                    _dbg(f"after Upsample ResidualBlock #{block_idx}", x)
+                elif isinstance(layer, AttentionBlock):
+                    _dbg("after Upsample AttentionBlock", x)
+                elif isinstance(layer, Resample):
+                    _dbg("after Upsample block (Resample)", x)
+
+        ## head
+        with ProfileTimer.block("decode.body.head"):
+            for layer in self.head:
+                if check_is_instance(layer, CausalConv3d) and feat_cache is not None:
+                    idx = feat_idx[0]
+                    cache_x = x[:, :, -CACHE_T:, :, :].clone()
+                    if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
+                        # cache last frame of last two chunk
+                        cache_x = torch.cat([
+                            feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(
+                                cache_x.device), cache_x
+                        ],
+                            dim=2)
+                    x = layer(x, feat_cache[idx])
+                    feat_cache[idx] = cache_x
+                    feat_idx[0] += 1
+                else:
+                    x = layer(x)
+                if isinstance(layer, CausalConv3d):
+                    _dbg("after final CausalConv3d head", x)
         return x
 
 
@@ -1330,8 +1621,8 @@ class MultiViewVideoVAE_(nn.Module):
         attn_scales=[],
         temperal_downsample=[False, True, True],
         dropout=0.0,
-        view_in=8,
-        view_out=2,
+        view_in=8, # just default, uses actual view_in from input
+        view_out=2, # just default, uses actual view_out from input
         use_view_embedding=True,
         view_init="avg",
     ):
@@ -1379,39 +1670,47 @@ class MultiViewVideoVAE_(nn.Module):
 
 
 # NEW
-class CrossViewAttention(nn.Module):
+class ViewAttention(nn.Module):
     """
-    Bidirectional cross-attention over spatial tokens per time step.
-
-    Expects inputs of shape [B, T, N_spatial, C] with C=embed_dim.
+    Self-attention over all views tokens (per temporal step)
     """
 
-    def __init__(self, embed_dim=384, num_heads=8):
+    def __init__(self, dim):
         super().__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.norm = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(
-            embed_dim=embed_dim, num_heads=num_heads, batch_first=True
-        )
+        self.dim = dim
 
-    def forward(self, tokens_per_view):
-        # tokens_per_view: list[[B, T, N, C]] with arbitrary number of views.
-        if len(tokens_per_view) < 2:
-            return tokens_per_view
-        b, t, n, c = tokens_per_view[0].shape
-        x_stack = torch.stack(tokens_per_view, dim=1)  # [B, V, T, N, C]
-        x_norm = self.norm(x_stack)
+        # layers
+        self.norm = RMS_norm(dim)
+        self.to_qkv = nn.Conv2d(dim, dim * 3, 1)
+        self.proj = nn.Conv2d(dim, dim, 1)
 
-        # All-to-all: each view queries the concatenated keys/values from all views.
-        kv = x_norm.permute(0, 2, 1, 3, 4).reshape(b * t, -1, c)  # [B*T, V*N, C]
-        enriched = []
-        for v_idx in range(x_stack.shape[1]):
-            q = x_norm[:, v_idx].reshape(b * t, n, c)
-            attn_v, _ = self.attn(q, kv, kv, need_weights=False)
-            attn_v = attn_v.reshape(b, t, n, c)
-            enriched.append(tokens_per_view[v_idx] + attn_v)
-        return enriched
+        # zero out the last layer params so the block is identity at init
+        nn.init.zeros_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x):
+        identity = x
+        b, t, v, n, c = x.shape
+
+        with ProfileTimer.block("attention.view.qkv_proj"):
+            # [B, T, V, N, C] -> [B*T, C, V, N]
+            x = rearrange(x, 'b t v n c -> (b t) c v n')
+            x = self.norm(x)
+
+            # to [B*T, 1, V*N, C]
+            q, k, val = self.to_qkv(x).reshape(b * t, 1, c * 3, -1).permute(
+                0, 1, 3, 2).contiguous().chunk(3, dim=-1)
+
+        with ProfileTimer.block("attention.view.sdpa"):
+            x = F.scaled_dot_product_attention(q, k, val)
+
+        with ProfileTimer.block("attention.view.out_proj"):
+            x = x.squeeze(1).permute(0, 2, 1).reshape(b * t, c, v, n)
+            x = self.proj(x)
+
+            # [B*T, C, V, N] -> [B, T, V, N, C]
+            x = rearrange(x, '(b t) c v n -> b t v n c', t=t)
+        return x + identity
 
 
 class JointViewAttention(nn.Module):
@@ -1433,13 +1732,16 @@ class JointViewAttention(nn.Module):
         if len(tokens_per_view) < 2:
             return tokens_per_view
         b, t, n, c = tokens_per_view[0].shape
-        x = torch.cat(tokens_per_view, dim=2)  # [B, T, V*N, C]
-        x_norm = self.norm(x)
-        x_norm_bt = x_norm.reshape(b * t, x.shape[2], c)
-        attn_out, _ = self.attn(x_norm_bt, x_norm_bt, x_norm_bt, need_weights=False)
-        attn_out = attn_out.reshape(b, t, x.shape[2], c)
-        x_enriched = x + attn_out
-        return list(x_enriched.split(n, dim=2))
+        with ProfileTimer.block("attention.joint.preprocess"):
+            x = torch.cat(tokens_per_view, dim=2)  # [B, T, V*N, C]
+            x_norm = self.norm(x)
+            x_norm_bt = x_norm.reshape(b * t, x.shape[2], c)
+        with ProfileTimer.block("attention.joint.mha"):
+            attn_out, _ = self.attn(x_norm_bt, x_norm_bt, x_norm_bt, need_weights=False)
+        with ProfileTimer.block("attention.joint.postprocess"):
+            attn_out = attn_out.reshape(b, t, x.shape[2], c)
+            x_enriched = x + attn_out
+            return list(x_enriched.split(n, dim=2))
 
 
 class LoRAConv3d(nn.Module):
@@ -1684,6 +1986,8 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.use_lora_after = use_lora_after
         self.use_viewwise_decoder_lora = use_viewwise_decoder_lora
         self.num_views = int(num_views)
+        self._encode_call_count = 0
+        self._encode_logged = False  # used instead of _encode_call_count to avoid torch.compile recompilation
 
         # Reuse the standard encoder/decoder stacks
         self.encoder = Encoder3d(
@@ -1696,7 +2000,8 @@ class AttentionMultiViewVideoVan(nn.Module):
         )
 
         # Learnable per-view embeddings for view-conditioned decoding.
-        self.view_embed = nn.Embedding(self.num_views, z_dim)
+        # VIEW_EMBEDDINGS 1: table is created with num_views rows and z_dim columns
+        self.view_embed = nn.Embedding(self.num_views, z_dim) # eg num_views=4, latent dim for Wan=16
 
         bottleneck_channels = dim * dim_mult[-1]
         fused_channels = bottleneck_channels * self.num_views  # concatenated along channels
@@ -1714,11 +2019,40 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.conv4d_act = None
         self.fusion_resblock1 = None
         self.fusion_resblock2 = None
+        self.tree_resblocks = None  # per-level pairs for cross_attention tree merge
 
         if fusion_mode == "cross_attention":
-            self.cross_attn = CrossViewAttention(embed_dim=bottleneck_channels, num_heads=8)
-            self.fusion_resblock1 = ResidualBlock(fused_channels, bottleneck_channels, dropout)
-            self.fusion_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
+            self.cross_attn = ViewAttention(dim=bottleneck_channels)
+            # Hierarchical pairwise tree merge: one independent (rb1, rb2) pair per tree level.
+            # num_levels = ceil(log2(num_views)):  2 views → 1,  4 → 2,  8 → 3.
+            # Each level operates on features with different semantics (raw per-view at level 0,
+            # partially-fused at deeper levels), so separate weights are the right choice.
+            num_levels = max(1, math.ceil(math.log2(max(self.num_views, 2))))
+            self.tree_resblocks = nn.ModuleList([
+                nn.ModuleList([
+                    ResidualBlock(2 * bottleneck_channels, bottleneck_channels, dropout),
+                    ResidualBlock(bottleneck_channels, bottleneck_channels, dropout),
+                ])
+                for _ in range(num_levels)
+            ])
+            """
+            # Per-level mean-pool init for rb1 at each level:
+            # (shortcut: output[c] = 0.5*view_a[c] + 0.5*view_b[c]; residual path ≈ 0).
+            C = bottleneck_channels
+            for _rb1, _rb2 in self.tree_resblocks:
+                _sc = _rb1.shortcut  # CausalConv3d(2C, C, 1)
+                nn.init.zeros_(_sc.weight)
+                for _c in range(C):
+                    _sc.weight.data[_c, _c, 0, 0, 0] = 0.5       # from view a
+                    _sc.weight.data[_c, _c + C, 0, 0, 0] = 0.5   # from view b
+                if _sc.bias is not None:
+                    nn.init.zeros_(_sc.bias)
+                for _rb in (_rb1, _rb2):
+                    _last = _rb.residual[-1]
+                    nn.init.zeros_(_last.weight)
+                    if _last.bias is not None:
+                        nn.init.zeros_(_last.bias)
+            """
         elif fusion_mode == "self_attention":
             # Full-sequence self-attention over both views' tokens (JointViewAttention), then concat + ResBlocks.
             self.joint_attn = JointViewAttention(embed_dim=bottleneck_channels, num_heads=8)
@@ -1842,7 +2176,8 @@ class AttentionMultiViewVideoVan(nn.Module):
                 x_out = layer(x_out)
             return x_out
 
-        feats = [run_down_path(x[:, i]) for i in range(v)]
+        with ProfileTimer.block("encode.downsample_all_views"):
+            feats = [run_down_path(x[:, i]) for i in range(v)]
 
         # Keep time explicit for attention: [B, T', (H'*W'), C]
         def flatten_feat(feat):
@@ -1861,75 +2196,94 @@ class AttentionMultiViewVideoVan(nn.Module):
             return rearrange(tokens, "b t (h w) c -> b c t h w", h=h2, w=w2)
 
         if self.fusion_mode == "cross_attention":
-            tokens_enriched = self.cross_attn(tokens_per_view)
-            feats_enriched = [unflatten_tokens(tok) for tok in tokens_enriched]
-            fused = torch.cat(feats_enriched, dim=1)
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
+            num_v = len(tokens_per_view)
+            with ProfileTimer.block("encode.fusion.cross_attention"):
+                # All views attend to each other first.
+                stacked = torch.stack(tokens_per_view, dim=2)  # [B, T, V, N, C]
+                enriched = self.cross_attn(stacked)  # [B, T, V, N, C]
+                feats_enriched = [unflatten_tokens(enriched[:, :, v_idx]) for v_idx in range(num_v)]
+
+            with ProfileTimer.block("encode.fusion.tree_merge"):
+                current = feats_enriched
+                level_idx = 0
+                while len(current) > 1:
+                    rb1, rb2 = self.tree_resblocks[level_idx]
+                    next_level = []
+                    for i in range(0, len(current) - 1, 2):
+                        merged = torch.cat([current[i], current[i + 1]], dim=1)  # [B, 2C, T', H', W']
+                        merged = rb1(merged)  # 2C → C
+                        merged = rb2(merged)  # C  → C
+                        next_level.append(merged)
+                    if len(current) % 2 == 1:
+                        next_level.append(current[-1])  # carry odd view forward
+                    current = next_level
+                    level_idx += 1
+                fused = current[0]
         elif self.fusion_mode == "self_attention":
-            tokens_enriched = self.joint_attn(tokens_per_view)
-            feats_enriched = [unflatten_tokens(tok) for tok in tokens_enriched]
-            fused = torch.cat(feats_enriched, dim=1)
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
+            with ProfileTimer.block("encode.fusion.self_attention"):
+                tokens_enriched = self.joint_attn(tokens_per_view)
+                feats_enriched = [unflatten_tokens(tok) for tok in tokens_enriched]
+                fused = torch.cat(feats_enriched, dim=1)
+                fused = self.fusion_resblock1(fused)
+                fused = self.fusion_resblock2(fused)
         elif self.fusion_mode == "conv3d":
-            # conv3d fusion
-            fused = torch.cat(feats, dim=1)  # [B,V*C,T',H',W']
-            fused = self.view_conv_fuse(fused)
-            # GroupNorm expects 4D; apply per-time slice.
-            b2, c2, t2, h2, w2 = fused.shape
-            fused_2d = fused.permute(0, 2, 1, 3, 4).reshape(b2 * t2, c2, h2, w2)
-            fused_2d = self.view_conv_norm(fused_2d)
-            fused_2d = self.view_conv_act(fused_2d)
-            fused = fused_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
+            with ProfileTimer.block("encode.fusion.conv3d"):
+                fused = torch.cat(feats, dim=1)  # [B,V*C,T',H',W']
+                fused = self.view_conv_fuse(fused)
+                b2, c2, t2, h2, w2 = fused.shape
+                fused_2d = fused.permute(0, 2, 1, 3, 4).reshape(b2 * t2, c2, h2, w2)
+                fused_2d = self.view_conv_norm(fused_2d)
+                fused_2d = self.view_conv_act(fused_2d)
+                fused = fused_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
+                fused = self.fusion_resblock1(fused)
+                fused = self.fusion_resblock2(fused)
         else:
-            # conv4d fusion (factorized): spatial -> temporal -> view compression.
-            # Start from [B,C,T,V,H,W] for explicit view axis processing.
-            x_4d = torch.stack(feats, dim=3)
-            b2, c2, t2, v2, h2, w2 = x_4d.shape
-            assert v2 == self.num_views, f"conv4d expected {self.num_views} views, got {v2}"
+            with ProfileTimer.block("encode.fusion.conv4d"):
+                x_4d = torch.stack(feats, dim=3)
+                b2, c2, t2, v2, h2, w2 = x_4d.shape
+                assert v2 == self.num_views, f"conv4d expected {self.num_views} views, got {v2}"
 
-            # Spatial 2D conv: (B,V,T,C,H,W) -> (B*V*T,C,H,W)
-            x_spatial = x_4d.permute(0, 3, 2, 1, 4, 5).reshape(b2 * v2 * t2, c2, h2, w2)
-            x_spatial = self.conv4d_spatial(x_spatial)
-            x_spatial = self.conv4d_norm(x_spatial)
-            x_spatial = self.conv4d_act(x_spatial)
-            x_spatial = x_spatial.view(b2, v2, t2, c2, h2, w2).permute(0, 1, 3, 2, 4, 5).contiguous()
+                # Spatial 2D conv: (B,V,T,C,H,W) -> (B*V*T,C,H,W)
+                x_spatial = x_4d.permute(0, 3, 2, 1, 4, 5).reshape(b2 * v2 * t2, c2, h2, w2)
+                x_spatial = self.conv4d_spatial(x_spatial)
+                x_spatial = self.conv4d_norm(x_spatial)
+                x_spatial = self.conv4d_act(x_spatial)
+                x_spatial = x_spatial.view(b2, v2, t2, c2, h2, w2).permute(0, 1, 3, 2, 4, 5).contiguous()
 
-            # Temporal 3D conv on (T,H,W): (B*V,C,T,H,W)
-            x_temporal = x_spatial.reshape(b2 * v2, c2, t2, h2, w2)
-            x_temporal = self.conv4d_temporal(x_temporal)
-            x_temporal_2d = x_temporal.permute(0, 2, 1, 3, 4).reshape(b2 * v2 * t2, c2, h2, w2)
-            x_temporal_2d = self.conv4d_norm(x_temporal_2d)
-            x_temporal_2d = self.conv4d_act(x_temporal_2d)
-            x_temporal = x_temporal_2d.view(b2 * v2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
-            x_temporal = x_temporal.view(b2, v2, c2, t2, h2, w2)
+                # Temporal 3D conv on (T,H,W): (B*V,C,T,H,W)
+                x_temporal = x_spatial.reshape(b2 * v2, c2, t2, h2, w2)
+                x_temporal = self.conv4d_temporal(x_temporal)
+                x_temporal_2d = x_temporal.permute(0, 2, 1, 3, 4).reshape(b2 * v2 * t2, c2, h2, w2)
+                x_temporal_2d = self.conv4d_norm(x_temporal_2d)
+                x_temporal_2d = self.conv4d_act(x_temporal_2d)
+                x_temporal = x_temporal_2d.view(b2 * v2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
+                x_temporal = x_temporal.view(b2, v2, c2, t2, h2, w2)
 
-            # View 3D conv on (V,H,W): (B*T,C,V,H,W), then squeeze V from 2 -> 1.
-            x_view = x_temporal.permute(0, 3, 2, 1, 4, 5).reshape(b2 * t2, c2, v2, h2, w2)
-            x_view = self.conv4d_view(x_view)
-            x_view_2d = x_view.permute(0, 2, 1, 3, 4).reshape(b2 * t2, c2, h2, w2)
-            x_view_2d = self.conv4d_norm(x_view_2d)
-            x_view_2d = self.conv4d_act(x_view_2d)
-            fused = x_view_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
+                # View 3D conv on (V,H,W): (B*T,C,V,H,W), then squeeze V from 2 -> 1.
+                x_view = x_temporal.permute(0, 3, 2, 1, 4, 5).reshape(b2 * t2, c2, v2, h2, w2)
+                x_view = self.conv4d_view(x_view)
+                x_view_2d = x_view.permute(0, 2, 1, 3, 4).reshape(b2 * t2, c2, h2, w2)
+                x_view_2d = self.conv4d_norm(x_view_2d)
+                x_view_2d = self.conv4d_act(x_view_2d)
+                fused = x_view_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
 
-            fused = self.fusion_resblock1(fused)
-            fused = self.fusion_resblock2(fused)
+                fused = self.fusion_resblock1(fused)
+                fused = self.fusion_resblock2(fused)
 
         # Continue through the encoder middle and head (original code)
-        x_mid = fused
-        for layer in self.encoder.middle:
-            x_mid = layer(x_mid)
+        with ProfileTimer.block("encode.middle"):
+            x_mid = fused
+            for layer in self.encoder.middle:
+                x_mid = layer(x_mid)
 
-        x_head = x_mid
-        for layer in self.encoder.head:
-            x_head = layer(x_head)
+        with ProfileTimer.block("encode.head"):
+            x_head = x_mid
+            for layer in self.encoder.head:
+                x_head = layer(x_head)
 
-        # Now mimic VideoVAE_._encode_with_stats from here
-        out_conv = self.conv1(x_head)
-        mu, log_var = out_conv.chunk(2, dim=1)
+        with ProfileTimer.block("encode.latent_conv"):
+            out_conv = self.conv1(x_head)
+            mu, log_var = out_conv.chunk(2, dim=1)
 
         if isinstance(scale[0], torch.Tensor):
             scale = [s.to(dtype=mu.dtype, device=mu.device) for s in scale]
@@ -1939,6 +2293,50 @@ class AttentionMultiViewVideoVan(nn.Module):
         else:
             scale = scale.to(dtype=mu.dtype, device=mu.device)
             mu = (mu - scale[0]) * scale[1]
+
+        if not self._encode_logged:
+            self._encode_logged = True
+            logger.info(
+                "[AttentionMultiViewVideoVan] latent shape: %s  "
+                "(B=%d, z_dim=%d, T'=%d, H'=%d, W'=%d)",
+                tuple(mu.shape), mu.shape[0], mu.shape[1],
+                mu.shape[2], mu.shape[3], mu.shape[4],
+            )
+
+        return mu, log_var
+
+    def _encode_profiled(self, x, scale):
+        """
+        Same as encode() but wraps the full forward in torch.profiler.
+        Call this manually on a warmed-up iteration to find bottlenecks.
+
+        Prints a top-20 op table sorted by CUDA time and saves a Chrome
+        trace to /tmp/encode_profile.json (open in chrome://tracing).
+        """
+        activities = [ProfilerActivity.CPU]
+        if x.is_cuda:
+            activities.append(ProfilerActivity.CUDA)
+
+        with profile(
+            activities=activities,
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=False,
+        ) as prof:
+            with record_function("encode_full"):
+                mu, log_var = self.encode(x, scale)
+
+        sort_key = "cuda_time_total" if x.is_cuda else "cpu_time_total"
+        logger.info(
+            "[AttentionMultiViewVideoVan] encode() profile — top 20 ops by %s:\n%s",
+            sort_key,
+            prof.key_averages().table(sort_by=sort_key, row_limit=20),
+        )
+
+        trace_path = "/tmp/encode_profile.json"
+        prof.export_chrome_trace(trace_path)
+        logger.info("[AttentionMultiViewVideoVan] Chrome trace saved to %s", trace_path)
+
         return mu, log_var
 
     def reparameterize(self, mu, log_var):
@@ -1954,14 +2352,16 @@ class AttentionMultiViewVideoVan(nn.Module):
         if not (0 <= view_idx < self.num_views):
             raise IndexError(f"view_idx={view_idx} out of range for num_views={self.num_views}")
         if self.use_viewwise_decoder_lora:
-            # Apply view-specific low-rank latent modulation instead of embeddings.
-            lora_delta = self.view_lora_up[view_idx](self.view_lora_down[view_idx](z))
-            z = z + lora_delta
+            with ProfileTimer.block("decode.view_condition"):
+                lora_delta = self.view_lora_up[view_idx](self.view_lora_down[view_idx](z))
+                z = z + lora_delta
+
+        # VIEW_EMBEDDINGS 2: Lookup + add + decode
         else:
-            # View conditioning: add a small learned embedding per view.
-            view_idx_tensor = torch.tensor(view_idx, device=z.device, dtype=torch.long)
-            emb = self.view_embed(view_idx_tensor).view(1, self.z_dim, 1, 1, 1)
-            z = z + emb
+            with ProfileTimer.block("decode.view_condition"):
+                view_idx_tensor = torch.tensor(view_idx, device=z.device, dtype=torch.long)
+                emb = self.view_embed(view_idx_tensor).view(1, self.z_dim, 1, 1, 1)
+                z = z + emb
 
         if isinstance(scale[0], torch.Tensor):
             scale = [s.to(dtype=z.dtype, device=z.device) for s in scale]
@@ -1973,16 +2373,21 @@ class AttentionMultiViewVideoVan(nn.Module):
             z = z / scale[1] + scale[0]
 
         iter_ = z.shape[2]
-        x = self.conv2(z)
+        with ProfileTimer.block("decode.conv2"):
+            x = self.conv2(z)
 
-        out = None
-        for i in range(iter_):
-            x_chunk = x[:, :, i : i + 1, :, :]
-            if i == 0:
-                out = self.decoder(x_chunk)
-            else:
-                out_ = self.decoder(x_chunk)
-                out = torch.cat([out, out_], 2)
+        with ProfileTimer.block("decode.temporal_loop"):
+            out = None
+            for i in range(iter_):
+                x_chunk = x[:, :, i : i + 1, :, :]
+                with ProfileTimer.block("decode.temporal.decoder"):
+                    if i == 0:
+                        out = self.decoder(x_chunk)
+                    else:
+                        out_ = self.decoder(x_chunk)
+                if i > 0:
+                    with ProfileTimer.block("decode.temporal.cat"):
+                        out = torch.cat([out, out_], 2)
         return out
 
 

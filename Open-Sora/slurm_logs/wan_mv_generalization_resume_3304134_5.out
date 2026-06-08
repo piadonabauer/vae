@@ -1,1 +1,0 @@
-SLURM_ARRAY_TASK_ID=5 -> idx=4 out of range [0,3] (n=4)

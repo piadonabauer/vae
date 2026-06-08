@@ -16,13 +16,12 @@ fixed_seq_eval_every_epochs = 0 # CHANGE to 200
 model = dict(
     type="multiview_wan_video_vae",  # Registered in opensora/models/vae/__init__.py
     z_dim=16,  # Latent dimension for Wan 2.1 VAE
-    view_in=4,  # Number of input views (set to match your preprocessed tensor V)
+    view_in=0,  # 0 = auto-detect from first dataset sample (train.py reads V from data shape)
     view_compression=2,  # Compression ratio (only used when use_view_group_fusion=True)
     use_view_embedding=False,  # Learnable per-view add before fusion; set True for stronger view separation
     use_view_group_fusion=False,  # If False: only latent_fusion + latent_expand (simplest setup)
     view_mixing_strategy="embedding",  # Key: embeddings guide what each view should decode to
     from_scratch=False,
-    # Load Wan 2.1 VAE checkpoint
     from_pretrained="/home/piado/scratch/Wan2.1_VAE.pth",
     freeze_temporal=True,
     train_spatial=True,
@@ -52,15 +51,15 @@ model = dict(
 from opensora.utils.nersemble_bucket import resolve_nersemble_bucket
 
 # Optional: parent of ``64-res`` / ``128-res`` (default: NeRSemble v2 processed root).
-nersemble_processed_base = None
+nersemble_processed_base = "/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames" #None
 
 # ``DATA_ROOT``, ``train_target_hw``, ``train_target_frames`` are derived from ``bucket_config``:
 # - ``256px_...`` + T frames → load ``.../256-res``, train at 256×256, T frames (e.g. 9).
 # - ``128px_...`` + T frames → load ``.../128-res``, train at 128×128, T frames.
 # - ``64px_...`` + ≤9 frames → ``.../64-res``; + >9 frames → ``128-res`` + on-the-fly downsample to 64.
 bucket_config = {
-    #"128px_ar1:1": {9: (1.0, 1)},
-    "256px_ar1:1": {9: (1.0, 1)},  # ``<processed_base>/256-res``, 256×256, 9 frames
+    "128px_ar1:1": {9: (1.0, 1)},
+    #"256px_ar1:1": {9: (1.0, 1)},  # ``<processed_base>/256-res``, 256×256, 9 frames
     # "64px_ar1:1": {13: (1.0, 1)},  # uses 128-res on disk, downsamples to 64×64
 }
 _resolved = resolve_nersemble_bucket(bucket_config, processed_base=nersemble_processed_base)
@@ -74,7 +73,7 @@ train_target_frames = _resolved["train_target_frames"]
 # - some_people: train 17,31,32,33,35,36,37; evaluate on 18,30.
 # - all_people: all sequences from all participants except val participants.
 # - all_people_one_expression: all participants (minus val list); use expression_sequence for exact folder name.
-data_preset = "all_people_one_expression"
+data_preset = "all_people_one_expression" #"single_sequence" #"all_people_one_expression"
 # For all_people_one_expression: exact sequence folder per person (e.g. EMO-1-shout+laugh)
 all_people_expression_sequence = "EMO-1-shout+laugh"
 
@@ -83,7 +82,7 @@ _val_participants = [97, 175, 226, 18, 30, 38, 85, 124, 227, 240]
 dataset_presets = {
     "single_sequence": dict(
         type="pt_video",
-        data_path=DATA_ROOT + "/p018/EMO-1-shout+laugh/EMO-1-shout+laugh.pt",
+        data_path=DATA_ROOT + "/p017/EMO-1-shout+laugh/frames.pt",
         #"/p018/EXP-1-head/p018_EXP-1-head.pt",
         repeat=1,
     ),
@@ -110,7 +109,7 @@ dataset_presets = {
         exclude_participants=_val_participants,
         # Skip mismatched samples so V matches model.view_in
         # doesn't crash during visualization/eval.
-        expected_views=4,
+        expected_views=2,
         skip_mismatched_views=True,
         repeat=1,
     ),
@@ -123,7 +122,7 @@ dataset_presets = {
         expression_sequence=all_people_expression_sequence,
         # Skip mismatched samples so V matches model.view_in
         # doesn't crash during visualization/eval.
-        expected_views=4,
+        #expected_views=2,
         skip_mismatched_views=True,
         repeat=1,
     ),
@@ -143,7 +142,7 @@ val_dataset_presets = {
         type="pt_video",
         data_path=DATA_ROOT,
         scan_subdirs=True,
-        participants=[18],
+        participants=[17],
         include_only_sequences=["EMO-4-disgust+happy", "SEN-10-port_strong_smokey"],
         repeat=1,
     ),
@@ -159,7 +158,7 @@ val_dataset_presets = {
         data_path=DATA_ROOT,
         scan_subdirs=True,
         participants=_val_participants,
-        expected_views=4,
+        expected_views=2,
         skip_mismatched_views=True,
         repeat=1,
     ),
@@ -169,7 +168,7 @@ val_dataset_presets = {
         scan_subdirs=True,
         participants=_val_participants,
         expression_sequence=all_people_expression_sequence,
-        expected_views=4,
+        #expected_views=2,
         skip_mismatched_views=True,
         repeat=1,
     ),
@@ -191,7 +190,7 @@ persistent_workers = True
 # ============
 # Learning rates (main knobs). ``optim["lr"]`` and, when a GAN discriminator is enabled,
 # ``optim_discriminator["lr"]`` are filled from these after the discriminator preset runs.
-learning_rate = 5e-4  # VAE / generator (AdamW). Try 2e-4 for single-sequence; lower if loss is spiky.
+learning_rate = 1e-4  # VAE / generator (AdamW). Try 2e-4 for single-sequence; lower if loss is spiky.
 # Discriminator AdamW LR. ``None`` = keep the value from the discriminator preset (StyleGAN2 vs PatchGAN vs Train).
 disc_learning_rate = None
 
@@ -202,24 +201,35 @@ optim = dict(
     weight_decay=0.0,
     betas=(0.9, 0.98),
 )
-lr_scheduler = dict(warmup_steps=100, use_cosine_scheduler=False)  # Warmup only; keep constant after warmup.
+# Exponential decay: no need to know total training length.
+# Every decay_steps optimizer steps the LR is multiplied by decay_factor (halved here).
+# At ~50 update-steps/epoch: decay_steps=5000 ≈ every ~100 epochs the LR halves.
+# Stops decaying once min_lr is reached and stays there indefinitely.
+lr_scheduler = dict(
+    warmup_steps=100,
+    use_exponential_decay=True,
+    decay_steps=5000,        # halve every 5000 optimizer steps (~100 epochs)
+    decay_factor=0.5,        # × 0.5 per interval
+    min_lr=learning_rate * 0.05,  # 5 % floor
+)
 
 mixed_strategy = None  # Disable mixed strategy - we only have video
 mixed_image_ratio = 0.0
 
 dtype = "bf16"
-# Single-GPU: try plugin = "none" for slightly less ColossalAI/ZeRO overhead (multi-GPU needs a parallel plugin).
-plugin = "zero2"
+# Single-GPU: "none" removes ZeRO overhead (gradient bucketing, optimizer sharding, NCCL) that is
+# pointless with one GPU. Switch to "zero2" for multi-GPU. Grad clipping uses torch.clip_grad_norm_
+# automatically (train.py detects plugin="none" and sets force_manual_global_grad_clip=True).
+plugin = "none"
 # TorchDynamo backend used by accelerate launch in sweep scripts.
 # Typical values: "no" (default, safest), "inductor" (try for speedups).
-dynamo_backend = "inductor"
+dynamo_backend = "no" # for deterministic training, otherwise flexible tiling/blocking strategies
 plugin_config = dict(
     reduce_bucket_size_in_m=128,
     overlap_allgather=False,
 )
 
-
-grad_clip = 1.0
+grad_clip = 2.0
 grad_checkpoint = True
 pin_memory_cache_pre_alloc_numels = None  # Small dataset, don't need caching
 
@@ -231,7 +241,7 @@ outputs = "outputs"
 # Optional: fixed experiment folder name under outputs/ (else auto timestamp + config name)
 # experiment_name = "cross_attn_lora_after_16_all_people_9t_2v_64p"
 epochs = 100000 # 10000  # One epoch = one pass over ALL samples (.pt files). steps_per_epoch = num_samples // batch_size. Total steps = epochs × steps_per_epoch. (9 participants = many samples, not 9.)
-log_every = 250 # 1000  # Log every 10 steps # CHANGE to 100
+log_every = 100 # 1000  # Log every 10 steps # CHANGE to 100
 # Master switch: no checkpoint dirs written when False (periodic + final). Set True to save.
 save_ckpt = True
 # Save a checkpoint at the end of every epoch (if epoch-mean train PSNR is healthy).
@@ -253,7 +263,7 @@ ema_decay = 0.9999  # High EMA decay for stable fine-tuning
 wandb = True
 wandb_project = "wan_multiview_vae"
 # Optional run name override: keep None for current auto-generated naming logic.
-wandb_expr_name = "gen_none__perc1p5__k1em6_256px"
+wandb_expr_name = None #"gen_none__perc1p5__k1em6_256px"
 # wandb_expr_name = "manual_override"
 # Only call wandb.init after this many optimizer steps (avoids empty runs on short tests; resume past step inits immediately)
 wandb_min_steps_before_init = 10
@@ -343,10 +353,15 @@ if str(discriminator_choice).lower() == "train":
 # ============
 # Evaluation config
 # ============
-# eval_every: cheap metrics on the *current training batch* (PSNR/SSIM on that batch) every N steps.
-eval_every = 250 # was 200 # eval on TRAIN
+# eval_every: cheap metrics on the *current training batch* (PSNR/SSIM on that batch) every N
+# optimizer update steps. Scale with dataset size: single_sequence (1 step/epoch) → 1 or 5;
+# all_people_one_expression (~30 steps/epoch, 1 optimizer update/epoch) → 1 or 10;
+# all_people (many steps/epoch) → 100+.
+# NOTE: epoch-end checkpoints are skipped until the first PSNR sample is available, so if
+# eval_every is larger than the number of optimizer steps so far, no checkpoint is ever saved.
+eval_every = 100  # 1 = evaluate on every optimizer update (low overhead for small datasets)
 # full_eval_every: separate dataloader over val (or train) — mean/std over clips. Heavier.
-full_eval_every = 500 # was 1000 # eval on VAL
+full_eval_every = 500
 # 0 = score every clip in the val (or train) holdout set (e.g. all _val_participants). N>0 = cap for quick tests.
 eval_num_samples = 0
 eval_batch_size = 1  # Batch size for evaluation
@@ -381,7 +396,7 @@ debug_stats_weight_every = 50
 
 # Train-batch PSNR guard (same metric as wandb train_batch/psnr): evaluate at epoch level
 # and stop after N consecutive epochs below threshold.
-train_psnr_guard = True
+train_psnr_guard = False
 train_psnr_guard_threshold = 15.0
 train_psnr_guard_start_epoch = 0
 train_psnr_guard_consecutive = 5
@@ -392,9 +407,33 @@ train_psnr_guard_min_epochs = 0
 # ============
 # Training steps and speed
 # ============
-# Samples = total .pt files (e.g. 9 participants × ~7 sequences each = 63 samples). Steps per epoch = samples // batch_size. Total steps = epochs × steps_per_epoch (e.g. 63 × 125 = 7875).
-# More speed (no code changes): raise batch_size if VRAM allows; discriminator_choice none; lower perceptual_loss_weight;
-# fusion_mode conv3d vs cross_attention; log_bottleneck_every=0; eval_every=0; fixed_seq_eval_every_epochs=0;
-# wandb=False for local runs; plugin "none" on 1 GPU; gan_log_adaptive_grad_metrics False (default in train.py).
-batch_size = 64 # Use 1 for multi-sequence stability; increase to 2–4 once training converges
-accumulation_steps = 8
+# Samples = total .pt files (e.g. 400 videos − 10 val participants ≈ 390 train files).
+# Steps per epoch = train_samples // batch_size (drop_last=True, so floor division).
+# Gradient accumulation uses global_step, so it spans epoch boundaries — batch_size can be
+# anything regardless of accumulation_steps (no longer constrained to batch_size × accum ≤ dataset).
+# With batch_size=16 and ~390 train files: 24 steps/epoch; effective batch = 16 × 8 = 128.
+# More speed (no code changes): raise batch_size if VRAM allows; discriminator_choice none;
+# lower perceptual_loss_weight; fusion_mode conv3d vs cross_attention; log_bottleneck_every=0;
+# eval_every=0; fixed_seq_eval_every_epochs=0; wandb=False for local runs.
+batch_size = 64 #16 #16 #32  # raise if VRAM allows; effective batch = batch_size × accumulation_steps
+accumulation_steps = 1 #4
+
+# profile = True       # existing schedule-based profiler (TensorBoard trace, can't combine with profile_step)
+profile_step = False   # Kineto trace: overwhelming JSON + op table (legacy; use profile_timing instead)
+# User-friendly CUDA-synchronized block timing (attention-focused, readable txt + json).
+# Runs once at profile_timing_step (after warmup). Disables wandb automatically.
+profile_timing = True
+profile_timing_step = 50  # global_step to profile (0-indexed loop counter)
+
+# ---------- performance optimizations ----------
+# Set optimization=True to enable all four optimizations at once:
+#   1. torch.compile — fuses small ops, ~1.3-1.8x speedup after warmup.
+#      Expect very slow first ~10 steps (compilation); then much faster. Recompilation
+#      warnings are normal if batch shapes change.
+#   2. channels_last_3d on model weights — skipped automatically when ema_decay is set
+#   3. gradient checkpointing — reduces VRAM, allows larger batches
+# "default": safe op-fusion, compatible with channels_last_3d strides.
+# "reduce-overhead": uses CUDA graphs — stalls with channels_last_3d (non-contiguous strides).
+# "max-autotune": most aggressive, even slower first step.
+optimization = True
+optimization_compile_mode = "reduce-overhead"

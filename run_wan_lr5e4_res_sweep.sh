@@ -1,20 +1,51 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=wan_mv_generalization
+#SBATCH --job-name=lr5e4_res
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=0-20:00:00
+#SBATCH --time=0-07:00:00
 #SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.out
 #SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.err
-#SBATCH --array=1-1%1
+#SBATCH --array=1-4%4
+
+# LR 5e-4 + constant LR × resolution × view-count data tree (4 parallel jobs, 7 h each).
+# Uses configs/vae/train/wan_multiview_finetune.py; each task changes bucket + processed base.
+#
+# Submit:  sbatch run_wan_lr5e4_res_sweep.sh
+# Monitor: squeue -u $USER
+#
+# Shared settings (all tasks):
+#   learning_rate / optim.lr = 5e-4
+#   no LR scheduling (warmup_steps=0, use_exponential_decay=False)
+#   profile_timing off → wandb on
+#
+# Tasks (2×2 grid):
+#   1  lr5e4_256px_4frames   — 256px bucket, nersemble …/processed/4-frames
+#   2  lr5e4_256px_8frames   — 256px bucket, nersemble …/processed/8-frames
+#   3  lr5e4_512px_4frames   — 512px bucket, nersemble …/processed/4-frames
+#   4  lr5e4_512px_8frames   — 512px bucket, nersemble …/processed/8-frames
+#
+# Data note: 4-frames/8-frames trees only ship 128-res on disk; 256/512 bucket keys load
+# 128-res and resize on the fly (see opensora/utils/nersemble_bucket.py fallback).
 
 set -euo pipefail
 
 OPEN_SORA_ROOT="${OPEN_SORA_ROOT:-/home/piado/projects/aip-lindell/piado/vae/Open-Sora}"
 CONFIG="${CONFIG:-configs/vae/train/wan_multiview_finetune.py}"
-WANDB_PREFIX="${WANDB_PREFIX:-generalization_}"
+WANDB_PREFIX="${WANDB_PREFIX:-lr5e4_}"
 DRY_RUN="${DRY_RUN:-0}"
 DYNAMO_BACKEND="${DYNAMO_BACKEND:-}"
+NERSEMBLE_BASE="${NERSEMBLE_BASE:-/datasets/lindell-proj/neumayr/nersemble_v2/processed}"
+
+# Always applied (keep wandb logging; skip one-shot profile step)
+COMMON_OVERRIDES=(
+  --profile_timing False
+  --profile_step False
+  --learning_rate 5e-4
+  --optim.lr 5e-4
+  --lr_scheduler.warmup_steps 0
+  --lr_scheduler.use_exponential_decay False
+)
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   mkdir -p "${OPEN_SORA_ROOT}/slurm_logs"
@@ -31,7 +62,7 @@ cd "$OPEN_SORA_ROOT"
 
 train_file="${OPEN_SORA_ROOT}/scripts/vae/train.py"
 my_config="${OPEN_SORA_ROOT}/${CONFIG}"
-sweep_name=wan_multiview_generalization
+sweep_name=wan_lr5e4_res_sweep
 
 if [[ -z "$DYNAMO_BACKEND" ]]; then
   DYNAMO_BACKEND=$(python3 - "$my_config" <<'PY'
@@ -47,30 +78,30 @@ PY
 )
 fi
 
-# key | overrides | load_checkpoint
+# Format: "run_key|frames_tree|bucket_key"
+# bucket_key examples: 256px_ar1:1, 512px_ar1:1  (train T=9 from bucket inner key)
 EXPERIMENTS=(
-  #"none__perc1p5__k1em6|--discriminator_choice none --vae_loss_config.perceptual_loss_weight 1.5 --vae_loss_config.kl_loss_weight 1e-6 --eval_every 500 --full_eval_every 500 --save_ckpt True --keep_n_latest 1"
-  #"mv4d__perc1p5__d03__k1em7|--discriminator_choice TrainMultiview4D --vae_loss_config.perceptual_loss_weight 1.5 --gen_disc_weight 0.3 --vae_loss_config.kl_loss_weight 1e-7 --eval_every 500 --full_eval_every 500 --save_ckpt True|/home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/generalization_mv4d__perc1p5__d03__k1em7__job3280618_t1/epoch279-global_step14000"
-  #"gen_none__perc1p5__k1em6_256px_1|--save_ckpt True|/home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/generalization_gen_none__perc1p5__k1em6_256px_logging__job3280616_t2/epoch299-global_step15000"
-  #"gen_none__perc1p5__k1em6_256px_updated|--save_ckpt True|/home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/generalization_gen_none__perc1p5__k1em6_256px_updated__job3475956_t1/epoch380-global_step19000"
-  #"gen_none__perc1p5__k1em6_256px_3|--save_ckpt True|/home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/generalization_gen_none__perc1p5__k1em6_256px_logging__job3280616_t2/epoch299-global_step15000"
-  #"gen_none__pesrc1p5__k1em6_128px_new"
-  #"gen_none__perc1p5__k1em6_128px_updated_2_lower_batch_2|--save_ckpt True|/home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/generalization_gen_none__perc1p5__k1em6_128px_updated_2_lower_batch__job3498041_t1/epoch443-global_step22477"
-  #"gen_none__perc1p5__k1em6_128px_updated"
-  #"gen_none__perc1p5__k1em6_8_views"
-  gen_none__perc1p5__k1em6_8_128px_view_attention_iterative_ALL
-
+  "256px_4frames|4-frames|256px_ar1:1"
+  "256px_8frames|8-frames|256px_ar1:1"
+  "512px_4frames|4-frames|512px_ar1:1"
+  "512px_8frames|8-frames|512px_ar1:1"
 )
 
 n_exp=${#EXPERIMENTS[@]}
 idx=$((${SLURM_ARRAY_TASK_ID:-1} - 1))
-if ((idx < 0 || idx >= n_exp)); then
+if (( idx < 0 || idx >= n_exp )); then
   echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-1} -> idx=$idx out of range [0,$((n_exp - 1))] (n=$n_exp)"
   exit 1
 fi
 
-IFS='|' read -r run_key overrides resume_ckpt <<< "${EXPERIMENTS[$idx]}"
-read -ra override_args <<< "$overrides"
+IFS='|' read -r run_key frames_tree bucket_key <<< "${EXPERIMENTS[$idx]}"
+processed_base="${NERSEMBLE_BASE}/${frames_tree}"
+bucket_config="{'${bucket_key}': {9: (1.0, 1)}}"
+
+override_args=(
+  --nersemble_processed_base "$processed_base"
+  --bucket_config "$bucket_config"
+)
 
 wandb_name="${WANDB_PREFIX}${run_key}"
 experiment_name="${wandb_name}"
@@ -81,10 +112,11 @@ fi
 echo "=== ${sweep_name} task ${SLURM_ARRAY_TASK_ID:-1}/$n_exp idx=$idx ==="
 echo "wandb_expr_name=$wandb_name"
 echo "experiment_name (outputs dir)=$experiment_name"
-echo "Overrides: ${override_args[*]}"
-if [[ -n "${resume_ckpt:-}" ]]; then
-  echo "Resume checkpoint: $resume_ckpt"
-fi
+echo "Config: $my_config"
+echo "nersemble_processed_base=$processed_base"
+echo "bucket_config=$bucket_config"
+echo "Common overrides: ${COMMON_OVERRIDES[*]}"
+echo "Experiment overrides: ${override_args[*]}"
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   nvidia-smi || true
@@ -99,11 +131,12 @@ export MASTER_PORT
 export MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 export WORLD_SIZE="${WORLD_SIZE:-1}"
 export RANK="${RANK:-0}"
-export LOCAL_RANK="${LOCAL_RANK:-0}"
+export LOCAL_RANK="${LOCAL_RANK=0}"
 
 export WANDB_NAME="$wandb_name"
 echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT"
 echo "DYNAMO_BACKEND=$DYNAMO_BACKEND"
+echo "wandb=True (config default; profile_timing forced False in this script)"
 
 run_cmd=(
   accelerate launch
@@ -116,11 +149,9 @@ run_cmd=(
   "$my_config"
   --experiment_name "$experiment_name"
   --wandb_expr_name "$wandb_name"
+  "${COMMON_OVERRIDES[@]}"
   "${override_args[@]}"
 )
-if [[ -n "${resume_ckpt:-}" ]]; then
-  run_cmd+=(--load "$resume_ckpt")
-fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
   printf '%q ' "${run_cmd[@]}"
@@ -152,11 +183,9 @@ while (( attempt <= max_port_retries )); do
     "$my_config"
     --experiment_name "$experiment_name"
     --wandb_expr_name "$wandb_name"
+    "${COMMON_OVERRIDES[@]}"
     "${override_args[@]}"
   )
-  if [[ -n "${resume_ckpt:-}" ]]; then
-    run_cmd+=(--load "$resume_ckpt")
-  fi
   echo "Retrying with port ${MASTER_PORT}..."
   attempt=$((attempt + 1))
 done

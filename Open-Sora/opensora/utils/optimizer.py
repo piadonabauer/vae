@@ -83,34 +83,61 @@ def create_lr_scheduler(
     epochs: int = 1000,
     warmup_steps: int | None = None,
     use_cosine_scheduler: bool = False,
+    use_exponential_decay: bool = False,
     initial_lr: float = 1e-6,
+    min_lr: float = 0.0,
+    total_steps: int | None = None,
+    decay_steps: int = 5000,
+    decay_factor: float = 0.5,
 ) -> _LRScheduler | None:
     """
     Create a learning rate scheduler.
 
+    Three modes (mutually exclusive, checked in order):
+      1. use_exponential_decay=True  — halves every decay_steps optimizer steps, independent of
+                                       total training length. Best when you don't know how long
+                                       you'll train. Decays to min_lr then stays there.
+      2. use_cosine_scheduler=True   — cosine decay from peak to min_lr over total_steps.
+                                       Requires knowing (or estimating) training length.
+      3. warmup_steps only           — linear warmup then constant LR.
+
     Args:
-        optimizer (torch.optim.Optimizer): The optimizer to be used.
-        num_steps_per_epoch (int): The number of steps per epoch.
-        epochs (int): The number of epochs.
-        warmup_steps (int |  None): The number of warmup steps.
-        use_cosine_scheduler (bool): Whether to use cosine scheduler.
-
-    Returns:
-        _LRScheduler |  None: The learning rate scheduler
+        optimizer: The optimizer to be used.
+        num_steps_per_epoch: Steps per epoch (only used by cosine when total_steps is None).
+        epochs: Total epochs (only used by cosine when total_steps is None).
+        warmup_steps: Short linear warmup before the main schedule. 0 or None = skip.
+        use_exponential_decay: Smooth per-step exponential decay. After warmup, every
+            decay_steps steps the LR is multiplied by decay_factor (e.g. 0.5 = halve).
+        use_cosine_scheduler: Cosine annealing decay over total_steps.
+        initial_lr: LR at the start of the warmup ramp.
+        min_lr: Floor LR — decay stops here.
+        total_steps: Explicit cycle length for cosine. Falls back to num_steps_per_epoch * epochs.
+        decay_steps: For exponential decay: interval (optimizer steps) between each halving.
+        decay_factor: For exponential decay: multiplicative factor per decay_steps interval.
     """
-    if warmup_steps is None and not use_cosine_scheduler:
-        lr_scheduler = None
-    elif use_cosine_scheduler:
-        lr_scheduler = CosineAnnealingWarmupLR(
-            optimizer,
-            total_steps=num_steps_per_epoch * epochs,
-            warmup_steps=warmup_steps,
-        )
-    else:
-        lr_scheduler = LinearWarmupLR(optimizer, initial_lr=1e-6, warmup_steps=warmup_steps)
-        # lr_scheduler = LinearWarmupLR(optimizer, warmup_steps=warmup_steps)
+    if not warmup_steps and not use_cosine_scheduler and not use_exponential_decay:
+        return None
 
-    return lr_scheduler
+    if use_exponential_decay:
+        return ExponentialDecayLR(
+            optimizer,
+            warmup_steps=warmup_steps or 0,
+            decay_steps=decay_steps,
+            decay_factor=decay_factor,
+            min_lr=min_lr,
+            initial_lr=initial_lr,
+        )
+
+    if use_cosine_scheduler:
+        effective_total_steps = total_steps if total_steps is not None else num_steps_per_epoch * epochs
+        return CosineAnnealingWarmupLR(
+            optimizer,
+            total_steps=effective_total_steps,
+            warmup_steps=warmup_steps or 0,
+            eta_min=min_lr,
+        )
+
+    return LinearWarmupLR(optimizer, initial_lr=initial_lr, warmup_steps=warmup_steps)
 
 
 class LinearWarmupLR(_LRScheduler):
@@ -136,3 +163,44 @@ class LinearWarmupLR(_LRScheduler):
             ]
         else:
             return self.base_lrs
+
+
+class ExponentialDecayLR(_LRScheduler):
+    """Smooth exponential LR decay that needs no knowledge of total training length.
+
+    After an optional linear warmup, the LR decays continuously so that every
+    ``decay_steps`` optimizer steps it is multiplied by ``decay_factor`` (e.g. 0.5 = halve).
+    Decay stops at ``min_lr``.
+
+    Example with decay_steps=5000, decay_factor=0.5, peak_lr=5e-4, min_lr=2.5e-5:
+        step     0  → warmup
+        step   100  → 5e-4   (peak)
+        step  5100  → 2.5e-4 (×0.5)
+        step 10100  → 1.25e-4
+        step 15100  → 6.25e-5
+        step 20100  → 2.5e-5  → stays here
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        warmup_steps: int = 0,
+        decay_steps: int = 5000,
+        decay_factor: float = 0.5,
+        min_lr: float = 0.0,
+        initial_lr: float = 0.0,
+        last_epoch: int = -1,
+    ):
+        self.warmup_steps = warmup_steps
+        # Per-step gamma so that after decay_steps steps LR = base_lr * decay_factor.
+        self.gamma = decay_factor ** (1.0 / max(1, decay_steps))
+        self.min_lr = min_lr
+        self.initial_lr = initial_lr
+        super().__init__(optimizer, last_epoch=last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch < self.warmup_steps:
+            progress = (self.last_epoch + 1) / (self.warmup_steps + 1)
+            return [self.initial_lr + progress * (base - self.initial_lr) for base in self.base_lrs]
+        steps_after_warmup = self.last_epoch - self.warmup_steps
+        return [max(self.min_lr, base * (self.gamma ** steps_after_warmup)) for base in self.base_lrs]

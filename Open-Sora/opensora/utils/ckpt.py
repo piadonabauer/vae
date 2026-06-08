@@ -239,6 +239,29 @@ def remove_padding(tensor: torch.Tensor, original_shape: tuple) -> torch.Tensor:
     return tensor[: functools.reduce(operator.mul, original_shape)]
 
 
+def _make_model_tensors_contiguous(model: nn.Module):
+    """Make parameters/buffers contiguous so safetensors can serialize them.
+
+    Returns a list of (tensor, original_data) pairs so the caller can restore
+    the original layout (e.g. channels_last_3d) after saving — necessary to keep
+    torch.compile's cached graph valid.
+    """
+    changed = []
+    for tensor in list(model.parameters()) + list(model.buffers()):
+        if tensor is None or not isinstance(tensor, torch.Tensor):
+            continue
+        if not tensor.is_contiguous():
+            changed.append((tensor, tensor.data))
+            tensor.data = tensor.data.contiguous()
+    return changed
+
+
+def _restore_model_tensor_layouts(changed: list) -> None:
+    """Restore tensors to their original (possibly non-contiguous) layout after saving."""
+    for tensor, original_data in changed:
+        tensor.data = original_data
+
+
 def record_model_param_shape(model: torch.nn.Module) -> dict:
     """
     Record the shape of the model parameters.
@@ -419,14 +442,23 @@ class CheckpointIO:
         if model is not None:
             if not lora:
                 os.makedirs(os.path.join(save_dir, "model"), exist_ok=True)
-                booster.save_model(
-                    model,
-                    os.path.join(save_dir, "model"),
-                    shard=True,
-                    use_safetensors=True,
-                    size_per_shard=4096,
-                    use_async=async_io,
-                )
+                _layout_changed = _make_model_tensors_contiguous(model)
+                if _layout_changed and dist.get_rank() == 0:
+                    log_message(
+                        f"[ckpt] Temporarily made {len(_layout_changed)} tensors contiguous for save "
+                        "(will restore channels_last_3d layout after save)."
+                    )
+                try:
+                    booster.save_model(
+                        model,
+                        os.path.join(save_dir, "model"),
+                        shard=True,
+                        use_safetensors=True,
+                        size_per_shard=4096,
+                        use_async=async_io,
+                    )
+                finally:
+                    _restore_model_tensor_layouts(_layout_changed)
             else:
                 os.makedirs(os.path.join(save_dir, "lora"), exist_ok=True)
                 booster.save_lora_as_pretrained(model, os.path.join(save_dir, "lora"))
@@ -515,7 +547,22 @@ class CheckpointIO:
                 ema_state_dict = load_file(os.path.join(load_dir, "ema.safetensors"))
             else:
                 ema_state_dict = torch.load(os.path.join(load_dir, "ema.pt"), map_location=torch.device("cpu"))
-            # ema is not boosted, so we don't use booster.load_model
+            # strict=False tolerates missing/extra keys but PyTorch still hard-errors on
+            # size mismatches for keys present in both dicts. Filter those out so that a
+            # partial architecture change (e.g. 2-view → N-view) doesn't block resuming.
+            current_sd = ema.state_dict()
+            size_skipped = []
+            for k in list(ema_state_dict.keys()):
+                if k in current_sd and ema_state_dict[k].shape != current_sd[k].shape:
+                    size_skipped.append(
+                        f"  {k}: ckpt {tuple(ema_state_dict[k].shape)} → model {tuple(current_sd[k].shape)}"
+                    )
+                    del ema_state_dict[k]
+            if size_skipped:
+                print(
+                    f"[ckpt] EMA load: skipped {len(size_skipped)} size-mismatched key(s) "
+                    f"(kept current init):\n" + "\n".join(size_skipped)
+                )
             ema.load_state_dict(ema_state_dict, strict=strict, assign=True)
 
         if optimizer is not None:
