@@ -1,0 +1,179 @@
+=== 4-view 2048px all_people_one_expression (auto batch) ===
+experiment_name: 4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044
+probe log: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044/batch_probe_results.jsonl
+Sun Jun 14 13:26:10 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.159.03             Driver Version: 580.159.03     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    Off |   00000000:CA:00.0 Off |                    0 |
+| N/A   39C    P8             36W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+=== Batch-size probe (5 steps each) ===
+Results will be saved to: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044/batch_probe_results.jsonl
+
+
+──────────────────────────────────────────────
+ PROBE  batch_size=32  accum=1  (5 steps)
+──────────────────────────────────────────────
+Traceback (most recent call last):
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+    main()
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 1347, in main
+    _resolved = resolve_nersemble_bucket(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/project/6101839/piado/vae/Open-Sora/opensora/utils/nersemble_bucket.py", line 61, in resolve_nersemble_bucket
+    raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, or 512).")
+ValueError: Unsupported training resolution 2048px (use 64, 128, 256, or 512).
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044', '--wandb_expr_name', '4v_2048px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'2048px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '32', '--accumulation_steps', '1', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+
+──────────────────────────────────────────────
+ PROBE  batch_size=16  accum=2  (5 steps)
+──────────────────────────────────────────────
+Traceback (most recent call last):
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+    main()
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 1347, in main
+    _resolved = resolve_nersemble_bucket(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/project/6101839/piado/vae/Open-Sora/opensora/utils/nersemble_bucket.py", line 61, in resolve_nersemble_bucket
+    raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, or 512).")
+ValueError: Unsupported training resolution 2048px (use 64, 128, 256, or 512).
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044', '--wandb_expr_name', '4v_2048px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'2048px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '16', '--accumulation_steps', '2', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+
+──────────────────────────────────────────────
+ PROBE  batch_size=8  accum=4  (5 steps)
+──────────────────────────────────────────────
+Traceback (most recent call last):
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+    main()
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 1347, in main
+    _resolved = resolve_nersemble_bucket(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/project/6101839/piado/vae/Open-Sora/opensora/utils/nersemble_bucket.py", line 61, in resolve_nersemble_bucket
+    raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, or 512).")
+ValueError: Unsupported training resolution 2048px (use 64, 128, 256, or 512).
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044', '--wandb_expr_name', '4v_2048px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'2048px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '8', '--accumulation_steps', '4', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+
+──────────────────────────────────────────────
+ PROBE  batch_size=4  accum=8  (5 steps)
+──────────────────────────────────────────────
+Traceback (most recent call last):
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+    main()
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 1347, in main
+    _resolved = resolve_nersemble_bucket(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/project/6101839/piado/vae/Open-Sora/opensora/utils/nersemble_bucket.py", line 61, in resolve_nersemble_bucket
+    raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, or 512).")
+ValueError: Unsupported training resolution 2048px (use 64, 128, 256, or 512).
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044', '--wandb_expr_name', '4v_2048px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'2048px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '4', '--accumulation_steps', '8', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+
+──────────────────────────────────────────────
+ PROBE  batch_size=2  accum=16  (5 steps)
+──────────────────────────────────────────────
+Traceback (most recent call last):
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+    main()
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 1347, in main
+    _resolved = resolve_nersemble_bucket(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/project/6101839/piado/vae/Open-Sora/opensora/utils/nersemble_bucket.py", line 61, in resolve_nersemble_bucket
+    raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, or 512).")
+ValueError: Unsupported training resolution 2048px (use 64, 128, 256, or 512).
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044', '--wandb_expr_name', '4v_2048px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'2048px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '2', '--accumulation_steps', '16', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+
+──────────────────────────────────────────────
+ PROBE  batch_size=1  accum=32  (5 steps)
+──────────────────────────────────────────────
+Traceback (most recent call last):
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+    main()
+  File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 1347, in main
+    _resolved = resolve_nersemble_bucket(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/project/6101839/piado/vae/Open-Sora/opensora/utils/nersemble_bucket.py", line 61, in resolve_nersemble_bucket
+    raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, or 512).")
+ValueError: Unsupported training resolution 2048px (use 64, 128, 256, or 512).
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044', '--wandb_expr_name', '4v_2048px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'2048px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '1', '--accumulation_steps', '32', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+ERROR: All batch sizes OOM'd. Cannot train at 2048px on this GPU.
+Probe results: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/4v_2048px_allpeople_one_expr_lr5e4_compile__job3954044/batch_probe_results.jsonl

@@ -2106,6 +2106,10 @@ def main():
     last_saved_ckpt_epoch = -1
     early_stop_requested = False
     _psnr_stop_log_once = False
+    # max_steps: hard stop after this many optimizer update steps (0 = no limit).
+    _max_steps = int(cfg.get("max_steps", 0))
+    # eval_at_steps: sorted list of specific update steps to force eval/log regardless of eval_every.
+    _eval_at_steps: set[int] = set(int(s) for s in cfg.get("eval_at_steps", []))
     _profile_timing_done = False
     _profile_timing_step = int(cfg.get("profile_timing_step", 50))
     # One-time average wall time over first 10 steps; set log_step_time False to disable.
@@ -2733,26 +2737,46 @@ def main():
                         train_stats_record.update(pending_train_stats)
                         append_training_debug_jsonl(exp_dir, train_stats_record)
                     
+                    # -- max_steps hard stop --
+                    if _max_steps > 0 and actual_update_step >= _max_steps:
+                        logger.info(
+                            "[max_steps] Reached max_steps=%d at actual_update_step=%d — stopping.",
+                            _max_steps, actual_update_step,
+                        )
+                        early_stop_requested = True
+
                     # -- JSONL train_batch snapshot (optional; throttled by eval_every) --
                     eval_every = cfg.get("eval_every", 0)
+                    _is_update_boundary = (global_step + 1) % accumulation_steps == 0
+                    _at_milestone = _is_update_boundary and actual_update_step in _eval_at_steps
                     batch_eval_this_step = (
-                        eval_every > 0
-                        and (global_step + 1) % accumulation_steps == 0
-                        and actual_update_step % eval_every == 0
+                        _is_update_boundary
                         and coordinator.is_master()
                         and use_video == 1
                         and "psnr" in loss_dict
+                        and (
+                            (eval_every > 0 and actual_update_step % eval_every == 0)
+                            or _at_milestone
+                        )
                     )
 
                     # -- plot train reconstruction every log_every steps (fixed train samples: 1 or 3 people) --
                     log_every_steps = cfg.get("log_every", 10)
                     plot_reconstruction = (
-                        (global_step + 1) % accumulation_steps == 0
-                        and actual_update_step % log_every_steps == 0
+                        _is_update_boundary
                         and coordinator.is_master()
                         and use_video == 1
+                        and (
+                            actual_update_step % log_every_steps == 0
+                            or _at_milestone
+                        )
                     )
                     if plot_reconstruction:
+                        # Free fragmented allocator cache before running visualization:
+                        # with 4+ views the decoder runs once per view, so reconstruction
+                        # tensors pile up on top of the training batch.  empty_cache()
+                        # releases reserved-but-unused pages and avoids spurious OOM.
+                        torch.cuda.empty_cache()
                         vis_range = "[-1,1]" if (vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview)) else "[0,1]"
                         dataset = dataloader.dataset
                         participants_cfg = getattr(dataset, "participants", None)
@@ -3055,10 +3079,13 @@ def main():
                         # -- periodic full evaluation (runs even when save_ckpt is False) --
                         full_eval_every = cfg.get("full_eval_every", 0)
                         if (
-                            full_eval_every > 0
-                            and actual_update_step % full_eval_every == 0
-                            and coordinator.is_master()
+                            coordinator.is_master()
+                            and (
+                                (full_eval_every > 0 and actual_update_step % full_eval_every == 0)
+                                or actual_update_step in _eval_at_steps
+                            )
                         ):
+                            torch.cuda.empty_cache()
                             eval_ds = val_dataset if val_dataset is not None else dataset
                             eval_ds_label = "val" if val_dataset is not None else "train"
                             logger.info("Running full evaluation at step %s (%s)...", actual_update_step, eval_ds_label)

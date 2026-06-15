@@ -163,8 +163,26 @@ class VAELoss(nn.Module):
         # reconstruction loss
         recon_loss = l1(video_flat, recon_video_flat)
 
-        # perceptual loss
-        perceptual_loss = self.perceptual_loss_fn(video_flat, recon_video_flat)
+        # perceptual loss — chunked + resolution-capped for high-res inputs.
+        # VGG/LPIPS features are designed for ~224px; computing on 1024px batches
+        # of 36 frames causes OOM (36×64×1024²×2 ≈ 4.5 GB for block-1 alone).
+        # Downsample to at most 256px before LPIPS; chunked over frames to bound
+        # peak memory independent of batch*views*T.
+        _LPIPS_MAX_SIZE = 256
+        _lp_h, _lp_w = video_flat.shape[-2], video_flat.shape[-1]
+        if max(_lp_h, _lp_w) > _LPIPS_MAX_SIZE:
+            _scale = _LPIPS_MAX_SIZE / max(_lp_h, _lp_w)
+            _lp_h2 = max(1, int(_lp_h * _scale))
+            _lp_w2 = max(1, int(_lp_w * _scale))
+            _vf_lp = F.interpolate(video_flat.float(), size=(_lp_h2, _lp_w2), mode="bilinear", align_corners=False).to(video_flat.dtype)
+            _rf_lp = F.interpolate(recon_video_flat.float(), size=(_lp_h2, _lp_w2), mode="bilinear", align_corners=False).to(recon_video_flat.dtype)
+        else:
+            _vf_lp, _rf_lp = video_flat, recon_video_flat
+        _lpips_chunk = 8  # frames per LPIPS forward pass
+        _lp_parts = []
+        for _i in range(0, _vf_lp.shape[0], _lpips_chunk):
+            _lp_parts.append(self.perceptual_loss_fn(_vf_lp[_i:_i + _lpips_chunk], _rf_lp[_i:_i + _lpips_chunk]))
+        perceptual_loss = torch.cat(_lp_parts, dim=0)
         
         # nll loss (from reconstruction loss and perceptual loss)
         nll_loss = recon_loss + perceptual_loss * self.perceptual_loss_weight

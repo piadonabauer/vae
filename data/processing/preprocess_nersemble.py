@@ -474,8 +474,13 @@ def extract_sequence_camera_mp4s(
     sequence_name: str,
     camera_serials: Sequence[str],
     images_subdir: str = "images",
+    extract_alpha_maps: bool = False,
 ) -> None:
-    """Extract only the requested ``cam_<serial>.mp4`` files (archive already has calibration)."""
+    """Extract only the requested ``cam_<serial>.mp4`` files (archive already has calibration).
+
+    When ``extract_alpha_maps=True``, also extract the corresponding
+    ``alpha_maps/cam_<serial>.mp4`` files (silently skip if absent).
+    """
     with tarfile.open(tar_path, "r:*") as tf:
         names = [_norm_tar_path(x) for x in tf.getnames()]
         layout = _infer_archive_layout(names, participant_id)
@@ -495,6 +500,16 @@ def extract_sequence_camera_mp4s(
                 continue
             _tar_extract_member(tf, m, extract_root)
             extracted += 1
+            if extract_alpha_maps:
+                alpha_m = _find_cam_mp4_member(
+                    tf, archive_prefix, sequence_name, serial, images_subdir="alpha_maps"
+                )
+                if alpha_m is not None:
+                    _tar_extract_member(tf, alpha_m, extract_root)
+                else:
+                    print(
+                        f"[preprocess] NOTE: no alpha_maps/cam_{serial}.mp4 in tar for {sequence_name}"
+                    )
         if extracted == 0:
             hint = ""
             sample = [n for n in names if sequence_name in n and n.endswith(".mp4")][:8]
@@ -585,6 +600,7 @@ def prepare_temp_nersemble_from_tar(
     upper_views: int | None,
     explicit_camera_serials: Sequence[str] | None = None,
     images_subdir: str = "images",
+    extract_alpha_maps: bool = False,
 ) -> Path:
     """
     Extract calibration + required MP4s into ``temp_dir`` and return the on-disk
@@ -604,11 +620,55 @@ def prepare_temp_nersemble_from_tar(
         sequence_name,
         serials,
         images_subdir=images_subdir,
+        extract_alpha_maps=extract_alpha_maps,
     )
     return nersemble_local
 
 
 import cv2
+
+
+def _load_video_frames_cv2(
+    path: Path, subsample_factor: int, indices_to_keep
+) -> List[np.ndarray]:
+    """Load specific frames from an MP4 using the same temporal selection logic."""
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open video: {path}")
+    keep_set = set(indices_to_keep.tolist() if hasattr(indices_to_keep, "tolist") else indices_to_keep)
+    frames: List[np.ndarray] = []
+    frame_idx = 0
+    keep_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx % subsample_factor == 0:
+            if keep_idx in keep_set:
+                frames.append(frame)
+            keep_idx += 1
+        frame_idx += 1
+    cap.release()
+    return frames
+
+
+def _composite_alpha_white_bg(rgb_pil: Image.Image, alpha_bgr: np.ndarray) -> Image.Image:
+    """Composite an RGB PIL image over a white background using a BGR alpha frame.
+
+    The alpha map is grayscale (all BGR channels equal) in [0, 255].
+    Alpha map may be at a different spatial resolution — it is resized to match.
+    """
+    W, H = rgb_pil.size
+    # alpha_bgr: (H_a, W_a, 3) uint8 grayscale
+    alpha_gray = alpha_bgr[:, :, 0].astype(np.float32) / 255.0  # (H_a, W_a)
+    if alpha_gray.shape != (H, W):
+        alpha_pil = Image.fromarray((alpha_gray * 255).astype(np.uint8), mode="L")
+        alpha_pil = alpha_pil.resize((W, H), Image.BILINEAR)
+        alpha_gray = np.asarray(alpha_pil).astype(np.float32) / 255.0
+    img_np = np.asarray(rgb_pil).astype(np.float32) / 255.0  # (H, W, 3)
+    alpha_3c = alpha_gray[:, :, None]
+    composited = img_np * alpha_3c + np.ones_like(img_np) * (1.0 - alpha_3c)
+    return Image.fromarray(np.clip(composited * 255, 0, 255).astype(np.uint8))
 
 
 def process_mp4_to_tensor(
@@ -618,11 +678,17 @@ def process_mp4_to_tensor(
     target_fps: float = 24.0,
     target_frames: int = 13,
     remove_bg: bool = True,
+    alpha_map_path: Path | None = None,
 ) -> torch.Tensor:
     """
-    Load an MP4, temporally subsample, run RVM, optional square resize.
+    Load an MP4, temporally subsample, run RVM (or composite with pre-computed alpha), optional square resize.
 
     Returns float tensor ``[T, C, H, W]`` in ``[0, 1]``.
+
+    Priority:
+      1. If ``alpha_map_path`` is provided: composite over white background using the tar alpha.
+      2. Else if ``remove_bg=True``: run RVM.
+      3. Else: use raw RGB frames.
     """
     cap = cv2.VideoCapture(str(input_path))
     if not cap.isOpened():
@@ -643,12 +709,13 @@ def process_mp4_to_tensor(
     frame_idx = 0
     keep_idx = 0
     t0 = time.time()
+    keep_set = set(indices_to_keep.tolist())
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         if frame_idx % subsample_factor == 0:
-            if keep_idx in indices_to_keep:
+            if keep_idx in keep_set:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frames_all.append(Image.fromarray(frame_rgb))
             keep_idx += 1
@@ -660,7 +727,22 @@ def process_mp4_to_tensor(
         raise RuntimeError(f"No frames loaded from {input_path}")
 
     matted_frames = frames_all
-    if remove_bg:
+    if alpha_map_path is not None:
+        t0 = time.time()
+        alpha_frames = _load_video_frames_cv2(alpha_map_path, subsample_factor, indices_to_keep)
+        if len(alpha_frames) != len(frames_all):
+            print(
+                f"[preprocess] WARNING: alpha frame count {len(alpha_frames)} != "
+                f"image frame count {len(frames_all)} — skipping alpha compositing."
+            )
+        else:
+            matted_frames = [
+                _composite_alpha_white_bg(f, a) for f, a in zip(frames_all, alpha_frames)
+            ]
+            print(
+                f"[timing] Tar-alpha compositing ({len(matted_frames)} frames) in {time.time()-t0:.2f}s"
+            )
+    elif remove_bg:
         if converter is None:
             raise ValueError("remove_bg=True requires a valid Converter instance.")
         t0 = time.time()
@@ -764,6 +846,7 @@ def process_sequence(
     explicit_camera_serials: Sequence[str] | None = None,
     images_subdir: str = "images",
     remove_bg: bool = True,
+    use_tar_alpha: bool = False,
 ):
     """
     Process a NeRSemble sequence: pick middle-upper cameras, run RVM, then either
@@ -882,6 +965,20 @@ def process_sequence(
             print(f"[preprocess] Skipping already processed video: {cam_video_out}")
             continue
 
+        # Locate pre-computed alpha map alongside the image video when requested.
+        alpha_video_in: Path | None = None
+        if use_tar_alpha:
+            # alpha_maps/ lives next to images/ in the same sequence directory
+            alpha_candidates = [
+                cam_video_in.parent.parent / "alpha_maps" / f"cam_{serial}.mp4",
+                cam_video_in.parent / ".." / "alpha_maps" / f"cam_{serial}.mp4",
+            ]
+            alpha_video_in = next((p for p in alpha_candidates if p.exists()), None)
+            if alpha_video_in is None:
+                print(f"[preprocess] WARNING: alpha map not found for cam_{serial} — compositing skipped.")
+            else:
+                print(f"[preprocess] Using tar alpha map: {alpha_video_in}")
+
         print(f"[preprocess] Processing camera {serial} for {sequence_name}")
         t0 = time.time()
         tensor = process_mp4_to_tensor(
@@ -890,6 +987,7 @@ def process_sequence(
             image_size=image_size,
             target_frames=target_frames,
             remove_bg=remove_bg,
+            alpha_map_path=alpha_video_in,
         )
         views.append(tensor)
         print(f"[timing] Camera {serial} processed in {time.time()-t0:.2f}s")
@@ -1018,6 +1116,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Skip RVM and process raw RGB frames only.",
     )
     p.add_argument(
+        "--use-tar-alpha",
+        action="store_true",
+        help=(
+            "Composite frames over a white background using the pre-computed alpha_maps/ "
+            "videos found inside each .tar archive.  Mutually exclusive with RVM "
+            "(takes precedence over --disable-background-removal)."
+        ),
+    )
+    p.add_argument(
         "--num-participants",
         type=int,
         default=None,
@@ -1121,12 +1228,18 @@ def main():
         test_dump_dir.mkdir(parents=True, exist_ok=True)
         print(f"[preprocess] Test strip: one PNG per sequence (first camera) -> {test_dump_dir}")
 
-    remove_bg = not args.disable_background_removal
-    converter: Converter | None = None
-    if remove_bg:
-        converter = Converter("mobilenetv3", str(args.rvm_checkpoint), device=device)
+    use_tar_alpha: bool = getattr(args, "use_tar_alpha", False)
+    if use_tar_alpha:
+        remove_bg = False
+        converter = None
+        print("[preprocess] Mode: tar alpha compositing (white background from alpha_maps/ in tar).")
     else:
-        print("[preprocess] Background removal disabled; using raw frames only.")
+        remove_bg = not args.disable_background_removal
+        converter: Converter | None = None
+        if remove_bg:
+            converter = Converter("mobilenetv3", str(args.rvm_checkpoint), device=device)
+        else:
+            print("[preprocess] Background removal disabled; using raw frames only.")
 
     if args.from_tars:
         _ensure_nersemble_pkg_on_path()
@@ -1200,6 +1313,7 @@ def main():
                             args.upper_views,
                             explicit_camera_serials=args.camera_serials,
                             images_subdir=args.images_subdir,
+                            extract_alpha_maps=use_tar_alpha,
                         )
                         for img_sz, out_root in size_roots:
                             out_path = process_sequence(
@@ -1218,6 +1332,7 @@ def main():
                                 explicit_camera_serials=args.camera_serials,
                                 images_subdir=args.images_subdir,
                                 remove_bg=remove_bg,
+                                use_tar_alpha=use_tar_alpha,
                             )
                             print(f"[preprocess] Saved ({img_sz}px): {out_path}")
                 except Exception as e:
@@ -1273,6 +1388,7 @@ def main():
                         explicit_camera_serials=args.camera_serials,
                         images_subdir=args.images_subdir,
                         remove_bg=remove_bg,
+                        use_tar_alpha=use_tar_alpha,
                     )
             except Exception as e:
                 print(f"[preprocess] ERROR: p{pid:03d} {seq}: {e}")

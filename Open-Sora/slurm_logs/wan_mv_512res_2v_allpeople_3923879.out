@@ -1,0 +1,50 @@
+=== 512-res 2-view all_people_one_expression ===
+experiment_name: 512res_2v_allpeople_one_expr_lr5e4_reduce_overhead__job3923879
+MASTER_PORT: 48967
+Wed Jun 10 19:30:31 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.159.03             Driver Version: 580.159.03     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    Off |   00000000:E3:00.0 Off |                    0 |
+| N/A   30C    P8             34W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+Launch attempt 1/3 on port 48967
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/512-res train_target_hw=(512, 512) train_target_frames=9 bucket_config={'512px_ar1:1': {9: (1.0, 1)}}
+changing outputs/512res_2v_allpeople_one_expr_lr5e4_reduce_overhead__job3923879 to share
+PTVideoDataset: Found 281 .pt file(s)
+PTVideoDataset: Found 9 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 227 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Retrying with port 48968...
+Launch attempt 2/3 on port 48968
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/512-res train_target_hw=(512, 512) train_target_frames=9 bucket_config={'512px_ar1:1': {9: (1.0, 1)}}
+changing outputs/512res_2v_allpeople_one_expr_lr5e4_reduce_overhead__job3923879 to share
+PTVideoDataset: Found 281 .pt file(s)
+PTVideoDataset: Found 9 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 227 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Retrying with port 48969...
+Launch attempt 3/3 on port 48969
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/512-res train_target_hw=(512, 512) train_target_frames=9 bucket_config={'512px_ar1:1': {9: (1.0, 1)}}
+changing outputs/512res_2v_allpeople_one_expr_lr5e4_reduce_overhead__job3923879 to share
+PTVideoDataset: Found 281 .pt file(s)
+PTVideoDataset: Found 9 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 227 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Launch failed after 3 attempts (rc=0).

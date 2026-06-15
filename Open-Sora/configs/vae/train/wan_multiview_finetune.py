@@ -422,7 +422,7 @@ accumulation_steps = 1 #4
 profile_step = False   # Kineto trace: overwhelming JSON + op table (legacy; use profile_timing instead)
 # User-friendly CUDA-synchronized block timing (attention-focused, readable txt + json).
 # Runs once at profile_timing_step (after warmup). Disables wandb automatically.
-profile_timing = True
+profile_timing = False
 profile_timing_step = 50  # global_step to profile (0-indexed loop counter)
 
 # ---------- performance optimizations ----------

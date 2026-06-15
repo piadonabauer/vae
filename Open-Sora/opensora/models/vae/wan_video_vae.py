@@ -576,11 +576,29 @@ class MultiviewWanVideoVAE(nn.Module):
 
             # Decode once per view using view-conditioned embeddings
             # VIEW_EMBEDDINGS 3: loop over views
+            # Checkpoint each per-view decode during training so decoder
+            # activations are recomputed during backward instead of stored.
+            # Wrapped in _dynamo.disable so CUDA graphs (reduce-overhead) do not
+            # capture the checkpointed region — without this, compile+checkpoint
+            # causes severe allocator fragmentation at 512px+.
             recons = []
+            import torch.utils.checkpoint as _grad_ckpt
+            import torch._dynamo as _dynamo
             with ProfileTimer.block("decode.all_views"):
                 for v_idx in range(V):
                     with ProfileTimer.block(f"decode.view_{v_idx}"):
-                        rec_v = self.crossview_vae.decode(z, scale, view_idx=v_idx)
+                        if self.training:
+                            _vi = v_idx
+                            @_dynamo.disable
+                            def _ckpt_decode(_z, _vi=_vi):
+                                return _grad_ckpt.checkpoint(
+                                    lambda __z, __vi=_vi: self.crossview_vae.decode(__z, scale, view_idx=__vi),
+                                    _z,
+                                    use_reentrant=False,
+                                )
+                            rec_v = _ckpt_decode(z)
+                        else:
+                            rec_v = self.crossview_vae.decode(z, scale, view_idx=v_idx)
                     recons.append(rec_v)
 
             # Stack → [B, V, C, T, H, W]

@@ -313,7 +313,14 @@ class CausalConv3d(nn.Conv3d):
                          self.padding[1], 2 * self.padding[0], 0)
         self.padding = (0, 0, 0)
 
+    @torch._dynamo.disable
     def forward(self, x, cache_x=None):
+        # Disabled from torch.compile / CUDA-graph capture: cache_x is a
+        # stateful tensor stored between calls.  When CUDA graphs re-run the
+        # captured graph they overwrite the buffer before the previous run has
+        # consumed it, causing "accessing tensor output of CUDAGraphs that has
+        # been overwritten by a subsequent run".  Running eagerly here is safe
+        # and cheap relative to the conv itself.
         padding = list(self._padding)
         if cache_x is not None and self._padding[4] > 0:
             cache_x = cache_x.to(x.device)
@@ -2162,22 +2169,59 @@ class AttentionMultiViewVideoVan(nn.Module):
     def encode(self, x, scale):
         """
         x: [B, V, 3, T, H, W]
-        Returns: mu [B, z_dim, T', H', W']
+        Returns: mu [B, z_dim, T', H', W']  where T' = 1 + (T-1)//4  (4× temporal compression)
         """
         b, v, c, t, h, w = x.shape
         assert v == self.num_views, f"AttentionMultiViewVideoVan expects {self.num_views} views, got {v}"
 
-        # We do not use encoder.forward; manually unroll conv1 + downsamples
+        # Run conv1 + downsamples with causal temporal chunking (mirrors
+        # WanVideoVAE_._encode_with_stats) so temporal compression is applied:
+        #   T_in=9 → 3 chunks → T'=3  (instead of broken T'=9 without caching).
+        # Each view gets its own feat_cache to avoid cross-view contamination.
+        _n_down_cache = count_conv3d(self.encoder.conv1) + count_conv3d(self.encoder.downsamples)
+
         def run_down_path(x_in):
-            # initial conv
-            x_out = self.encoder.conv1(x_in)
-            # downsamples
-            for layer in self.encoder.downsamples:
-                x_out = layer(x_out)
-            return x_out
+            t_in = x_in.shape[2]
+            n_chunks = 1 + (t_in - 1) // 4
+            feat_cache = [None] * _n_down_cache
+            out = None
+            for i in range(n_chunks):
+                feat_idx = [0]
+                x_chunk = x_in[:, :, :1, :, :] if i == 0 else x_in[:, :, 1 + 4*(i-1):1 + 4*i, :, :]
+                # conv1 with cache (mirrors Encoder3d.forward lines 856-868)
+                cache_x = x_chunk[:, :, -CACHE_T:, :, :].clone()
+                if cache_x.shape[2] < 2 and feat_cache[0] is not None:
+                    cache_x = torch.cat([feat_cache[0][:, :, -1:, :, :].to(cache_x.device), cache_x], dim=2)
+                x_out = self.encoder.conv1(x_chunk, feat_cache[0])
+                feat_cache[0] = cache_x
+                feat_idx[0] += 1
+                # downsamples with cache (mirrors Encoder3d.forward lines 875-879)
+                for layer in self.encoder.downsamples:
+                    x_out = layer(x_out, feat_cache, feat_idx)
+                out = x_out if out is None else torch.cat([out, x_out], dim=2)
+            return out
 
         with ProfileTimer.block("encode.downsample_all_views"):
-            feats = [run_down_path(x[:, i]) for i in range(v)]
+            # Checkpoint each view's encoder path to avoid storing large high-res
+            # intermediate activations (e.g. [B,96,T,512,512] at conv1).
+            #
+            # We wrap in torch._dynamo.disable so CUDA graphs (reduce-overhead)
+            # do NOT try to capture the checkpointed region into a static graph.
+            # Without this, torch.compile + checkpoint causes severe allocator
+            # fragmentation (30+ GB reserved-but-unallocated at 512px).
+            # With disable: this region runs eagerly each step; checkpoint still
+            # saves memory; the rest of the model benefits from CUDA graphs.
+            if self.training:
+                import torch.utils.checkpoint as _grad_ckpt
+                import torch._dynamo as _dynamo
+
+                @_dynamo.disable
+                def _ckpt_view(xi):
+                    return _grad_ckpt.checkpoint(run_down_path, xi, use_reentrant=False)
+
+                feats = [_ckpt_view(x[:, i]) for i in range(v)]
+            else:
+                feats = [run_down_path(x[:, i]) for i in range(v)]
 
         # Keep time explicit for attention: [B, T', (H'*W'), C]
         def flatten_feat(feat):
@@ -2376,15 +2420,22 @@ class AttentionMultiViewVideoVan(nn.Module):
         with ProfileTimer.block("decode.conv2"):
             x = self.conv2(z)
 
+        # feat_cache is local to this decode call (mirrors WanVideoVAE_.decode lines 1450-1472).
+        # Without it the causal temporal upsampling convolutions have no cross-chunk context and
+        # each T'=1 chunk produces only T=1 output instead of the expected T=3, giving a final
+        # reconstruction with T'=3 frames instead of T=9.
+        _dec_feat_cache = [None] * count_conv3d(self.decoder)
+
         with ProfileTimer.block("decode.temporal_loop"):
             out = None
             for i in range(iter_):
+                _conv_idx = [0]  # Reset per chunk, exactly as in WanVideoVAE_.decode
                 x_chunk = x[:, :, i : i + 1, :, :]
                 with ProfileTimer.block("decode.temporal.decoder"):
                     if i == 0:
-                        out = self.decoder(x_chunk)
+                        out = self.decoder(x_chunk, feat_cache=_dec_feat_cache, feat_idx=_conv_idx)
                     else:
-                        out_ = self.decoder(x_chunk)
+                        out_ = self.decoder(x_chunk, feat_cache=_dec_feat_cache, feat_idx=_conv_idx)
                 if i > 0:
                     with ProfileTimer.block("decode.temporal.cat"):
                         out = torch.cat([out, out_], 2)

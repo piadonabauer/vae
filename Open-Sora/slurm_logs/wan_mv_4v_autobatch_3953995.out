@@ -1,0 +1,1197 @@
+=== 4-view 512px all_people_one_expression (auto batch) ===
+experiment_name: 4v_512px_allpeople_one_expr_lr5e4_compile__job3953995
+probe log: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/batch_probe_results.jsonl
+Sun Jun 14 13:12:06 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.159.03             Driver Version: 580.159.03     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    Off |   00000000:CA:00.0 Off |                    0 |
+| N/A   42C    P8             39W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+=== Batch-size probe (5 steps each) ===
+Results will be saved to: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/batch_probe_results.jsonl
+
+
+──────────────────────────────────────────────
+ PROBE  batch_size=32  accum=1  (5 steps)
+──────────────────────────────────────────────
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/config.txt': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995': Operation not permitted
+[[34m2026-06-14 13:12:39[0m] Experiment directory created at outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995
+[[34m2026-06-14 13:12:39[0m] profile_timing enabled: wandb disabled; will profile once at global_step=50
+[[34m2026-06-14 13:12:39[0m] Determinism mode: cuBLAS workspace, cudnn deterministic, TF32 disabled, torch.use_deterministic_algorithms(warn_only=True); data workers use seed+worker_id; epoch Python RNG uses seed+rank. Multi-GPU ZeRO and BF16 may still break bit-for-bit replay.
+[[34m2026-06-14 13:12:39[0m] Using explicit global grad clipping (max_norm=2.0) with DP all-reduce; plugin-internal clipping disabled to avoid ZeRO shard-local clipping ambiguity.
+[[34m2026-06-14 13:12:39[0m] Training configuration:
+ {'DATA_ROOT': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+ '_gen_loss_config': None,
+ '_optim_discriminator': None,
+ '_resolved': {'bucket_key': '128px_ar1:1',
+               'data_root': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+               'load_from_128_for_64_high_t': False,
+               'load_res_fallback': None,
+               'train_target_frames': 9,
+               'train_target_hw': (128, 128)},
+ '_val_participants': [97, 175, 226, 18, 30, 38, 85, 124, 227, 240],
+ 'accumulation_steps': 1,
+ 'all_people_expression_sequence': 'EMO-1-shout+laugh',
+ 'batch_size': 32,
+ 'bucket_config': {'512px_ar1:1': {9: (1.0, 1)}},
+ 'config_path': '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py',
+ 'data_preset': 'all_people_one_expression',
+ 'dataset': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+             'exclude_participants': [97,
+                                      175,
+                                      226,
+                                      18,
+                                      30,
+                                      38,
+                                      85,
+                                      124,
+                                      227,
+                                      240],
+             'expression_sequence': 'EMO-1-shout+laugh',
+             'participants': None,
+             'repeat': 1,
+             'scan_subdirs': True,
+             'skip_mismatched_views': True,
+             'type': 'pt_video'},
+ 'dataset_presets': {'__default__': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                     'participants': [17,
+                                                      18,
+                                                      30,
+                                                      31,
+                                                      32,
+                                                      33,
+                                                      35,
+                                                      36,
+                                                      37],
+                                     'repeat': 1,
+                                     'scan_subdirs': True,
+                                     'type': 'pt_video'},
+                     'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                    'exclude_participants': [97,
+                                                             175,
+                                                             226,
+                                                             18,
+                                                             30,
+                                                             38,
+                                                             85,
+                                                             124,
+                                                             227,
+                                                             240],
+                                    'expected_views': 2,
+                                    'participants': None,
+                                    'repeat': 1,
+                                    'scan_subdirs': True,
+                                    'skip_mismatched_views': True,
+                                    'type': 'pt_video'},
+                     'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                                   'exclude_participants': [97,
+                                                                            175,
+                                                                            226,
+                                                                            18,
+                                                                            30,
+                                                                            38,
+                                                                            85,
+                                                                            124,
+                                                                            227,
+                                                                            240],
+                                                   'expression_sequence': 'EMO-1-shout+laugh',
+                                                   'participants': None,
+                                                   'repeat': 1,
+                                                   'scan_subdirs': True,
+                                                   'skip_mismatched_views': True,
+                                                   'type': 'pt_video'},
+                     'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                    'exclude_sequences': ['EMO-4-disgust+happy',
+                                                          'SEN-10-port_strong_smokey'],
+                                    'participants': [18],
+                                    'repeat': 1,
+                                    'scan_subdirs': True,
+                                    'type': 'pt_video'},
+                     'single_sequence': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res/p017/EMO-1-shout+laugh/frames.pt',
+                                         'repeat': 1,
+                                         'type': 'pt_video'},
+                     'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                     'participants': [17,
+                                                      31,
+                                                      32,
+                                                      33,
+                                                      35,
+                                                      36,
+                                                      37],
+                                     'repeat': 1,
+                                     'scan_subdirs': True,
+                                     'type': 'pt_video'}},
+ 'debug_stats_every': 1,
+ 'debug_stats_start_step': 0,
+ 'debug_stats_weight_every': 50,
+ 'deterministic': True,
+ 'disc_learning_rate': None,
+ 'disc_multiview_mode': 'joint_4d',
+ 'disc_per_frame_2d': False,
+ 'discriminator': None,
+ 'discriminator_choice': 'none',
+ 'dtype': 'bf16',
+ 'dynamo_backend': 'no',
+ 'ema_decay': 0.9999,
+ 'epochs': 100000,
+ 'eval_at_steps': [10, 100, 500, 1000, 1500],
+ 'eval_batch_size': 1,
+ 'eval_every': 500,
+ 'eval_num_samples': 0,
+ 'eval_use_ema': True,
+ 'experiment_name': '4v_512px_allpeople_one_expr_lr5e4_compile__job3953995',
+ 'final_eval': True,
+ 'final_eval_num_samples': 0,
+ 'fixed_seq_eval_every_epochs': 0,
+ 'full_eval_every': 500,
+ 'gan_log_adaptive_grad_metrics': False,
+ 'gen_disc_weight': None,
+ 'grad_checkpoint': True,
+ 'grad_clip': 2.0,
+ 'keep_n_latest': 5,
+ 'kl_loss_weight': 1e-06,
+ 'learning_rate': 0.0005,
+ 'log_bottleneck_every': 0,
+ 'log_every': 500,
+ 'log_latent_shapes_every': 0,
+ 'log_memory': True,
+ 'log_step_time': True,
+ 'log_training_design_summary': True,
+ 'log_training_param_overview': True,
+ 'logvar_init': 0.0,
+ 'lr_scheduler': {'decay_factor': 0.5,
+                  'decay_steps': 5000,
+                  'min_lr': 5e-06,
+                  'use_exponential_decay': False,
+                  'warmup_steps': 0},
+ 'max_steps': 5,
+ 'mixed_image_ratio': 0.0,
+ 'mixed_strategy': None,
+ 'model': {'freeze_temporal': True,
+           'from_pretrained': '/home/piado/scratch/Wan2.1_VAE.pth',
+           'from_scratch': False,
+           'full_finetune_decoder': False,
+           'fusion_mode': 'cross_attention',
+           'lora_rank': 32,
+           'train_spatial': True,
+           'type': 'multiview_wan_video_vae',
+           'use_crossview_encoder': True,
+           'use_lora': True,
+           'use_lora_after': True,
+           'use_lora_before': False,
+           'use_view_embedding': False,
+           'use_view_group_fusion': False,
+           'use_viewwise_decoder_lora': False,
+           'view_compression': 2,
+           'view_in': 0,
+           'view_mixing_strategy': 'embedding',
+           'z_dim': 16},
+ 'nersemble_processed_base': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames',
+ 'num_bucket_build_workers': 1,
+ 'num_reconstruction_vis_samples': 1,
+ 'num_workers': 8,
+ 'optim': {'betas': (0.9, 0.98),
+           'cls': 'AdamW',
+           'eps': 1e-08,
+           'lr': 0.0001,
+           'weight_decay': 0.0},
+ 'optimization': True,
+ 'optimization_compile_mode': 'reduce-overhead',
+ 'outputs': 'outputs',
+ 'perceptual_loss_weight': 1.5,
+ 'persistent_workers': True,
+ 'pin_memory_cache_pre_alloc_numels': None,
+ 'plugin': 'none',
+ 'plugin_config': {'overlap_allgather': False, 'reduce_bucket_size_in_m': 128},
+ 'prefetch_factor': 4,
+ 'profile_step': False,
+ 'profile_timing': True,
+ 'profile_timing_step': 50,
+ 'save_ckpt': True,
+ 'seed': 42,
+ 'sweep_gen_disc_weight': None,
+ 'train_psnr_guard': False,
+ 'train_psnr_guard_consecutive': 5,
+ 'train_psnr_guard_min_epochs': 0,
+ 'train_psnr_guard_start_epoch': 0,
+ 'train_psnr_guard_threshold': 15.0,
+ 'train_target_frames': 9,
+ 'train_target_hw': (512, 512),
+ 'update_warmup_steps': False,
+ 'vae_loss_config': {'kl_loss_weight': 1e-06,
+                     'logvar_init': 0.0,
+                     'perceptual_loss_weight': 1.5,
+                     'view_consistency_weight': 0.0},
+ 'vae_loss_preset': 'default',
+ 'vae_target_range': '[-1,1]',
+ 'val_dataset': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                 'expression_sequence': 'EMO-1-shout+laugh',
+                 'participants': [97, 175, 226, 18, 30, 38, 85, 124, 227, 240],
+                 'repeat': 1,
+                 'scan_subdirs': True,
+                 'skip_mismatched_views': True,
+                 'type': 'pt_video'},
+ 'val_dataset_presets': {'__default__': None,
+                         'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                        'expected_views': 2,
+                                        'participants': [97,
+                                                         175,
+                                                         226,
+                                                         18,
+                                                         30,
+                                                         38,
+                                                         85,
+                                                         124,
+                                                         227,
+                                                         240],
+                                        'repeat': 1,
+                                        'scan_subdirs': True,
+                                        'skip_mismatched_views': True,
+                                        'type': 'pt_video'},
+                         'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                                       'expression_sequence': 'EMO-1-shout+laugh',
+                                                       'participants': [97,
+                                                                        175,
+                                                                        226,
+                                                                        18,
+                                                                        30,
+                                                                        38,
+                                                                        85,
+                                                                        124,
+                                                                        227,
+                                                                        240],
+                                                       'repeat': 1,
+                                                       'scan_subdirs': True,
+                                                       'skip_mismatched_views': True,
+                                                       'type': 'pt_video'},
+                         'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                        'include_only_sequences': ['EMO-4-disgust+happy',
+                                                                   'SEN-10-port_strong_smokey'],
+                                        'participants': [17],
+                                        'repeat': 1,
+                                        'scan_subdirs': True,
+                                        'type': 'pt_video'},
+                         'single_sequence': None,
+                         'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                         'participants': [18, 30],
+                                         'repeat': 1,
+                                         'scan_subdirs': True,
+                                         'type': 'pt_video'}},
+ 'view_consistency_weight': 0.0,
+ 'view_flatten_in_disc': False,
+ 'view_flatten_in_loss': False,
+ 'wandb': False,
+ 'wandb_expr_name': '4v_512px_allpeople_one_expr_lr5e4_compile',
+ 'wandb_min_steps_before_init': 10,
+ 'wandb_project': 'wan_multiview_vae'}
+[[34m2026-06-14 13:12:39[0m] Building dataset...
+[[34m2026-06-14 13:12:40[0m] Dataset contains 405 samples.
+[[34m2026-06-14 13:12:40[0m] Val (held-out) dataset contains 10 samples.
+[[34m2026-06-14 13:12:40[0m] Fixed per-frame eval sequence name: EMO-1-shout+laugh (train idx=0, val idx=0)
+[[34m2026-06-14 13:12:40[0m] Building models...
+[[34m2026-06-14 13:12:41[0m] Auto-detected model.view_in=4 from first dataset sample
+[[34m2026-06-14 13:12:43[0m] [MultiviewWanVideoVAE] Number of parameters: 161.23 M
+[[34m2026-06-14 13:12:43[0m] [MultiviewWanVideoVAE] Number of trainable parameters: 75.13 M
+[[34m2026-06-14 13:12:45[0m] EMA model created.
+[[34m2026-06-14 13:12:45[0m] [optimization] channels_last_3d: disabled (fragile with view() ops and compile cache)
+[[34m2026-06-14 13:12:45[0m] VAE trainable params (optimizer): 78,780,400
+[[34m2026-06-14 13:12:45[0m] [optimization] torch.compile: mode=reduce-overhead (first step will be slow)
+[[34m2026-06-14 13:12:45[0m] Preparing for distributed training...
+[[34m2026-06-14 13:12:45[0m] Optimizer AdamW has no `.backward`; using booster.backward(loss=...) compatibility path.
+[[34m2026-06-14 13:12:45[0m] Boosted model for distributed training
+[[34m2026-06-14 13:12:45[0m] Training for 100000 epochs with 405 steps per epoch
+[[34m2026-06-14 13:12:45[0m] [optimization] Warming up torch.compile eval graph (one-time, before training loop)...
+[[34m2026-06-14 13:14:13[0m] [AttentionMultiViewVideoVan] latent shape: (1, 16, 3, 64, 64)  (B=1, z_dim=16, T'=3, H'=64, W'=64)
+cudagraph partition due to non gpu ops
+cudagraph partition due to DeviceCopy ops
+cudagraph partition into 2 partitions
+[rank0]:W0614 13:15:04.454000 1372923 torch/utils/_sympy/interp.py:179] [6/2] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[rank0]:W0614 13:15:05.338000 1372923 torch/utils/_sympy/interp.py:179] [6/2] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+cudagraph partition due to non gpu ops
+cudagraph partition due to DeviceCopy ops
+cudagraph partition into 2 partitions
+[rank0]:W0614 13:15:15.474000 1372923 torch/utils/_sympy/interp.py:179] [6/3] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[rank0]:W0614 13:15:15.725000 1372923 torch/utils/_sympy/interp.py:179] [6/3] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to DeviceCopy ops
+cudagraph partition into 2 partitions
+[rank0]:W0614 13:15:23.674000 1372923 torch/utils/_sympy/interp.py:179] [6/4] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[rank0]:W0614 13:15:24.011000 1372923 torch/utils/_sympy/interp.py:179] [6/4] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to DeviceCopy ops
+cudagraph partition into 2 partitions
+[rank0]:W0614 13:15:27.343000 1372923 torch/utils/_sympy/interp.py:179] [6/5] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[rank0]:W0614 13:15:27.592000 1372923 torch/utils/_sympy/interp.py:179] [6/5] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to DeviceCopy ops
+cudagraph partition into 2 partitions
+[rank0]:W0614 13:15:32.342000 1372923 torch/utils/_sympy/interp.py:179] [6/6] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[rank0]:W0614 13:15:32.905000 1372923 torch/utils/_sympy/interp.py:179] [6/6] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to non gpu ops
+cudagraph partition due to DeviceCopy ops
+cudagraph partition into 2 partitions
+[rank0]:W0614 13:15:35.751000 1372923 torch/utils/_sympy/interp.py:179] [6/7] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[rank0]:W0614 13:15:36.010000 1372923 torch/utils/_sympy/interp.py:179] [6/7] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[rank0]:W0614 13:15:38.201000 1372923 torch/utils/_sympy/interp.py:179] [9/2] failed while executing pow_by_natural([VR[4, int_oo], VR[-1, -1]])
+[[34m2026-06-14 13:15:45[0m] [optimization] Eval graph warm-up done.
+[rank0]:[W614 13:15:45.875266197 ProcessGroupNCCL.cpp:5138] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res train_target_hw=(512, 512) train_target_frames=9 bucket_config={'512px_ar1:1': {9: (1.0, 1)}}
+changing outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 241 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+train:   0%|          | 0/405 [00:00<?, ?it/s]train:   0%|          | 0/405 [00:00<?, ?it/s, epoch=0]train:   0%|          | 1/405 [00:00<04:54,  1.37it/s, epoch=0][[34m2026-06-14 13:15:47[0m] ======== Wan multiview / crossview design summary (one-time) ========
+[[34m2026-06-14 13:15:47[0m] use_crossview_encoder=True
+[[34m2026-06-14 13:15:47[0m] fusion_mode='cross_attention'
+[[34m2026-06-14 13:15:47[0m]   -> Bidirectional cross-attention between views: each view attends to the other view’s tokens, then features are combined for the rest of the encoder/decoder. Strong when views are aligned but not identical.
+[[34m2026-06-14 13:15:47[0m] view_in=4, view_mixing_strategy=embedding
+[[34m2026-06-14 13:15:47[0m] use_view_embedding vs use_viewwise_decoder_lora: per-view additive embeddings bias early (or latent) features with a small vector per view; viewwise_decoder_lora adds low-rank adapters on the decoder side conditioned by view index—typically more flexible than a single embedding per view for reconstruction, at the cost of more trainable parameters.
+[[34m2026-06-14 13:15:47[0m]   use_view_embedding=False
+[[34m2026-06-14 13:15:47[0m]   use_viewwise_decoder_lora=False
+[[34m2026-06-14 13:15:47[0m] use_lora=True, use_lora_before=False, use_lora_after=True, lora_rank=32. Before = LoRA on the encoder stem / early downsampling; after = bottleneck and later decoder. Both can be enabled for two complementary adaptation regions.
+[[34m2026-06-14 13:15:47[0m] LoRA rank: all listed adapters in this stack typically share this rank. Larger rank increases adapter capacity and parameter count roughly linearly in rank; too high can overfit small datasets, too low can underfit cross-view cues.
+[[34m2026-06-14 13:15:47[0m] freeze_temporal=True, train_spatial=True
+[[34m2026-06-14 13:15:47[0m] ======== end design summary ========
+[[34m2026-06-14 13:15:47[0m] [VAE] param overview: total=161.23 M trainable=75.13 M (46.60% of weights) frozen=86.10 M
+[[34m2026-06-14 13:15:47[0m] [VAE] LoRA trainable: 998.59 K (1.3% of trainable); heuristic attention/cross-fusion LoRA: 998.59 K (100.0% of LoRA); other LoRA: 0
+[[34m2026-06-14 13:15:47[0m] [VAE] base trainable (non-LoRA): 74.16 M (98.7% of trainable)
+[[34m2026-06-14 13:15:47[0m] [VAE] LoRA heuristic buckets (buckets overlap if a name matches multiple hints): encoder/stem-ish=275.50 K, decoder-ish=723.09 K, viewwise-ish=0
+train:   0%|          | 1/405 [02:15<15:14:01, 135.75s/it, epoch=0]
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+[rank0]:     main()
+[rank0]:   File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 2321, in main
+[rank0]:     x_rec, posterior, z = model(x)
+[rank0]:                           ^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py", line 465, in __call__
+[rank0]:     return super().__call__(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py", line 953, in compile_wrapper
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/project/6101839/piado/vae/Open-Sora/opensora/models/vae/wan_video_vae.py", line 583, in forward
+[rank0]:     rec_v = self.crossview_vae.decode(z, scale, view_idx=v_idx)
+[rank0]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/project/6101839/piado/vae/DiffSynth-Studio/diffsynth/models/wan_video_vae.py", line 2412, in decode
+[rank0]:     # each T'=1 chunk produces only T=1 output instead of the expected T=3, giving a final
+[rank0]:                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/project/6101839/piado/vae/DiffSynth-Studio/diffsynth/models/wan_video_vae.py", line 1090, in forward
+[rank0]:     def forward(self, x, feat_cache=None, feat_idx=[0], debug_shapes: bool = False, stage_name: str = "Decoder3d"):
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py", line 1181, in _fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/aot_autograd.py", line 1148, in forward
+[rank0]:     return compiled_fn(full_args)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 343, in runtime_wrapper
+[rank0]:     all_outs = call_func_at_runtime_with_args(
+[rank0]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/utils.py", line 134, in call_func_at_runtime_with_args
+[rank0]:     out = normalize_as_list(f(args))
+[rank0]:                             ^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/utils.py", line 108, in g
+[rank0]:     return f(*args)
+[rank0]:            ^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/autograd/function.py", line 583, in apply
+[rank0]:     return super().apply(*args, **kwargs)  # type: ignore[misc]
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2152, in forward
+[rank0]:     fw_outs = call_func_at_runtime_with_args(
+[rank0]:               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/utils.py", line 134, in call_func_at_runtime_with_args
+[rank0]:     out = normalize_as_list(f(args))
+[rank0]:                             ^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 531, in wrapper
+[rank0]:     return compiled_fn(runtime_args)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 729, in inner_fn
+[rank0]:     outs = compiled_fn(args)
+[rank0]:            ^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/output_code.py", line 638, in __call__
+[rank0]:     return self.current_callable(inputs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/tmp/.torchinductor/3n/c3nxkir22zc4cc3n76ikdmc6szyn6z7u5qmbrubadm6dwkj3fcxw.py", line 4924, in call
+[rank0]:     (buf0, buf1, buf4, buf6, buf8, buf9, buf10, buf13, buf15, buf17, buf18, buf19, buf22, buf24, buf26, buf27, buf28, buf29, buf32, buf34, buf36, buf37, buf38, buf39, buf42, buf43, buf49, buf51, buf53, buf54, buf55, buf58, buf60, buf63, buf64, buf65, buf67, buf69, buf72, buf73, buf74, buf76, buf78, buf81, buf82, buf83, buf85, buf87, buf90, buf91, buf92, buf94, buf96, buf99, buf100, buf101, buf103, buf105, buf108, buf109, buf110, buf112, buf114, buf117, buf118, buf119, buf121, buf123, buf124, buf125, buf126, buf128, buf130, buf131, buf132, buf133, buf136, buf143, buf144, buf145, buf140, buf146, buf149, buf151, buf153, buf154, buf155, buf157, buf159, buf161, buf162, buf163, buf165, buf167, buf169, buf170, buf171, buf173, buf175, buf177, buf178, buf179, buf181, buf183, buf185, buf186, buf187, buf189, buf191, buf192, buf194, buf196, buf197, buf198, buf199, buf202, buf204, buf205, buf206, buf209, buf211, buf213, buf214, buf215, buf217, buf219, buf221, buf222, buf223, buf225, buf227, buf229, buf230, buf231, buf233, buf235, buf237, buf238, buf239, buf241, buf243, buf245, buf246, buf247, buf249, buf251, buf252, buf253, buf254, buf257, buf259, buf260, buf261, buf264, buf266, buf268, buf269, buf270, buf272, buf274, buf276, buf277, buf278, buf280, buf282, buf284, buf285, buf286, buf288, buf290, buf292, buf293, buf294, buf296, buf298, buf300, buf301, buf302, buf304, buf306, buf308, buf309, buf310, buf312, buf314, primals_1, primals_4, primals_6, primals_7, primals_8, primals_9, primals_11, primals_12, primals_13, primals_14, primals_16, primals_17, primals_18, primals_19, primals_20, primals_21, primals_22, primals_24, primals_25, primals_26, primals_27, primals_28, primals_29, primals_31, primals_32, primals_33, primals_34, primals_36, primals_37, primals_38, primals_39, primals_41, primals_42, primals_43, primals_44, primals_46, primals_47, primals_48, primals_49, primals_51, primals_52, primals_53, primals_54, primals_56, primals_57, primals_58, primals_59, primals_61, primals_62, primals_63, primals_64, primals_66, primals_67, primals_68, primals_69, primals_71, primals_72, primals_73, primals_75, primals_76, primals_77, primals_78, primals_79, primals_80, primals_86, primals_82, primals_84, primals_85, primals_87, primals_89, primals_90, primals_91, primals_92, primals_94, primals_95, primals_96, primals_97, primals_99, primals_100, primals_101, primals_102, primals_104, primals_105, primals_106, primals_107, primals_109, primals_110, primals_111, primals_112, primals_114, primals_115, primals_116, primals_118, primals_119, primals_120, primals_121, primals_122, primals_123, primals_125, primals_126, primals_128, primals_129, primals_130, primals_131, primals_133, primals_134, primals_135, primals_136, primals_138, primals_139, primals_140, primals_141, primals_143, primals_144, primals_145, primals_146, primals_148, primals_149, primals_150, primals_151, primals_153, primals_154, primals_155, primals_156, primals_157, primals_158, primals_160, primals_161, primals_163, primals_164, primals_165, primals_166, primals_168, primals_169, primals_170, primals_171, primals_173, primals_174, primals_175, primals_176, primals_178, primals_179, primals_180, primals_181, primals_183, primals_184, primals_185, primals_186, primals_188, primals_189, primals_190, primals_191, primals_193, primals_194) = self.partitions[0](partition0_args)
+[rank0]:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/compile_fx.py", line 1843, in run
+[rank0]:     return compiled_fn(new_inputs)  # type: ignore[arg-type]
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 404, in deferred_cudagraphify
+[rank0]:     fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
+[rank0]:               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 464, in cudagraphify
+[rank0]:     return manager.add_function(
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2337, in add_function
+[rank0]:     return fn, fn(inputs)
+[rank0]:                ^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2033, in run
+[rank0]:     out = self._run(new_inputs, function_id)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2137, in _run
+[rank0]:     return self.run_eager(new_inputs, function_id)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2298, in run_eager
+[rank0]:     return node.run(new_inputs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 692, in run
+[rank0]:     out = self.wrapped_function.model(new_inputs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/tmp/.torchinductor/3n/c3nxkir22zc4cc3n76ikdmc6szyn6z7u5qmbrubadm6dwkj3fcxw.py", line 4778, in partition_0
+[rank0]:     buf270 = empty_strided_cuda((1, 96, 6, 514, 514), (152176896, 1585176, 264196, 514, 1), torch.bfloat16)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 292.00 MiB. GPU 0 has a total capacity of 44.39 GiB of which 160.12 MiB is free. Including non-PyTorch memory, this process has 44.22 GiB memory in use. Of the allocated memory 42.47 GiB is allocated by PyTorch, with 325.94 MiB allocated in private pools (e.g., CUDA Graphs), and 820.92 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank0]:[W614 13:18:46.459826833 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_512px_allpeople_one_expr_lr5e4_compile__job3953995', '--wandb_expr_name', '4v_512px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'512px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '32', '--accumulation_steps', '1', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+
+──────────────────────────────────────────────
+ PROBE  batch_size=16  accum=2  (5 steps)
+──────────────────────────────────────────────
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/batch_probe_results.jsonl': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/config.txt': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/eval_metrics.jsonl': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/log.txt': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/loss_config.json': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/train_debug_stats.jsonl': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995': Operation not permitted
+[[34m2026-06-14 13:19:08[0m] Experiment directory created at outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995
+[[34m2026-06-14 13:19:08[0m] profile_timing enabled: wandb disabled; will profile once at global_step=50
+[[34m2026-06-14 13:19:08[0m] Determinism mode: cuBLAS workspace, cudnn deterministic, TF32 disabled, torch.use_deterministic_algorithms(warn_only=True); data workers use seed+worker_id; epoch Python RNG uses seed+rank. Multi-GPU ZeRO and BF16 may still break bit-for-bit replay.
+[[34m2026-06-14 13:19:08[0m] Using explicit global grad clipping (max_norm=2.0) with DP all-reduce; plugin-internal clipping disabled to avoid ZeRO shard-local clipping ambiguity.
+[[34m2026-06-14 13:19:08[0m] Training configuration:
+ {'DATA_ROOT': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+ '_gen_loss_config': None,
+ '_optim_discriminator': None,
+ '_resolved': {'bucket_key': '128px_ar1:1',
+               'data_root': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+               'load_from_128_for_64_high_t': False,
+               'load_res_fallback': None,
+               'train_target_frames': 9,
+               'train_target_hw': (128, 128)},
+ '_val_participants': [97, 175, 226, 18, 30, 38, 85, 124, 227, 240],
+ 'accumulation_steps': 2,
+ 'all_people_expression_sequence': 'EMO-1-shout+laugh',
+ 'batch_size': 16,
+ 'bucket_config': {'512px_ar1:1': {9: (1.0, 1)}},
+ 'config_path': '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py',
+ 'data_preset': 'all_people_one_expression',
+ 'dataset': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+             'exclude_participants': [97,
+                                      175,
+                                      226,
+                                      18,
+                                      30,
+                                      38,
+                                      85,
+                                      124,
+                                      227,
+                                      240],
+             'expression_sequence': 'EMO-1-shout+laugh',
+             'participants': None,
+             'repeat': 1,
+             'scan_subdirs': True,
+             'skip_mismatched_views': True,
+             'type': 'pt_video'},
+ 'dataset_presets': {'__default__': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                     'participants': [17,
+                                                      18,
+                                                      30,
+                                                      31,
+                                                      32,
+                                                      33,
+                                                      35,
+                                                      36,
+                                                      37],
+                                     'repeat': 1,
+                                     'scan_subdirs': True,
+                                     'type': 'pt_video'},
+                     'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                    'exclude_participants': [97,
+                                                             175,
+                                                             226,
+                                                             18,
+                                                             30,
+                                                             38,
+                                                             85,
+                                                             124,
+                                                             227,
+                                                             240],
+                                    'expected_views': 2,
+                                    'participants': None,
+                                    'repeat': 1,
+                                    'scan_subdirs': True,
+                                    'skip_mismatched_views': True,
+                                    'type': 'pt_video'},
+                     'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                                   'exclude_participants': [97,
+                                                                            175,
+                                                                            226,
+                                                                            18,
+                                                                            30,
+                                                                            38,
+                                                                            85,
+                                                                            124,
+                                                                            227,
+                                                                            240],
+                                                   'expression_sequence': 'EMO-1-shout+laugh',
+                                                   'participants': None,
+                                                   'repeat': 1,
+                                                   'scan_subdirs': True,
+                                                   'skip_mismatched_views': True,
+                                                   'type': 'pt_video'},
+                     'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                    'exclude_sequences': ['EMO-4-disgust+happy',
+                                                          'SEN-10-port_strong_smokey'],
+                                    'participants': [18],
+                                    'repeat': 1,
+                                    'scan_subdirs': True,
+                                    'type': 'pt_video'},
+                     'single_sequence': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res/p017/EMO-1-shout+laugh/frames.pt',
+                                         'repeat': 1,
+                                         'type': 'pt_video'},
+                     'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                     'participants': [17,
+                                                      31,
+                                                      32,
+                                                      33,
+                                                      35,
+                                                      36,
+                                                      37],
+                                     'repeat': 1,
+                                     'scan_subdirs': True,
+                                     'type': 'pt_video'}},
+ 'debug_stats_every': 1,
+ 'debug_stats_start_step': 0,
+ 'debug_stats_weight_every': 50,
+ 'deterministic': True,
+ 'disc_learning_rate': None,
+ 'disc_multiview_mode': 'joint_4d',
+ 'disc_per_frame_2d': False,
+ 'discriminator': None,
+ 'discriminator_choice': 'none',
+ 'dtype': 'bf16',
+ 'dynamo_backend': 'no',
+ 'ema_decay': 0.9999,
+ 'epochs': 100000,
+ 'eval_at_steps': [10, 100, 500, 1000, 1500],
+ 'eval_batch_size': 1,
+ 'eval_every': 500,
+ 'eval_num_samples': 0,
+ 'eval_use_ema': True,
+ 'experiment_name': '4v_512px_allpeople_one_expr_lr5e4_compile__job3953995',
+ 'final_eval': True,
+ 'final_eval_num_samples': 0,
+ 'fixed_seq_eval_every_epochs': 0,
+ 'full_eval_every': 500,
+ 'gan_log_adaptive_grad_metrics': False,
+ 'gen_disc_weight': None,
+ 'grad_checkpoint': True,
+ 'grad_clip': 2.0,
+ 'keep_n_latest': 5,
+ 'kl_loss_weight': 1e-06,
+ 'learning_rate': 0.0005,
+ 'log_bottleneck_every': 0,
+ 'log_every': 500,
+ 'log_latent_shapes_every': 0,
+ 'log_memory': True,
+ 'log_step_time': True,
+ 'log_training_design_summary': True,
+ 'log_training_param_overview': True,
+ 'logvar_init': 0.0,
+ 'lr_scheduler': {'decay_factor': 0.5,
+                  'decay_steps': 5000,
+                  'min_lr': 5e-06,
+                  'use_exponential_decay': False,
+                  'warmup_steps': 0},
+ 'max_steps': 5,
+ 'mixed_image_ratio': 0.0,
+ 'mixed_strategy': None,
+ 'model': {'freeze_temporal': True,
+           'from_pretrained': '/home/piado/scratch/Wan2.1_VAE.pth',
+           'from_scratch': False,
+           'full_finetune_decoder': False,
+           'fusion_mode': 'cross_attention',
+           'lora_rank': 32,
+           'train_spatial': True,
+           'type': 'multiview_wan_video_vae',
+           'use_crossview_encoder': True,
+           'use_lora': True,
+           'use_lora_after': True,
+           'use_lora_before': False,
+           'use_view_embedding': False,
+           'use_view_group_fusion': False,
+           'use_viewwise_decoder_lora': False,
+           'view_compression': 2,
+           'view_in': 0,
+           'view_mixing_strategy': 'embedding',
+           'z_dim': 16},
+ 'nersemble_processed_base': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames',
+ 'num_bucket_build_workers': 1,
+ 'num_reconstruction_vis_samples': 1,
+ 'num_workers': 8,
+ 'optim': {'betas': (0.9, 0.98),
+           'cls': 'AdamW',
+           'eps': 1e-08,
+           'lr': 0.0001,
+           'weight_decay': 0.0},
+ 'optimization': True,
+ 'optimization_compile_mode': 'reduce-overhead',
+ 'outputs': 'outputs',
+ 'perceptual_loss_weight': 1.5,
+ 'persistent_workers': True,
+ 'pin_memory_cache_pre_alloc_numels': None,
+ 'plugin': 'none',
+ 'plugin_config': {'overlap_allgather': False, 'reduce_bucket_size_in_m': 128},
+ 'prefetch_factor': 4,
+ 'profile_step': False,
+ 'profile_timing': True,
+ 'profile_timing_step': 50,
+ 'save_ckpt': True,
+ 'seed': 42,
+ 'sweep_gen_disc_weight': None,
+ 'train_psnr_guard': False,
+ 'train_psnr_guard_consecutive': 5,
+ 'train_psnr_guard_min_epochs': 0,
+ 'train_psnr_guard_start_epoch': 0,
+ 'train_psnr_guard_threshold': 15.0,
+ 'train_target_frames': 9,
+ 'train_target_hw': (512, 512),
+ 'update_warmup_steps': False,
+ 'vae_loss_config': {'kl_loss_weight': 1e-06,
+                     'logvar_init': 0.0,
+                     'perceptual_loss_weight': 1.5,
+                     'view_consistency_weight': 0.0},
+ 'vae_loss_preset': 'default',
+ 'vae_target_range': '[-1,1]',
+ 'val_dataset': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                 'expression_sequence': 'EMO-1-shout+laugh',
+                 'participants': [97, 175, 226, 18, 30, 38, 85, 124, 227, 240],
+                 'repeat': 1,
+                 'scan_subdirs': True,
+                 'skip_mismatched_views': True,
+                 'type': 'pt_video'},
+ 'val_dataset_presets': {'__default__': None,
+                         'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                        'expected_views': 2,
+                                        'participants': [97,
+                                                         175,
+                                                         226,
+                                                         18,
+                                                         30,
+                                                         38,
+                                                         85,
+                                                         124,
+                                                         227,
+                                                         240],
+                                        'repeat': 1,
+                                        'scan_subdirs': True,
+                                        'skip_mismatched_views': True,
+                                        'type': 'pt_video'},
+                         'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                                       'expression_sequence': 'EMO-1-shout+laugh',
+                                                       'participants': [97,
+                                                                        175,
+                                                                        226,
+                                                                        18,
+                                                                        30,
+                                                                        38,
+                                                                        85,
+                                                                        124,
+                                                                        227,
+                                                                        240],
+                                                       'repeat': 1,
+                                                       'scan_subdirs': True,
+                                                       'skip_mismatched_views': True,
+                                                       'type': 'pt_video'},
+                         'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                        'include_only_sequences': ['EMO-4-disgust+happy',
+                                                                   'SEN-10-port_strong_smokey'],
+                                        'participants': [17],
+                                        'repeat': 1,
+                                        'scan_subdirs': True,
+                                        'type': 'pt_video'},
+                         'single_sequence': None,
+                         'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                         'participants': [18, 30],
+                                         'repeat': 1,
+                                         'scan_subdirs': True,
+                                         'type': 'pt_video'}},
+ 'view_consistency_weight': 0.0,
+ 'view_flatten_in_disc': False,
+ 'view_flatten_in_loss': False,
+ 'wandb': False,
+ 'wandb_expr_name': '4v_512px_allpeople_one_expr_lr5e4_compile',
+ 'wandb_min_steps_before_init': 10,
+ 'wandb_project': 'wan_multiview_vae'}
+[[34m2026-06-14 13:19:08[0m] Building dataset...
+[[34m2026-06-14 13:19:08[0m] Dataset contains 405 samples.
+[[34m2026-06-14 13:19:08[0m] Val (held-out) dataset contains 10 samples.
+[[34m2026-06-14 13:19:08[0m] Fixed per-frame eval sequence name: EMO-1-shout+laugh (train idx=0, val idx=0)
+[[34m2026-06-14 13:19:08[0m] Building models...
+[[34m2026-06-14 13:19:08[0m] Auto-detected model.view_in=4 from first dataset sample
+[[34m2026-06-14 13:19:10[0m] [MultiviewWanVideoVAE] Number of parameters: 161.23 M
+[[34m2026-06-14 13:19:10[0m] [MultiviewWanVideoVAE] Number of trainable parameters: 75.13 M
+[[34m2026-06-14 13:19:12[0m] EMA model created.
+[[34m2026-06-14 13:19:12[0m] [optimization] channels_last_3d: disabled (fragile with view() ops and compile cache)
+[[34m2026-06-14 13:19:12[0m] VAE trainable params (optimizer): 78,780,400
+[[34m2026-06-14 13:19:12[0m] [optimization] torch.compile: mode=reduce-overhead (first step will be slow)
+[[34m2026-06-14 13:19:12[0m] Preparing for distributed training...
+[[34m2026-06-14 13:19:12[0m] Optimizer AdamW has no `.backward`; using booster.backward(loss=...) compatibility path.
+[[34m2026-06-14 13:19:12[0m] Boosted model for distributed training
+[[34m2026-06-14 13:19:12[0m] Training for 100000 epochs with 405 steps per epoch
+[[34m2026-06-14 13:19:12[0m] [optimization] Warming up torch.compile eval graph (one-time, before training loop)...
+[[34m2026-06-14 13:19:37[0m] [AttentionMultiViewVideoVan] latent shape: (1, 16, 3, 64, 64)  (B=1, z_dim=16, T'=3, H'=64, W'=64)
+[[34m2026-06-14 13:20:09[0m] [optimization] Eval graph warm-up done.
+[rank0]:[W614 13:20:09.106627337 ProcessGroupNCCL.cpp:5138] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res train_target_hw=(512, 512) train_target_frames=9 bucket_config={'512px_ar1:1': {9: (1.0, 1)}}
+changing outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 241 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+train:   0%|          | 0/405 [00:00<?, ?it/s]train:   0%|          | 0/405 [00:00<?, ?it/s, epoch=0]train:   0%|          | 1/405 [00:00<03:59,  1.69it/s, epoch=0][[34m2026-06-14 13:20:10[0m] ======== Wan multiview / crossview design summary (one-time) ========
+[[34m2026-06-14 13:20:10[0m] use_crossview_encoder=True
+[[34m2026-06-14 13:20:10[0m] fusion_mode='cross_attention'
+[[34m2026-06-14 13:20:10[0m]   -> Bidirectional cross-attention between views: each view attends to the other view’s tokens, then features are combined for the rest of the encoder/decoder. Strong when views are aligned but not identical.
+[[34m2026-06-14 13:20:10[0m] view_in=4, view_mixing_strategy=embedding
+[[34m2026-06-14 13:20:10[0m] use_view_embedding vs use_viewwise_decoder_lora: per-view additive embeddings bias early (or latent) features with a small vector per view; viewwise_decoder_lora adds low-rank adapters on the decoder side conditioned by view index—typically more flexible than a single embedding per view for reconstruction, at the cost of more trainable parameters.
+[[34m2026-06-14 13:20:10[0m]   use_view_embedding=False
+[[34m2026-06-14 13:20:10[0m]   use_viewwise_decoder_lora=False
+[[34m2026-06-14 13:20:10[0m] use_lora=True, use_lora_before=False, use_lora_after=True, lora_rank=32. Before = LoRA on the encoder stem / early downsampling; after = bottleneck and later decoder. Both can be enabled for two complementary adaptation regions.
+[[34m2026-06-14 13:20:10[0m] LoRA rank: all listed adapters in this stack typically share this rank. Larger rank increases adapter capacity and parameter count roughly linearly in rank; too high can overfit small datasets, too low can underfit cross-view cues.
+[[34m2026-06-14 13:20:10[0m] freeze_temporal=True, train_spatial=True
+[[34m2026-06-14 13:20:10[0m] ======== end design summary ========
+[[34m2026-06-14 13:20:10[0m] [VAE] param overview: total=161.23 M trainable=75.13 M (46.60% of weights) frozen=86.10 M
+[[34m2026-06-14 13:20:10[0m] [VAE] LoRA trainable: 998.59 K (1.3% of trainable); heuristic attention/cross-fusion LoRA: 998.59 K (100.0% of LoRA); other LoRA: 0
+[[34m2026-06-14 13:20:10[0m] [VAE] base trainable (non-LoRA): 74.16 M (98.7% of trainable)
+[[34m2026-06-14 13:20:10[0m] [VAE] LoRA heuristic buckets (buckets overlap if a name matches multiple hints): encoder/stem-ish=275.50 K, decoder-ish=723.09 K, viewwise-ish=0
+train:   0%|          | 1/405 [04:32<30:35:18, 272.57s/it, epoch=0]
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 3523, in <module>
+[rank0]:     main()
+[rank0]:   File "/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py", line 2555, in main
+[rank0]:     loss_scaled.backward()
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_tensor.py", line 630, in backward
+[rank0]:     torch.autograd.backward(
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/autograd/__init__.py", line 364, in backward
+[rank0]:     _engine_run_backward(
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank0]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/autograd/function.py", line 317, in apply
+[rank0]:     return user_fn(self, *args)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2338, in backward
+[rank0]:     return impl_fn()
+[rank0]:            ^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2324, in impl_fn
+[rank0]:     out = CompiledFunction._backward_impl(ctx, all_args)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2494, in _backward_impl
+[rank0]:     out = call_func_at_runtime_with_args(
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_functorch/_aot_autograd/utils.py", line 134, in call_func_at_runtime_with_args
+[rank0]:     out = normalize_as_list(f(args))
+[rank0]:                             ^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py", line 1181, in _fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/output_code.py", line 638, in __call__
+[rank0]:     return self.current_callable(inputs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/tmp/.torchinductor/nc/cncxwibsrx4e47pnefixyuacgfak4pvbbjatck322minwobe3zn2.py", line 46477, in call
+[rank0]:     (buf2, buf5, buf9, buf12, buf17, buf23, buf26, buf31, buf37, buf40, buf45, buf54, buf57, buf60, buf67, buf70, buf78, buf81, buf73, buf84, buf97, buf100, buf103, buf110, buf113, buf121, buf124, buf116, buf127, buf129, buf136, buf139, buf144, buf150, buf153, buf158, buf162, buf165, buf168, buf172, buf175, buf178, buf182, buf202, buf185, buf205, buf188, buf192, buf195, buf198, buf256, buf255, buf260, buf269, buf268, buf273, buf282, buf306, buf281, buf305, buf286, buf295, buf299, buf294, buf309, buf312, buf319, buf324, buf322, buf3687, buf3691, buf3686, buf3700, buf3703, buf3699, buf3715, buf3719, buf3714, buf3728, buf3519, buf3518, buf3727, buf3733, buf3743, buf3742, buf3750, buf3754, buf3749, buf3762, buf3765, buf3761, buf3773, buf3797, buf3772, buf3796, buf3777, buf3785, buf3784, buf3789, buf3572, buf3571, buf3805, buf3804, buf3813, buf3812, buf3818, buf3827, buf3831, buf3826, buf3840, buf3866, buf3839, buf3865, buf3845, buf3854, buf3853, buf3858, buf3874, buf3873, buf3882, buf3881, buf3887, buf3896, buf3895, buf3900, buf3908, buf3914, buf3923, buf3909, buf3928, buf3936, buf3922, buf3935) = self.partitions[0](partition0_args)
+[rank0]:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/compile_fx.py", line 1843, in run
+[rank0]:     return compiled_fn(new_inputs)  # type: ignore[arg-type]
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 404, in deferred_cudagraphify
+[rank0]:     fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
+[rank0]:               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 464, in cudagraphify
+[rank0]:     return manager.add_function(
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2337, in add_function
+[rank0]:     return fn, fn(inputs)
+[rank0]:                ^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2033, in run
+[rank0]:     out = self._run(new_inputs, function_id)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2137, in _run
+[rank0]:     return self.run_eager(new_inputs, function_id)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 2298, in run_eager
+[rank0]:     return node.run(new_inputs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/piado/.local/lib/python3.11/site-packages/torch/_inductor/cudagraph_trees.py", line 692, in run
+[rank0]:     out = self.wrapped_function.model(new_inputs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/tmp/.torchinductor/nc/cncxwibsrx4e47pnefixyuacgfak4pvbbjatck322minwobe3zn2.py", line 35735, in partition_0
+[rank0]:     buf535 = empty_strided_cuda((1, 192, 6, 256, 256), (75497472, 393216, 65536, 256, 1), torch.bfloat16)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 144.00 MiB. GPU 0 has a total capacity of 44.39 GiB of which 160.12 MiB is free. Including non-PyTorch memory, this process has 44.22 GiB memory in use. Of the allocated memory 12.35 GiB is allocated by PyTorch, with 224.05 MiB allocated in private pools (e.g., CUDA Graphs), and 30.91 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank0]:[W614 13:25:24.294526787 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+Traceback (most recent call last):
+  File "/home/piado/.local/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1281, in launch_command
+    simple_launcher(args)
+  File "/home/piado/.local/lib/python3.11/site-packages/accelerate/commands/launch.py", line 869, in simple_launcher
+    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+subprocess.CalledProcessError: Command '['/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v3/Compiler/gcccore/python/3.11.5/bin/python', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/scripts/vae/train.py', '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py', '--experiment_name', '4v_512px_allpeople_one_expr_lr5e4_compile__job3953995', '--wandb_expr_name', '4v_512px_allpeople_one_expr_lr5e4_compile', '--nersemble_processed_base', '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames', '--bucket_config', "{'512px_ar1:1':{9:(1.0,1)}}", '--data_preset', 'all_people_one_expression', '--learning_rate', '5e-4', '--lr_scheduler.warmup_steps', '0', '--lr_scheduler.use_exponential_decay', 'False', '--discriminator_choice', 'none', '--optimization', 'True', '--optimization_compile_mode', 'reduce-overhead', '--epochs', '100000', '--eval_at_steps', '[10,100,500,1000,1500]', '--eval_every', '500', '--full_eval_every', '500', '--log_every', '500', '--save_ckpt', 'True', '--fixed_seq_eval_every_epochs', '0', '--log_memory', 'True', '--num_reconstruction_vis_samples', '1', '--batch_size', '16', '--accumulation_steps', '2', '--max_steps', '5', '--wandb', 'False']' returned non-zero exit status 1.
+ → status=oom  peak_gpu=nullGB  (exit 1)
+
+──────────────────────────────────────────────
+ PROBE  batch_size=8  accum=4  (5 steps)
+──────────────────────────────────────────────
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/batch_probe_results.jsonl': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/config.txt': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/eval_metrics.jsonl': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/log.txt': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/loss_config.json': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995/train_debug_stats.jsonl': Operation not permitted
+chgrp: changing group of 'outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995': Operation not permitted
+[[34m2026-06-14 13:25:44[0m] Experiment directory created at outputs/4v_512px_allpeople_one_expr_lr5e4_compile__job3953995
+[[34m2026-06-14 13:25:44[0m] Determinism mode: cuBLAS workspace, cudnn deterministic, TF32 disabled, torch.use_deterministic_algorithms(warn_only=True); data workers use seed+worker_id; epoch Python RNG uses seed+rank. Multi-GPU ZeRO and BF16 may still break bit-for-bit replay.
+[[34m2026-06-14 13:25:44[0m] Using explicit global grad clipping (max_norm=2.0) with DP all-reduce; plugin-internal clipping disabled to avoid ZeRO shard-local clipping ambiguity.
+[[34m2026-06-14 13:25:44[0m] Training configuration:
+ {'DATA_ROOT': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+ '_gen_loss_config': None,
+ '_optim_discriminator': None,
+ '_resolved': {'bucket_key': '128px_ar1:1',
+               'data_root': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames/128-res',
+               'load_from_128_for_64_high_t': False,
+               'load_res_fallback': None,
+               'train_target_frames': 9,
+               'train_target_hw': (128, 128)},
+ '_val_participants': [97, 175, 226, 18, 30, 38, 85, 124, 227, 240],
+ 'accumulation_steps': 4,
+ 'all_people_expression_sequence': 'EMO-1-shout+laugh',
+ 'batch_size': 8,
+ 'bucket_config': {'512px_ar1:1': {9: (1.0, 1)}},
+ 'config_path': '/home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py',
+ 'data_preset': 'all_people_one_expression',
+ 'dataset': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+             'exclude_participants': [97,
+                                      175,
+                                      226,
+                                      18,
+                                      30,
+                                      38,
+                                      85,
+                                      124,
+                                      227,
+                                      240],
+             'expression_sequence': 'EMO-1-shout+laugh',
+             'participants': None,
+             'repeat': 1,
+             'scan_subdirs': True,
+             'skip_mismatched_views': True,
+             'type': 'pt_video'},
+ 'dataset_presets': {'__default__': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                     'participants': [17,
+                                                      18,
+                                                      30,
+                                                      31,
+                                                      32,
+                                                      33,
+                                                      35,
+                                                      36,
+                                                      37],
+                                     'repeat': 1,
+                                     'scan_subdirs': True,
+                                     'type': 'pt_video'},
+                     'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                    'exclude_participants': [97,
+                                                             175,
+                                                             226,
+                                                             18,
+                                                             30,
+                                                             38,
+                                                             85,
+                                                             124,
+                                                             227,
+                                                             240],
+                                    'expected_views': 2,
+                                    'participants': None,
+                                    'repeat': 1,
+                                    'scan_subdirs': True,
+                                    'skip_mismatched_views': True,
+                                    'type': 'pt_video'},
+                     'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                                   'exclude_participants': [97,
+                                                                            175,
+                                                                            226,
+                                                                            18,
+                                                                            30,
+                                                                            38,
+                                                                            85,
+                                                                            124,
+                                                                            227,
+                                                                            240],
+                                                   'expression_sequence': 'EMO-1-shout+laugh',
+                                                   'participants': None,
+                                                   'repeat': 1,
+                                                   'scan_subdirs': True,
+                                                   'skip_mismatched_views': True,
+                                                   'type': 'pt_video'},
+                     'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                    'exclude_sequences': ['EMO-4-disgust+happy',
+                                                          'SEN-10-port_strong_smokey'],
+                                    'participants': [18],
+                                    'repeat': 1,
+                                    'scan_subdirs': True,
+                                    'type': 'pt_video'},
+                     'single_sequence': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res/p017/EMO-1-shout+laugh/frames.pt',
+                                         'repeat': 1,
+                                         'type': 'pt_video'},
+                     'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                     'participants': [17,
+                                                      31,
+                                                      32,
+                                                      33,
+                                                      35,
+                                                      36,
+                                                      37],
+                                     'repeat': 1,
+                                     'scan_subdirs': True,
+                                     'type': 'pt_video'}},
+ 'debug_stats_every': 1,
+ 'debug_stats_start_step': 0,
+ 'debug_stats_weight_every': 50,
+ 'deterministic': True,
+ 'disc_learning_rate': None,
+ 'disc_multiview_mode': 'joint_4d',
+ 'disc_per_frame_2d': False,
+ 'discriminator': None,
+ 'discriminator_choice': 'none',
+ 'dtype': 'bf16',
+ 'dynamo_backend': 'no',
+ 'ema_decay': 0.9999,
+ 'epochs': 100000,
+ 'eval_at_steps': [10, 100, 500, 1000, 1500],
+ 'eval_batch_size': 1,
+ 'eval_every': 500,
+ 'eval_num_samples': 0,
+ 'eval_use_ema': True,
+ 'experiment_name': '4v_512px_allpeople_one_expr_lr5e4_compile__job3953995',
+ 'final_eval': True,
+ 'final_eval_num_samples': 0,
+ 'fixed_seq_eval_every_epochs': 0,
+ 'full_eval_every': 500,
+ 'gan_log_adaptive_grad_metrics': False,
+ 'gen_disc_weight': None,
+ 'grad_checkpoint': True,
+ 'grad_clip': 2.0,
+ 'keep_n_latest': 5,
+ 'kl_loss_weight': 1e-06,
+ 'learning_rate': 0.0005,
+ 'log_bottleneck_every': 0,
+ 'log_every': 500,
+ 'log_latent_shapes_every': 0,
+ 'log_memory': True,
+ 'log_step_time': True,
+ 'log_training_design_summary': True,
+ 'log_training_param_overview': True,
+ 'logvar_init': 0.0,
+ 'lr_scheduler': {'decay_factor': 0.5,
+                  'decay_steps': 5000,
+                  'min_lr': 5e-06,
+                  'use_exponential_decay': False,
+                  'warmup_steps': 0},
+ 'max_steps': 5,
+ 'mixed_image_ratio': 0.0,
+ 'mixed_strategy': None,
+ 'model': {'freeze_temporal': True,
+           'from_pretrained': '/home/piado/scratch/Wan2.1_VAE.pth',
+           'from_scratch': False,
+           'full_finetune_decoder': False,
+           'fusion_mode': 'cross_attention',
+           'lora_rank': 32,
+           'train_spatial': True,
+           'type': 'multiview_wan_video_vae',
+           'use_crossview_encoder': True,
+           'use_lora': True,
+           'use_lora_after': True,
+           'use_lora_before': False,
+           'use_view_embedding': False,
+           'use_view_group_fusion': False,
+           'use_viewwise_decoder_lora': False,
+           'view_compression': 2,
+           'view_in': 0,
+           'view_mixing_strategy': 'embedding',
+           'z_dim': 16},
+ 'nersemble_processed_base': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames',
+ 'num_bucket_build_workers': 1,
+ 'num_reconstruction_vis_samples': 1,
+ 'num_workers': 8,
+ 'optim': {'betas': (0.9, 0.98),
+           'cls': 'AdamW',
+           'eps': 1e-08,
+           'lr': 0.0001,
+           'weight_decay': 0.0},
+ 'optimization': True,
+ 'optimization_compile_mode': 'reduce-overhead',
+ 'outputs': 'outputs',
+ 'perceptual_loss_weight': 1.5,
+ 'persistent_workers': True,
+ 'pin_memory_cache_pre_alloc_numels': None,
+ 'plugin': 'none',
+ 'plugin_config': {'overlap_allgather': False, 'reduce_bucket_size_in_m': 128},
+ 'prefetch_factor': 4,
+ 'profile_step': False,
+ 'profile_timing': False,
+ 'profile_timing_step': 50,
+ 'save_ckpt': True,
+ 'seed': 42,
+ 'sweep_gen_disc_weight': None,
+ 'train_psnr_guard': False,
+ 'train_psnr_guard_consecutive': 5,
+ 'train_psnr_guard_min_epochs': 0,
+ 'train_psnr_guard_start_epoch': 0,
+ 'train_psnr_guard_threshold': 15.0,
+ 'train_target_frames': 9,
+ 'train_target_hw': (512, 512),
+ 'update_warmup_steps': False,
+ 'vae_loss_config': {'kl_loss_weight': 1e-06,
+                     'logvar_init': 0.0,
+                     'perceptual_loss_weight': 1.5,
+                     'view_consistency_weight': 0.0},
+ 'vae_loss_preset': 'default',
+ 'vae_target_range': '[-1,1]',
+ 'val_dataset': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                 'expression_sequence': 'EMO-1-shout+laugh',
+                 'participants': [97, 175, 226, 18, 30, 38, 85, 124, 227, 240],
+                 'repeat': 1,
+                 'scan_subdirs': True,
+                 'skip_mismatched_views': True,
+                 'type': 'pt_video'},
+ 'val_dataset_presets': {'__default__': None,
+                         'all_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                        'expected_views': 2,
+                                        'participants': [97,
+                                                         175,
+                                                         226,
+                                                         18,
+                                                         30,
+                                                         38,
+                                                         85,
+                                                         124,
+                                                         227,
+                                                         240],
+                                        'repeat': 1,
+                                        'scan_subdirs': True,
+                                        'skip_mismatched_views': True,
+                                        'type': 'pt_video'},
+                         'all_people_one_expression': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                                       'expression_sequence': 'EMO-1-shout+laugh',
+                                                       'participants': [97,
+                                                                        175,
+                                                                        226,
+                                                                        18,
+                                                                        30,
+                                                                        38,
+                                                                        85,
+                                                                        124,
+                                                                        227,
+                                                                        240],
+                                                       'repeat': 1,
+                                                       'scan_subdirs': True,
+                                                       'skip_mismatched_views': True,
+                                                       'type': 'pt_video'},
+                         'one_person': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                        'include_only_sequences': ['EMO-4-disgust+happy',
+                                                                   'SEN-10-port_strong_smokey'],
+                                        'participants': [17],
+                                        'repeat': 1,
+                                        'scan_subdirs': True,
+                                        'type': 'pt_video'},
+                         'single_sequence': None,
+                         'some_people': {'data_path': '/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res',
+                                         'participants': [18, 30],
+                                         'repeat': 1,
+                                         'scan_subdirs': True,
+                                         'type': 'pt_video'}},
+ 'view_consistency_weight': 0.0,
+ 'view_flatten_in_disc': False,
+ 'view_flatten_in_loss': False,
+ 'wandb': False,
+ 'wandb_expr_name': '4v_512px_allpeople_one_expr_lr5e4_compile',
+ 'wandb_min_steps_before_init': 10,
+ 'wandb_project': 'wan_multiview_vae'}
+[[34m2026-06-14 13:25:44[0m] Building dataset...
+[[34m2026-06-14 13:25:44[0m] Dataset contains 405 samples.
+[[34m2026-06-14 13:25:44[0m] Val (held-out) dataset contains 10 samples.
+[[34m2026-06-14 13:25:44[0m] Fixed per-frame eval sequence name: EMO-1-shout+laugh (train idx=0, val idx=0)
+[[34m2026-06-14 13:25:44[0m] Building models...
+[[34m2026-06-14 13:25:44[0m] Auto-detected model.view_in=4 from first dataset sample
+[[34m2026-06-14 13:25:46[0m] [MultiviewWanVideoVAE] Number of parameters: 161.23 M
+[[34m2026-06-14 13:25:46[0m] [MultiviewWanVideoVAE] Number of trainable parameters: 75.13 M
+[[34m2026-06-14 13:25:47[0m] EMA model created.
+[[34m2026-06-14 13:25:47[0m] [optimization] channels_last_3d: disabled (fragile with view() ops and compile cache)
+[[34m2026-06-14 13:25:47[0m] VAE trainable params (optimizer): 78,780,400
+[[34m2026-06-14 13:25:47[0m] [optimization] torch.compile: mode=reduce-overhead (first step will be slow)
+[[34m2026-06-14 13:25:47[0m] Preparing for distributed training...
+[[34m2026-06-14 13:25:47[0m] Optimizer AdamW has no `.backward`; using booster.backward(loss=...) compatibility path.
+[[34m2026-06-14 13:25:47[0m] Boosted model for distributed training
+[[34m2026-06-14 13:25:47[0m] Training for 100000 epochs with 405 steps per epoch
+[[34m2026-06-14 13:25:47[0m] [optimization] Warming up torch.compile eval graph (one-time, before training loop)...

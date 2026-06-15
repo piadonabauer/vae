@@ -1,25 +1,28 @@
 #!/bin/bash
-#SBATCH --job-name=nersemble_preprocess_4v_one_expr
+#SBATCH --job-name=nersemble_preprocess_8v_one_expr
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --array=0-9
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=05:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/logs/%x_%A_%a.out
 #SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/logs/%x_%A_%a.err
 
-# Preprocess NeRSemble: all people, EMO-1-shout+laugh, 4 camera views.
-# Each tar is extracted ONCE and saved at all 4 resolutions (256, 512, 1024, 2048)
-# in a single pass.  10 array tasks split the participants across GPUs.
+# Preprocess NeRSemble: all people, EMO-1-shout+laugh, 8 camera views.
+# Each tar is extracted ONCE and saved at all 4 resolutions in a single pass.
+# 10 array tasks split participants across GPUs.
+#
+# Camera serials (8 views, same set as run_preprocess.sh):
+#   222200042 222200046 222200036 220700191 222200037 222200047 222200049 221501007
 #
 # Output tree:
-#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/256-res/
-#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/512-res/
-#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/1024-res/
-#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/2048-res/
+#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/8-views/256-res/
+#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/8-views/512-res/
+#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/8-views/1024-res/
+#   /datasets/lindell-proj/neumayr/nersemble_v2/processed/8-views/2048-res/
 #
 # Submit:
-#   sbatch run_preprocess_4v_one_expression_resolutions.sh
+#   sbatch run_preprocess_8v_one_expression_resolutions.sh
 
 set -euo pipefail
 
@@ -28,7 +31,7 @@ cd "$VAE_DIR" || exit 1
 mkdir -p logs
 
 NERSEMBLE_ROOT="${NERSEMBLE_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-views}"
 TEMP_DIR="${TEMP_DIR:-${SCRATCH:-/scratch/${USER}}}"
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
@@ -42,7 +45,7 @@ srun python3 "$VAE_DIR/data/processing/preprocess_nersemble.py" \
   --output-root "$OUTPUT_ROOT" \
   --image-sizes 256 512 1024 2048 \
   --frames 9 \
-  --camera-serials 222200036 220700191 222200037 222200047 \
+  --camera-serials 222200042 222200046 222200036 220700191 222200037 222200047 222200049 221501007 \
   --images-subdir images \
   --use-tar-alpha \
   --only-sequences EMO-1-shout+laugh \

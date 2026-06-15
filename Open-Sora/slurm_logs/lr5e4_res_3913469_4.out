@@ -1,0 +1,37 @@
+=== wan_lr5e4_res_sweep task 4/4 idx=3 ===
+wandb_expr_name=lr5e4_512px_8frames
+experiment_name (outputs dir)=lr5e4_512px_8frames__job3913469_t4
+Config: /home/piado/projects/aip-lindell/piado/vae/Open-Sora/configs/vae/train/wan_multiview_finetune.py
+nersemble_processed_base=/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames
+bucket_config={'512px_ar1:1': {9: (1.0, 1)}}
+Common overrides: --profile_timing False --profile_step False --learning_rate 5e-4 --optim.lr 5e-4 --lr_scheduler.warmup_steps 0 --lr_scheduler.use_exponential_decay False
+Experiment overrides: --nersemble_processed_base /datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames --bucket_config {'512px_ar1:1': {9: (1.0, 1)}}
+Wed Jun 10 10:46:35 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.159.03             Driver Version: 580.159.03     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    Off |   00000000:CA:00.0 Off |                    0 |
+| N/A   29C    P8             34W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_ADDR=127.0.0.1 MASTER_PORT=33473
+DYNAMO_BACKEND=reduce_overhead
+wandb=True (config default; profile_timing forced False in this script)
+Launch attempt 1/3 on port 33473
+Retrying with port 33474...
+Launch attempt 2/3 on port 33474
+Retrying with port 33475...
+Launch attempt 3/3 on port 33475
+Launch failed after 3 attempts (last port 33475, rc=2).
