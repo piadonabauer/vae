@@ -92,6 +92,8 @@ class VAELoss(nn.Module):
         device="cpu",
         dtype="bf16",
         view_consistency_weight=0.0,
+        lpips_chunk_size=None,
+        lpips_scale=1.0,
     ):
         super().__init__()
 
@@ -114,6 +116,13 @@ class VAELoss(nn.Module):
         self.logvar = nn.Parameter(torch.ones(size=()) * logvar_init)
         # Multi-view loss weight
         self.view_consistency_weight = view_consistency_weight
+        # LPIPS chunk size: process this many frames at a time through VGG to avoid OOM
+        # at high resolutions. None = no chunking (all frames in one call).
+        self.lpips_chunk_size = lpips_chunk_size
+        # LPIPS scale: resize frames to this fraction of original before VGG.
+        # VGG features are scale-invariant so 0.5 gives equivalent gradient signal
+        # at 4× lower cost. Set to 1.0 to disable downsampling.
+        self.lpips_scale = float(lpips_scale)
 
     def forward(
         self,
@@ -163,8 +172,29 @@ class VAELoss(nn.Module):
         # reconstruction loss
         recon_loss = l1(video_flat, recon_video_flat)
 
-        # perceptual loss
-        perceptual_loss = self.perceptual_loss_fn(video_flat, recon_video_flat)
+        # perceptual loss — optionally downsampled + chunked to avoid OOM.
+        # LPIPS measures perceptual similarity via VGG features (texture/structure),
+        # which are scale-invariant. Running at half resolution gives an equivalent
+        # gradient signal at 4× lower VGG cost and is standard practice (SD uses
+        # this too). Chunking along the N (frames) dimension handles any remaining
+        # memory pressure. LPIPS returns [N, 1, 1, 1].
+        _vf = video_flat
+        _rf = recon_video_flat
+        if self.lpips_scale < 1.0:
+            _vf = F.interpolate(_vf, scale_factor=self.lpips_scale, mode="bilinear", align_corners=False)
+            _rf = F.interpolate(_rf, scale_factor=self.lpips_scale, mode="bilinear", align_corners=False)
+        if self.lpips_chunk_size is not None and _vf.shape[0] > self.lpips_chunk_size:
+            _lpips_parts = []
+            for _i in range(0, _vf.shape[0], self.lpips_chunk_size):
+                _lpips_parts.append(
+                    self.perceptual_loss_fn(
+                        _vf[_i : _i + self.lpips_chunk_size],
+                        _rf[_i : _i + self.lpips_chunk_size],
+                    )
+                )
+            perceptual_loss = torch.cat(_lpips_parts, dim=0)
+        else:
+            perceptual_loss = self.perceptual_loss_fn(_vf, _rf)
         
         # nll loss (from reconstruction loss and perceptual loss)
         nll_loss = recon_loss + perceptual_loss * self.perceptual_loss_weight

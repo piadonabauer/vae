@@ -2,14 +2,17 @@
 Map Open-Sora `bucket_config` keys to NeRSemble processed `DATA_ROOT` and training shapes.
 
 Rules:
+- Bucket key prefix `2048px_...` → train at 2048×2048; load from `.../2048-res` (fallback: `128-res`).
+- Bucket key prefix `1024px_...` → train at 1024×1024; load from `.../1024-res` (fallback: `128-res`).
 - Bucket key prefix `512px_...` → train at 512×512; load from `.../512-res` (fallback: `128-res`).
 - Bucket key prefix `256px_...` → train at 256×256; load from `.../256-res` (fallback: `128-res`).
 - Bucket key prefix `128px_...` → train at 128×128; load from `.../128-res`.
 - Bucket key prefix `64px_...` → train at 64×64; load from `.../64-res` when temporal length ≤ 9.
 - 64-res clips only expose 9 temporal frames. If you request 64px with more than 9 frames (e.g. 13),
   load tensors from `128-res` (full length) and downsample spatially to 64 in the training loop.
-- Under ``4-frames/`` or ``8-frames/`` trees only ``128-res`` may exist; higher target resolutions
-  then load from ``128-res`` and resize on the fly in ``train.py``.
+- Under ``4-frames/`` or ``8-frames/`` trees only ``128-res`` may exist for 8-frames; higher target
+  resolutions then load from ``128-res`` and resize on the fly in ``train.py``.
+  The ``4-frames/`` tree ships 128, 256, 512, 1024, and 2048-res.
 """
 
 from __future__ import annotations
@@ -57,10 +60,16 @@ def resolve_nersemble_bucket(
             f"Bucket key must start with e.g. '256px_', '128px_', or '64px_', got: {bucket_key!r}"
         )
     target_px = int(m.group(1))
-    if target_px not in (64, 128, 256, 512):
-        raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, or 512).")
+    if target_px not in (64, 128, 256, 512, 1024, 2048):
+        raise ValueError(f"Unsupported training resolution {target_px}px (use 64, 128, 256, 512, 1024, or 2048).")
 
-    if target_px == 512:
+    if target_px == 2048:
+        preferred_root = f"{base}/2048-res"
+        train_target_hw = (2048, 2048)
+    elif target_px == 1024:
+        preferred_root = f"{base}/1024-res"
+        train_target_hw = (1024, 1024)
+    elif target_px == 512:
         preferred_root = f"{base}/512-res"
         train_target_hw = (512, 512)
     elif target_px == 256:
@@ -79,7 +88,7 @@ def resolve_nersemble_bucket(
     data_root = preferred_root
     load_res_fallback = None
     if not os.path.isdir(data_root):
-        for fallback_px in (128, 256, 64):
+        for fallback_px in (512, 256, 128, 64):
             candidate = f"{base}/{fallback_px}-res"
             if os.path.isdir(candidate):
                 data_root = candidate
@@ -94,4 +103,5 @@ def resolve_nersemble_bucket(
         "load_from_128_for_64_high_t": target_px == 64
         and train_target_frames > MAX_TEMPORAL_FRAMES_64_RES,
         "load_res_fallback": load_res_fallback,
+        "target_px": target_px,
     }

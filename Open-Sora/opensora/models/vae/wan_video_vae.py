@@ -574,13 +574,29 @@ class MultiviewWanVideoVAE(nn.Module):
             mu, logvar = self.crossview_vae.encode(x, scale)
             z = self.crossview_vae.reparameterize(mu, logvar)
 
-            # Decode once per view using view-conditioned embeddings
-            # VIEW_EMBEDDINGS 3: loop over views
+            # Decode once per view using view-conditioned embeddings.
+            # Coarse gradient checkpointing: when enabled, only the final decoded
+            # output per view is kept in memory (not all upsample layer boundaries).
+            # During backward, each view's decode is recomputed one at a time.
+            # This is far more memory-efficient than per-layer checkpointing, which
+            # would store ~10 GB of layer-boundary tensors per view × V views.
+            _use_decode_ckpt = (
+                getattr(self, "grad_checkpointing", False)
+                and torch.is_grad_enabled()
+            )
             recons = []
             with ProfileTimer.block("decode.all_views"):
                 for v_idx in range(V):
                     with ProfileTimer.block(f"decode.view_{v_idx}"):
-                        rec_v = self.crossview_vae.decode(z, scale, view_idx=v_idx)
+                        if _use_decode_ckpt:
+                            _vae, _sc, _vi = self.crossview_vae, scale, v_idx
+                            def _decode_view(z_in, _v=_vi, _scale=_sc, _crossvae=_vae):
+                                return _crossvae.decode(z_in, _scale, view_idx=_v)
+                            rec_v = torch.utils.checkpoint.checkpoint(
+                                _decode_view, z, use_reentrant=False
+                            )
+                        else:
+                            rec_v = self.crossview_vae.decode(z, scale, view_idx=v_idx)
                     recons.append(rec_v)
 
             # Stack → [B, V, C, T, H, W]

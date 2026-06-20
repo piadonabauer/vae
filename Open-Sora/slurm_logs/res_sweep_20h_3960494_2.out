@@ -1,0 +1,58 @@
+════════════════════════════════════════════════════════════════════
+  resolution_sweep_20h — task 2/5  (idx=1)
+  run_key=4frames_1024px   frames=4-frames   resolution=1024px
+  batch_size=1   accumulation_steps=4   eff_batch=4
+  nersemble_processed_base=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames
+  bucket_config={'1024px_ar1:1': {9: (1.0, 1)}}
+  wandb_name=res_sweep_4frames_1024px
+  experiment_name=res_sweep_4frames_1024px__job3960496_t2
+  DYNAMO_BACKEND=no
+════════════════════════════════════════════════════════════════════
+Mon Jun 15 07:07:23 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.159.03             Driver Version: 580.159.03     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    Off |   00000000:E3:00.0 Off |                    0 |
+| N/A   38C    P0             36W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+MASTER_ADDR=127.0.0.1 MASTER_PORT=20498
+Launch attempt 1/3 on port 20498
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/1024-res train_target_hw=(1024, 1024) train_target_frames=9 bucket_config={'1024px_ar1:1': {9: (1.0, 1)}}
+changing outputs/res_sweep_4frames_1024px__job3960496_t2 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 241 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Retrying with port 20499...
+Launch attempt 2/3 on port 20499
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/1024-res train_target_hw=(1024, 1024) train_target_frames=9 bucket_config={'1024px_ar1:1': {9: (1.0, 1)}}
+changing outputs/res_sweep_4frames_1024px__job3960496_t2 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 241 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Retrying with port 20500...
+Launch attempt 3/3 on port 20500
+[wan_multiview] effective data: epochs=100000 DATA_ROOT=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames/1024-res train_target_hw=(1024, 1024) train_target_frames=9 bucket_config={'1024px_ar1:1': {9: (1.0, 1)}}
+changing outputs/res_sweep_4frames_1024px__job3960496_t2 to share
+PTVideoDataset: Found 405 .pt file(s)
+PTVideoDataset: Found 10 .pt file(s)
+[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: /home/piado/scratch/Wan2.1_VAE.pth
+  -> 194 ckpt keys; 241 missing, 90 unexpected
+modulated mixed image ratio: 0.0
+Launch failed after 3 attempts (last port 20500, rc=0).

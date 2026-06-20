@@ -2084,6 +2084,10 @@ def main():
     debug_stats_start_step = int(cfg.get("debug_stats_start_step", 0))
     debug_stats_every = max(1, int(cfg.get("debug_stats_every", 500)))
     debug_stats_weight_every = max(1, int(cfg.get("debug_stats_weight_every", 500)))
+    # Early-step diagnostic milestones: log/eval at these exact update steps in addition to the
+    # regular log_every / eval_every interval (e.g. [10, 100, 500] to capture early dynamics).
+    _log_milestones: set[int] = set(int(s) for s in (cfg.get("log_milestones") or []))
+    _eval_milestones: set[int] = set(int(s) for s in (cfg.get("eval_milestones") or []))
     # Train-batch PSNR guard (rank 0): enforce on optimizer update boundaries (not micro-steps)
     # so behavior matches logged train_batch snapshots when accumulation_steps > 1.
     train_psnr_guard_threshold = float(
@@ -2738,7 +2742,7 @@ def main():
                     batch_eval_this_step = (
                         eval_every > 0
                         and (global_step + 1) % accumulation_steps == 0
-                        and actual_update_step % eval_every == 0
+                        and (actual_update_step % eval_every == 0 or actual_update_step in _eval_milestones)
                         and coordinator.is_master()
                         and use_video == 1
                         and "psnr" in loss_dict
@@ -2748,7 +2752,7 @@ def main():
                     log_every_steps = cfg.get("log_every", 10)
                     plot_reconstruction = (
                         (global_step + 1) % accumulation_steps == 0
-                        and actual_update_step % log_every_steps == 0
+                        and (actual_update_step % log_every_steps == 0 or actual_update_step in _log_milestones)
                         and coordinator.is_master()
                         and use_video == 1
                     )
@@ -2947,7 +2951,10 @@ def main():
                     # We log periodically to avoid overwhelming the logs, but include timing stats
                     # to help identify bottlenecks. Logging itself is fast, so we don't time it.
                     if (global_step + 1) % accumulation_steps == 0:
-                        if coordinator.is_master() and actual_update_step % cfg.get("log_every", 1) == 0:
+                        if coordinator.is_master() and (
+                            actual_update_step % cfg.get("log_every", 1) == 0
+                            or actual_update_step in _log_milestones
+                        ):
                             avg_loss = {k: v / log_step for k, v in running_loss.items()}
                             
                             # Compute average timing stats over the logged steps
@@ -3056,7 +3063,7 @@ def main():
                         full_eval_every = cfg.get("full_eval_every", 0)
                         if (
                             full_eval_every > 0
-                            and actual_update_step % full_eval_every == 0
+                            and (actual_update_step % full_eval_every == 0 or actual_update_step in _eval_milestones)
                             and coordinator.is_master()
                         ):
                             eval_ds = val_dataset if val_dataset is not None else dataset

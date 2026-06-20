@@ -296,6 +296,14 @@ vae_loss_config = dict(
     kl_loss_weight=kl_loss_weight,
     view_consistency_weight=view_consistency_weight,
     logvar_init=logvar_init,
+    # Resize frames to this fraction of original before feeding to LPIPS/VGG.
+    # VGG features are scale-invariant: 0.5 gives equivalent perceptual gradient
+    # at 4× lower cost. Use 1.0 at 128px (no benefit), 0.5 at 256px+.
+    lpips_scale=0.5,
+    # Process LPIPS in chunks of this many frames to avoid OOM at high resolution.
+    # At 512px with scale=0.5: effectively 144 frames at 256px; chunk=64 is fine.
+    # At 1024px with scale=0.5: 512px effective; keep chunk=32.
+    lpips_chunk_size=64,
 )
 
 # ---- GAN discriminator (single switch) ----
