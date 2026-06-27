@@ -22,7 +22,7 @@ model = dict(
     use_view_group_fusion=False,  # If False: only latent_fusion + latent_expand (simplest setup)
     view_mixing_strategy="embedding",  # Key: embeddings guide what each view should decode to
     from_scratch=False,
-    from_pretrained="/home/piado/scratch/Wan2.1_VAE.pth",
+    from_pretrained="/home/coder/Wan2.1_VAE.pth",
     freeze_temporal=True,
     train_spatial=True,
     # New cross-view encoder with in-encoder fusion + LoRA
@@ -33,6 +33,17 @@ model = dict(
     # - "conv3d": concat views in channels, 1×1×1 Conv3d -> GroupNorm+SiLU -> two FusionResidualBlock3d (symmetric Conv3d)
     # conv4d
     fusion_mode="cross_attention",
+    # Temporal compression: when True the cross-view encoder/decoder run Wan's
+    # chunked feat_cache path so the temporal stride-convs actually fire
+    # (4x: 9 frames -> 3 latent frames -> 9 frames out). False = legacy (T kept = 9).
+    temporal_compression=False,
+    # Real activation checkpointing inside the cross-view encoder/decoder
+    # (per-view down-path + per-view decoder). Large memory cut, ~20-30% slower.
+    # Leave False first; flip True only if you still OOM at the batch size you want.
+    crossview_grad_checkpoint=False,
+    # Heads for the cross-view fusion attention (None -> auto, head_dim ~64 so
+    # SDPA stays on Flash/mem-efficient backends; critical at 512px).
+    view_attn_num_heads=None,
     use_lora=True,               # masfter switch for LoRA modules in crossview path
     use_lora_before=False,       # LoRA on Encoder3d stem before fusion (encoder.conv1 + downsamples); additive to use_lora_after
     use_lora_after=True,         # apply LoRA to bottleneck/decoder ("later" part)
@@ -51,14 +62,17 @@ model = dict(
 from opensora.utils.nersemble_bucket import resolve_nersemble_bucket
 
 # Optional: parent of ``64-res`` / ``128-res`` (default: NeRSemble v2 processed root).
-nersemble_processed_base = "/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-frames" #None
+nersemble_processed_base = "/home/coder/nersemble-data/processed/4view"
 
 # ``DATA_ROOT``, ``train_target_hw``, ``train_target_frames`` are derived from ``bucket_config``:
 # - ``256px_...`` + T frames → load ``.../256-res``, train at 256×256, T frames (e.g. 9).
 # - ``128px_...`` + T frames → load ``.../128-res``, train at 128×128, T frames.
 # - ``64px_...`` + ≤9 frames → ``.../64-res``; + >9 frames → ``128-res`` + on-the-fly downsample to 64.
 bucket_config = {
-    "128px_ar1:1": {9: (1.0, 1)},
+    # 512px: loads ``<processed_base>/512-res`` (falls back to 128-res + on-the-fly
+    # resize if 512-res is absent). 9 frames -> 3 latent frames with temporal_compression.
+    # "512px_ar1:1": {9: (1.0, 1)},   # phase 2: finetune at 512px (batch 2)
+    "128px_ar1:1": {9: (1.0, 1)},     # phase 1: train at 128px (batch 32)
     #"256px_ar1:1": {9: (1.0, 1)},  # ``<processed_base>/256-res``, 256×256, 9 frames
     # "64px_ar1:1": {13: (1.0, 1)},  # uses 128-res on disk, downsamples to 64×64
 }
@@ -190,7 +204,7 @@ persistent_workers = True
 # ============
 # Learning rates (main knobs). ``optim["lr"]`` and, when a GAN discriminator is enabled,
 # ``optim_discriminator["lr"]`` are filled from these after the discriminator preset runs.
-learning_rate = 1e-4  # VAE / generator (AdamW). Try 2e-4 for single-sequence; lower if loss is spiky.
+learning_rate = 5e-4  # VAE / generator (AdamW). Try 2e-4 for single-sequence; lower if loss is spiky.
 # Discriminator AdamW LR. ``None`` = keep the value from the discriminator preset (StyleGAN2 vs PatchGAN vs Train).
 disc_learning_rate = None
 
@@ -205,12 +219,14 @@ optim = dict(
 # Every decay_steps optimizer steps the LR is multiplied by decay_factor (halved here).
 # At ~50 update-steps/epoch: decay_steps=5000 ≈ every ~100 epochs the LR halves.
 # Stops decaying once min_lr is reached and stays there indefinitely.
+# LR scheduler DEACTIVATED: warmup_steps=0 + no cosine + no exponential decay makes
+# create_lr_scheduler() return None -> constant LR (= learning_rate) for the whole run.
 lr_scheduler = dict(
-    warmup_steps=100,
-    use_exponential_decay=True,
-    decay_steps=5000,        # halve every 5000 optimizer steps (~100 epochs)
-    decay_factor=0.5,        # × 0.5 per interval
-    min_lr=learning_rate * 0.05,  # 5 % floor
+    warmup_steps=0,
+    use_exponential_decay=False,
+    decay_steps=5000,        # unused while use_exponential_decay=False
+    decay_factor=0.5,        # unused
+    min_lr=learning_rate * 0.05,  # unused
 )
 
 mixed_strategy = None  # Disable mixed strategy - we only have video
@@ -244,7 +260,10 @@ epochs = 100000 # 10000  # One epoch = one pass over ALL samples (.pt files). st
 log_every = 100 # 1000  # Log every 10 steps # CHANGE to 100
 # Master switch: no checkpoint dirs written when False (periodic + final). Set True to save.
 save_ckpt = True
-# Save a checkpoint at the end of every epoch (if epoch-mean train PSNR is healthy).
+# Save a checkpoint at the end of every Nth epoch (if epoch-mean train PSNR is healthy).
+# At ~5 update-steps/epoch every-epoch saving is wasteful churn; raise this.
+# 1 = save every epoch (legacy). N = save only when epoch % N == 0 (plus the final save).
+save_every_n_epochs = 25
 # keep_n_latest controls retention.
 # Keep this many latest checkpoint dirs (epochX-global_stepY); -1 = keep all
 keep_n_latest = 5
@@ -415,19 +434,25 @@ train_psnr_guard_min_epochs = 0
 # More speed (no code changes): raise batch_size if VRAM allows; discriminator_choice none;
 # lower perceptual_loss_weight; fusion_mode conv3d vs cross_attention; log_bottleneck_every=0;
 # eval_every=0; fixed_seq_eval_every_epochs=0; wandb=False for local runs.
-batch_size = 64 #16 #16 #32  # raise if VRAM allows; effective batch = batch_size × accumulation_steps
-accumulation_steps = 1 #4
+# 512px is ~16x the spatial activations of 128px. Start small and RAMP UP until just
+# before OOM (watch nvidia-smi / the log_memory output). 64 was a 128px value and will
+# OOM instantly at 512. With temporal_compression + multi-head fusion attention you
+# should be able to push this up on the 96GB card; use accumulation_steps for a larger
+# effective batch without more memory.
+batch_size = 8  # 128px, temporal_compression=False + no crossview ckpt + reduce-overhead CUDA graphs is memory-heavy; 32 OOMs. Ramp up toward max if it fits. Phase 2 (512px): set to 2.
+accumulation_steps = 1  # raise for a larger EFFECTIVE batch with no extra memory
 
 # profile = True       # existing schedule-based profiler (TensorBoard trace, can't combine with profile_step)
 profile_step = False   # Kineto trace: overwhelming JSON + op table (legacy; use profile_timing instead)
 # User-friendly CUDA-synchronized block timing (attention-focused, readable txt + json).
 # Runs once at profile_timing_step (after warmup). Disables wandb automatically.
-profile_timing = True
+profile_timing = False  # MUST stay False for wandb: train.py force-disables wandb when this is True
 profile_timing_step = 50  # global_step to profile (0-indexed loop counter)
 
 # ---------- performance optimizations ----------
 # Set optimization=True to enable all four optimizations at once:
 #   1. torch.compile — fuses small ops, ~1.3-1.8x speedup after warmup.
+
 #      Expect very slow first ~10 steps (compilation); then much faster. Recompilation
 #      warnings are normal if batch shapes change.
 #   2. channels_last_3d on model weights — skipped automatically when ema_decay is set
@@ -435,5 +460,15 @@ profile_timing_step = 50  # global_step to profile (0-indexed loop counter)
 # "default": safe op-fusion, compatible with channels_last_3d strides.
 # "reduce-overhead": uses CUDA graphs — stalls with channels_last_3d (non-contiguous strides).
 # "max-autotune": most aggressive, even slower first step.
-optimization = True
-optimization_compile_mode = "reduce-overhead"
+#optimization = True
+optimization = False
+# Bring-up at 512px on "default" first: it isolates real OOM from compile/CUDA-graph
+# issues and tolerates the dynamic per-view / per-frame decode loops. Once a run is
+# stable and you've found your max batch, try "reduce-overhead" (CUDA graphs) for speed
+# — but expect to LOWER batch_size, since the graph memory pool adds pressure and the
+# dynamic temporal-chunk shapes (1-frame vs 4-frame) force multiple captured graphs.
+optimization_compile_mode = "reduce-overhead"  # CUDA graphs; ema_decay set -> channels_last_3d auto-skipped
+# None -> torch auto-detects (legacy). True -> one shape-flexible graph: avoids the
+# per-chunk recompiles from the temporal feat_cache loop and stays compatible with
+# gradient checkpointing (no CUDA graphs in "default" mode). Try with mode="default".
+optimization_compile_dynamic = None

@@ -167,7 +167,6 @@ def rm_checkpoints(
     )
     to_remove = files[keep_n_latest:]
     for f in to_remove:
-        # shutil.rmtree(f)
         for item in glob(os.path.join(f, "*")):
             if os.path.isdir(item):
                 dir_name = os.path.basename(item)
@@ -175,6 +174,14 @@ def rm_checkpoints(
                     shutil.rmtree(item)
             else:
                 os.remove(item)
+        # Remove the now-empty checkpoint directory itself so we don't leave
+        # thousands of empty epoch*-global_step* shells behind. Dirs that still
+        # contain a preserved "eval" subdir are kept.
+        try:
+            if not os.listdir(f):
+                os.rmdir(f)
+        except OSError:
+            pass
 
 
 def model_sharding(model: torch.nn.Module, device: torch.device = None):
@@ -514,6 +521,7 @@ class CheckpointIO:
         sampler=None,
         strict: bool = False,
         include_master_weights: bool = False,
+        load_optimizer: bool = True,
     ) -> tuple[int, int]:
         """
         Load a checkpoint.
@@ -565,7 +573,13 @@ class CheckpointIO:
                 )
             ema.load_state_dict(ema_state_dict, strict=strict, assign=True)
 
-        if optimizer is not None:
+        if optimizer is not None and not load_optimizer:
+            print(
+                "[ckpt] Skipping optimizer state load (load_optimizer=False); optimizer starts fresh. "
+                "Use this when the trainable parameter set changed (e.g. enabling new LoRA adapters), "
+                "which makes the saved optimizer param groups incompatible."
+            )
+        if optimizer is not None and load_optimizer:
             booster.load_optimizer(
                 optimizer, os.path.join(load_dir, "optimizer"), low_cpu_mem_mode=False, num_threads=32
             )

@@ -265,6 +265,9 @@ class MultiviewWanVideoVAE(nn.Module):
         use_viewwise_decoder_lora: bool = False,
         lora_rank: int = 16,
         full_finetune_decoder: bool = False,
+        temporal_compression: bool = True,
+        crossview_grad_checkpoint: bool = False,
+        view_attn_num_heads: int = None,
         **kwargs,
     ):
         super().__init__()
@@ -300,6 +303,9 @@ class MultiviewWanVideoVAE(nn.Module):
                 use_lora_after=use_lora_after,
                 use_viewwise_decoder_lora=use_viewwise_decoder_lora,
                 num_views=view_in,
+                temporal_compression=temporal_compression,
+                grad_checkpoint=crossview_grad_checkpoint,
+                view_attn_num_heads=view_attn_num_heads,
             )
 
             # Optionally load Wan 2.1 weights into the internal encoder/decoder
@@ -687,6 +693,9 @@ def build_multiview_wan_video_vae(
     use_viewwise_decoder_lora: bool = False,
     lora_rank: int = 16,
     full_finetune_decoder: bool = False,
+    temporal_compression: bool = True,
+    crossview_grad_checkpoint: bool = False,
+    view_attn_num_heads: int = None,
     **kwargs,
 ):
     """
@@ -729,6 +738,9 @@ def build_multiview_wan_video_vae(
         use_viewwise_decoder_lora=use_viewwise_decoder_lora,
         lora_rank=lora_rank,
         full_finetune_decoder=full_finetune_decoder,
+        temporal_compression=temporal_compression,
+        crossview_grad_checkpoint=crossview_grad_checkpoint,
+        view_attn_num_heads=view_attn_num_heads,
         **kwargs,
     )
     

@@ -1721,9 +1721,21 @@ def main():
     #    First run is slow (compilation); subsequent steps get the full speedup.
     if _optimize:
         _compile_mode = cfg.get("optimization_compile_mode", "reduce-overhead")
-        logger.info("[optimization] torch.compile: mode=%s (first step will be slow)", _compile_mode)
+        # dynamic=None -> torch auto-detects (legacy behavior). dynamic=True compiles a
+        # single shape-flexible graph, which avoids the per-chunk recompiles caused by the
+        # temporal feat_cache loop (variable chunk sizes). Use with mode="default" (no CUDA
+        # graphs) so it stays compatible with gradient checkpointing.
+        _compile_dynamic = cfg.get("optimization_compile_dynamic", None)
+        logger.info(
+            "[optimization] torch.compile: mode=%s dynamic=%s (first step will be slow)",
+            _compile_mode,
+            _compile_dynamic,
+        )
         try:
-            model = torch.compile(model, mode=_compile_mode)
+            if _compile_dynamic is None:
+                model = torch.compile(model, mode=_compile_mode)
+            else:
+                model = torch.compile(model, mode=_compile_mode, dynamic=_compile_dynamic)
         except Exception as _e:
             logger.warning("[optimization] torch.compile failed, continuing without it: %s", _e)
 
@@ -1855,6 +1867,7 @@ def main():
             sampler=(
                 None if start_step is not None else sampler
             ),  # if specify start step, set last_micro_batch_access_index of a new sampler instead
+            load_optimizer=cfg.get("load_optimizer", True),
         )
         if start_step is not None:
             # if start step exceeds data length, go to next epoch
@@ -3173,7 +3186,9 @@ def main():
                         )
         # == checkpoint saving at epoch end (optional; default off via save_ckpt) ==
         save_ckpt = cfg.get("save_ckpt", False)
-        if save_ckpt and coordinator.is_master():
+        save_every_n_epochs = max(1, int(cfg.get("save_every_n_epochs", 1)))
+        is_ckpt_epoch = (epoch % save_every_n_epochs == 0)
+        if save_ckpt and is_ckpt_epoch and coordinator.is_master():
             if epoch_psnr_count <= 0:
                 logger.warning(
                     "No train PSNR samples at epoch %s (NaN output or eval not reached yet); "
