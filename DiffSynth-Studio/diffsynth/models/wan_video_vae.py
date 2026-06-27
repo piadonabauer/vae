@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 from torch.profiler import profile, record_function, ProfilerActivity
 from tqdm import tqdm
 
@@ -284,6 +285,12 @@ def check_is_instance(model, module_class):
     if isinstance(model, module_class):
         return True
     if hasattr(model, "module") and isinstance(model.module, module_class):
+        return True
+    # LoRA-wrapped convolutions (e.g. LoRAConv3d) keep the original module in
+    # ``base_conv`` and forward *args (incl. the temporal ``cache_x``) to it.
+    # Treat them as instances of the wrapped type so feat_cache / temporal
+    # compression flows through correctly even when use_lora_* wraps these convs.
+    if hasattr(model, "base_conv") and isinstance(model.base_conv, module_class):
         return True
     return False
 
@@ -1672,12 +1679,26 @@ class MultiViewVideoVAE_(nn.Module):
 # NEW
 class ViewAttention(nn.Module):
     """
-    Self-attention over all views tokens (per temporal step)
+    Self-attention over all views' spatial tokens (per temporal step).
+
+    Multi-head: the channel dim is split into ``num_heads`` so the per-head
+    dimension is small (~64). This keeps SDPA on the Flash / memory-efficient
+    backends (head_dim <= 256), which is O(seq) memory instead of materializing
+    the (V*N) x (V*N) score matrix — critical at high resolution where
+    V*N grows quadratically (512px: V=4, N=64*64 -> 16384 tokens per step).
     """
 
-    def __init__(self, dim):
+    def __init__(self, dim, num_heads: int | None = None):
         super().__init__()
         self.dim = dim
+        # Target head_dim ~64 (Flash-friendly). Fall back to a divisor of dim.
+        if num_heads is None:
+            num_heads = max(1, dim // 64)
+            while dim % num_heads != 0:
+                num_heads -= 1
+        assert dim % num_heads == 0, f"dim={dim} not divisible by num_heads={num_heads}"
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
 
         # layers
         self.norm = RMS_norm(dim)
@@ -1691,21 +1712,28 @@ class ViewAttention(nn.Module):
     def forward(self, x):
         identity = x
         b, t, v, n, c = x.shape
+        H, hd = self.num_heads, self.head_dim
+        s = v * n  # sequence length (all views' spatial tokens)
 
         with ProfileTimer.block("attention.view.qkv_proj"):
             # [B, T, V, N, C] -> [B*T, C, V, N]
             x = rearrange(x, 'b t v n c -> (b t) c v n')
             x = self.norm(x)
+            qkv = self.to_qkv(x).reshape(b * t, 3 * c, s)  # [B*T, 3C, S]
+            q, k, val = qkv.chunk(3, dim=1)  # each [B*T, C, S]
 
-            # to [B*T, 1, V*N, C]
-            q, k, val = self.to_qkv(x).reshape(b * t, 1, c * 3, -1).permute(
-                0, 1, 3, 2).contiguous().chunk(3, dim=-1)
+            def to_heads(z):
+                # [B*T, C, S] -> [B*T, H, S, hd]
+                return z.reshape(b * t, H, hd, s).permute(0, 1, 3, 2).contiguous()
+
+            q, k, val = to_heads(q), to_heads(k), to_heads(val)
 
         with ProfileTimer.block("attention.view.sdpa"):
-            x = F.scaled_dot_product_attention(q, k, val)
+            x = F.scaled_dot_product_attention(q, k, val)  # [B*T, H, S, hd]
 
         with ProfileTimer.block("attention.view.out_proj"):
-            x = x.squeeze(1).permute(0, 2, 1).reshape(b * t, c, v, n)
+            # [B*T, H, S, hd] -> [B*T, C, V, N]
+            x = x.permute(0, 1, 3, 2).reshape(b * t, c, v, n)
             x = self.proj(x)
 
             # [B*T, C, V, N] -> [B, T, V, N, C]
@@ -1967,11 +1995,21 @@ class AttentionMultiViewVideoVan(nn.Module):
         use_lora_after: bool = True,
         use_viewwise_decoder_lora: bool = False,
         num_views: int = 2,
+        temporal_compression: bool = True,
+        grad_checkpoint: bool = False,
+        view_attn_num_heads: int | None = None,
     ):
         super().__init__()
         # Back-compat: old name "joint_attention" is the same as "self_attention".
         if fusion_mode == "joint_attention":
             fusion_mode = "self_attention"
+        # When True, run the per-view encoder/decoder with the chunked feat_cache
+        # mechanism so Wan's temporal stride-convs actually fire (4x temporal
+        # compression: T -> 1 + (T-1)//4). When False, T is preserved (legacy).
+        self.temporal_compression = temporal_compression
+        # Activation checkpointing for the heavy per-view down-path (encode) and
+        # per-view decoder (decode). Trades ~20-30% compute for a large memory cut.
+        self.grad_checkpoint = grad_checkpoint
         self.dim = dim
         self.z_dim = z_dim
         self.dim_mult = dim_mult
@@ -2022,18 +2060,23 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.tree_resblocks = None  # per-level pairs for cross_attention tree merge
 
         if fusion_mode == "cross_attention":
-            self.cross_attn = ViewAttention(dim=bottleneck_channels)
-            # Hierarchical pairwise tree merge: one independent (rb1, rb2) pair per tree level.
-            # num_levels = ceil(log2(num_views)):  2 views → 1,  4 → 2,  8 → 3.
-            # Each level operates on features with different semantics (raw per-view at level 0,
-            # partially-fused at deeper levels), so separate weights are the right choice.
-            num_levels = max(1, math.ceil(math.log2(max(self.num_views, 2))))
+            self.cross_attn = ViewAttention(dim=bottleneck_channels, num_heads=view_attn_num_heads)
+            # Hierarchical pairwise tree merge with an INDEPENDENT (rb1, rb2) pair per MERGE
+            # (i.e. per loop iteration), NOT shared per tree level.
+            # For the carry-forward binary tree the number of pairwise merges is exactly
+            # num_views - 1:
+            #   4 views -> (v0,v1), (v2,v3), (v01,v23)            = 3 merges
+            #   8 views -> 4 + 2 + 1                              = 7 merges
+            #   3 views -> (v0,v1), (v01,v2)                      = 2 merges
+            # Each merge sees features with different semantics (raw per-view early, partially
+            # fused later), so giving every merge its own weights maximizes specialization.
+            self.num_tree_merges = max(1, self.num_views - 1)
             self.tree_resblocks = nn.ModuleList([
                 nn.ModuleList([
                     ResidualBlock(2 * bottleneck_channels, bottleneck_channels, dropout),
                     ResidualBlock(bottleneck_channels, bottleneck_channels, dropout),
                 ])
-                for _ in range(num_levels)
+                for _ in range(self.num_tree_merges)
             ])
             """
             # Per-level mean-pool init for rb1 at each level:
@@ -2117,6 +2160,14 @@ class AttentionMultiViewVideoVan(nn.Module):
             """Wrap CausalConv3d / Conv3d / Conv2d in the subtree (incl. Resample spatial convs)."""
             for name, child in list(module.named_children()):
                 if isinstance(child, (CausalConv3d, nn.Conv3d)):
+                    # LoRAConv3d adds a stride-1 1x1x1 parallel path, which only matches the base
+                    # conv's output shape when the base preserves spatial/temporal size. Temporally
+                    # (or spatially) strided 3D convs -- e.g. the Resample downsample3d time_conv with
+                    # stride=(2,1,1) -- downsample T, so base_out and lora_out shapes differ and
+                    # "base_out + lora_out" crashes. Leave those frozen (no LoRA); LoRAConv2d already
+                    # handles strided 2D spatial downsamples correctly.
+                    if any(s != 1 for s in child.stride):
+                        continue
                     setattr(
                         module,
                         name,
@@ -2167,17 +2218,57 @@ class AttentionMultiViewVideoVan(nn.Module):
         b, v, c, t, h, w = x.shape
         assert v == self.num_views, f"AttentionMultiViewVideoVan expects {self.num_views} views, got {v}"
 
-        # We do not use encoder.forward; manually unroll conv1 + downsamples
-        def run_down_path(x_in):
-            # initial conv
-            x_out = self.encoder.conv1(x_in)
-            # downsamples
+        # We do not use encoder.forward; manually unroll conv1 + downsamples.
+        # Pass feat_cache so Wan's temporal stride-convs fire (temporal compression);
+        # without feat_cache those convs are skipped and T is preserved (legacy).
+        def run_down_path(x_in, feat_cache, feat_idx):
+            if feat_cache is not None:
+                idx = feat_idx[0]
+                cache_x = x_in[:, :, -CACHE_T:, :, :].clone()
+                if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
+                    cache_x = torch.cat(
+                        [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
+                        dim=2,
+                    )
+                x_out = self.encoder.conv1(x_in, feat_cache[idx])
+                feat_cache[idx] = cache_x
+                feat_idx[0] += 1
+            else:
+                x_out = self.encoder.conv1(x_in)
             for layer in self.encoder.downsamples:
-                x_out = layer(x_out)
+                if feat_cache is not None:
+                    x_out = layer(x_out, feat_cache, feat_idx)
+                else:
+                    x_out = layer(x_out)
             return x_out
 
+        def encode_one_view(x_view):
+            # x_view: [B, 3, T, H, W] -> bottleneck feats [B, Cb, T', H', W']
+            if not self.temporal_compression:
+                return run_down_path(x_view, None, [0])
+            # Chunked time processing with a persistent per-view feat_cache:
+            # frame 0 alone, then 4-frame chunks -> T' = 1 + (T-1)//4.
+            feat_map = [None] * count_conv3d(self.encoder)
+            t_in = x_view.shape[2]
+            iter_ = 1 + (t_in - 1) // 4
+            out = None
+            for i in range(iter_):
+                feat_idx = [0]
+                if i == 0:
+                    x_chunk = x_view[:, :, :1, :, :]
+                else:
+                    x_chunk = x_view[:, :, 1 + 4 * (i - 1): 1 + 4 * i, :, :]
+                o = run_down_path(x_chunk, feat_map, feat_idx)
+                out = o if out is None else torch.cat([out, o], dim=2)
+            return out
+
+        def encode_one_view_ckpt(x_view):
+            if self.grad_checkpoint and self.training:
+                return torch_checkpoint(encode_one_view, x_view, use_reentrant=False)
+            return encode_one_view(x_view)
+
         with ProfileTimer.block("encode.downsample_all_views"):
-            feats = [run_down_path(x[:, i]) for i in range(v)]
+            feats = [encode_one_view_ckpt(x[:, i]) for i in range(v)]
 
         # Keep time explicit for attention: [B, T', (H'*W'), C]
         def flatten_feat(feat):
@@ -2205,19 +2296,19 @@ class AttentionMultiViewVideoVan(nn.Module):
 
             with ProfileTimer.block("encode.fusion.tree_merge"):
                 current = feats_enriched
-                level_idx = 0
+                merge_idx = 0  # global per-merge counter -> own (rb1, rb2) per merge/iteration
                 while len(current) > 1:
-                    rb1, rb2 = self.tree_resblocks[level_idx]
                     next_level = []
                     for i in range(0, len(current) - 1, 2):
+                        rb1, rb2 = self.tree_resblocks[merge_idx]
                         merged = torch.cat([current[i], current[i + 1]], dim=1)  # [B, 2C, T', H', W']
                         merged = rb1(merged)  # 2C → C
                         merged = rb2(merged)  # C  → C
                         next_level.append(merged)
+                        merge_idx += 1
                     if len(current) % 2 == 1:
                         next_level.append(current[-1])  # carry odd view forward
                     current = next_level
-                    level_idx += 1
                 fused = current[0]
         elif self.fusion_mode == "self_attention":
             with ProfileTimer.block("encode.fusion.self_attention"):
@@ -2372,22 +2463,29 @@ class AttentionMultiViewVideoVan(nn.Module):
             scale = scale.to(dtype=z.dtype, device=z.device)
             z = z / scale[1] + scale[0]
 
-        iter_ = z.shape[2]
-        with ProfileTimer.block("decode.conv2"):
-            x = self.conv2(z)
-
-        with ProfileTimer.block("decode.temporal_loop"):
+        def decode_body(z_cond):
+            # conv2 on the full latent, then per-latent-frame decode. With
+            # temporal_compression a persistent feat_cache makes the temporal
+            # upsample convs fire (T' -> ~4*T'); otherwise 1 latent frame -> 1 out frame.
+            x = self.conv2(z_cond)
+            iter_ = x.shape[2]
+            feat_map = [None] * count_conv3d(self.decoder) if self.temporal_compression else None
             out = None
             for i in range(iter_):
                 x_chunk = x[:, :, i : i + 1, :, :]
-                with ProfileTimer.block("decode.temporal.decoder"):
-                    if i == 0:
-                        out = self.decoder(x_chunk)
-                    else:
-                        out_ = self.decoder(x_chunk)
-                if i > 0:
-                    with ProfileTimer.block("decode.temporal.cat"):
-                        out = torch.cat([out, out_], 2)
+                if feat_map is not None:
+                    conv_idx = [0]
+                    o = self.decoder(x_chunk, feat_cache=feat_map, feat_idx=conv_idx)
+                else:
+                    o = self.decoder(x_chunk)
+                out = o if out is None else torch.cat([out, o], 2)
+            return out
+
+        with ProfileTimer.block("decode.temporal_loop"):
+            if self.grad_checkpoint and self.training:
+                out = torch_checkpoint(decode_body, z, use_reentrant=False)
+            else:
+                out = decode_body(z)
         return out
 
 
