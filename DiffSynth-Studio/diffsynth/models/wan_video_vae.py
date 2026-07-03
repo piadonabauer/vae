@@ -27,11 +27,20 @@ class ProfileTimer:
 
     enabled = False
     records: dict[str, list[float]] = {}
+    # Per-block GPU memory deltas/peaks (bytes). Parallel to ``records``.
+    mem_records: dict[str, list[dict]] = {}
+    # When True, every block prints its memory footprint on exit. This is the
+    # key knob for "where does it OOM": the LAST line printed before the crash
+    # is the block that pushed allocation over the limit.
+    live_memory = False
 
     @classmethod
     def enable(cls, *, reset: bool = True) -> None:
         if reset:
             cls.records = {}
+            cls.mem_records = {}
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
         cls.enabled = True
 
     @classmethod
@@ -39,29 +48,61 @@ class ProfileTimer:
         cls.enabled = False
 
     @classmethod
+    def set_live_memory(cls, flag: bool) -> None:
+        """Enable/disable live per-block GPU memory printing (needs enable())."""
+        cls.live_memory = bool(flag)
+
+    @classmethod
     @contextmanager
     def block(cls, name: str):
         if not cls.enabled:
             yield
             return
-        if torch.cuda.is_available():
+        cuda = torch.cuda.is_available()
+        if cuda:
             torch.cuda.synchronize()
+        start_alloc = torch.cuda.memory_allocated() if cuda else 0
         t0 = time.perf_counter()
         try:
             yield
         finally:
-            if torch.cuda.is_available():
+            if cuda:
                 torch.cuda.synchronize()
             ms = (time.perf_counter() - t0) * 1000.0
             cls.records.setdefault(name, []).append(ms)
+            if cuda:
+                end_alloc = torch.cuda.memory_allocated()
+                peak = torch.cuda.max_memory_allocated()
+                reserved = torch.cuda.memory_reserved()
+                delta = end_alloc - start_alloc
+                cls.mem_records.setdefault(name, []).append(
+                    {"delta": delta, "end": end_alloc, "peak": peak}
+                )
+                if cls.live_memory:
+                    _mb = 1024.0 * 1024.0
+                    print(
+                        f"[mem] {name:<40} "
+                        f"delta={delta / _mb:+9.1f}MB  "
+                        f"cur={end_alloc / _mb:9.1f}MB  "
+                        f"peak={peak / _mb:9.1f}MB  "
+                        f"reserved={reserved / _mb:9.1f}MB",
+                        flush=True,
+                    )
 
     @classmethod
     def summarize(cls) -> dict:
         rows = []
+        _mb = 1024.0 * 1024.0
         for name, times in cls.records.items():
             if not times:
                 continue
             mean_ms = sum(times) / len(times)
+            mems = cls.mem_records.get(name, [])
+            # delta_total = net bytes RETAINED across all calls of this block
+            # (the activations kept alive for backward -> the real memory cost).
+            delta_total = sum(m["delta"] for m in mems) if mems else 0
+            peak_max = max((m["peak"] for m in mems), default=0)
+            end_max = max((m["end"] for m in mems), default=0)
             rows.append(
                 {
                     "name": name,
@@ -71,6 +112,9 @@ class ProfileTimer:
                     "ms_total": round(sum(times), 3),
                     "count": len(times),
                     "attention": name.startswith("attention."),
+                    "mem_delta_total_mb": round(delta_total / _mb, 1),
+                    "mem_peak_mb": round(peak_max / _mb, 1),
+                    "mem_end_mb": round(end_max / _mb, 1),
                 }
             )
         rows.sort(key=lambda r: r["ms_mean"], reverse=True)
@@ -254,6 +298,27 @@ class ProfileTimer:
             if fwd:
                 lines.append(
                     f"  → {cls._pct(block_sdpa['ms_total'], fwd['ms_mean'])} of train.forward"
+                )
+            lines.append("")
+
+        # ── Memory breakdown (which method retains the most GPU memory) ───────
+        mem_rows = [r for r in rows if r.get("mem_peak_mb")]
+        if mem_rows:
+            global_peak = max(r["mem_peak_mb"] for r in mem_rows)
+            lines.append("MEMORY BREAKDOWN (GPU alloc; sorted by net retained delta)")
+            lines.append("-" * 42)
+            lines.append(
+                "delta_total = net MB kept alive across all calls of the block "
+                "(activations held for backward = the real cost)."
+            )
+            lines.append(f"global peak allocated during step: {global_peak:.1f} MB")
+            lines.append(
+                f"{'block':<42} {'delta_MB':>11} {'peak_MB':>10} {'cur_end_MB':>11} {'count':>6}"
+            )
+            for row in sorted(mem_rows, key=lambda r: r["mem_delta_total_mb"], reverse=True):
+                lines.append(
+                    f"{row['name']:<42} {row['mem_delta_total_mb']:>11.1f} "
+                    f"{row['mem_peak_mb']:>10.1f} {row['mem_end_mb']:>11.1f} {row['count']:>6}"
                 )
             lines.append("")
 
@@ -1997,6 +2062,8 @@ class AttentionMultiViewVideoVan(nn.Module):
         num_views: int = 2,
         temporal_compression: bool = True,
         grad_checkpoint: bool = False,
+        grad_checkpoint_encoder: bool | None = None,
+        grad_checkpoint_decoder: bool | None = None,
         view_attn_num_heads: int | None = None,
     ):
         super().__init__()
@@ -2009,7 +2076,18 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.temporal_compression = temporal_compression
         # Activation checkpointing for the heavy per-view down-path (encode) and
         # per-view decoder (decode). Trades ~20-30% compute for a large memory cut.
+        # Split per-stage so the encoder (the real memory hog: +39 GB un-checkpointed
+        # at batch 8) can stay checkpointed while the decoder (compute-heavy upsample
+        # resblocks => expensive to recompute in backward) can run un-checkpointed when
+        # there is enough memory headroom. Each sub-flag falls back to grad_checkpoint
+        # when left as None (back-compat: a single flag still controls both stages).
         self.grad_checkpoint = grad_checkpoint
+        self.grad_checkpoint_encoder = (
+            grad_checkpoint if grad_checkpoint_encoder is None else grad_checkpoint_encoder
+        )
+        self.grad_checkpoint_decoder = (
+            grad_checkpoint if grad_checkpoint_decoder is None else grad_checkpoint_decoder
+        )
         self.dim = dim
         self.z_dim = z_dim
         self.dim_mult = dim_mult
@@ -2210,6 +2288,58 @@ class AttentionMultiViewVideoVan(nn.Module):
             wrap_conv_with_lora(self.decoder)
             wrap_attn_with_lora(self.decoder)
 
+    # NOTE: the per-view encoder down-path and the per-view decoder body are defined as
+    # *bound methods* (not nested closures) so that torch.utils.checkpoint wraps a plain
+    # method (self + tensor/int args) instead of a closure that captures local free
+    # variables. Dynamo / torch.compile cannot lift such captured free variables under
+    # checkpoint and used to crash with
+    #   AssertionError: lift_tracked_freevar_to_input should not be called on root SubgraphTracer
+    # Keeping these as methods makes the model torch.compile-compatible while leaving the
+    # eager numerics identical.
+    def _run_down_path(self, x_in, feat_cache, feat_idx):
+        # Manually unroll conv1 + downsamples (we do not use encoder.forward).
+        # feat_cache (a list of tensors) makes Wan's temporal stride-convs fire
+        # (temporal compression); without it those convs are skipped and T is preserved.
+        if feat_cache is not None:
+            idx = feat_idx[0]
+            cache_x = x_in[:, :, -CACHE_T:, :, :].clone()
+            if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
+                cache_x = torch.cat(
+                    [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
+                    dim=2,
+                )
+            x_out = self.encoder.conv1(x_in, feat_cache[idx])
+            feat_cache[idx] = cache_x
+            feat_idx[0] += 1
+        else:
+            x_out = self.encoder.conv1(x_in)
+        for layer in self.encoder.downsamples:
+            if feat_cache is not None:
+                x_out = layer(x_out, feat_cache, feat_idx)
+            else:
+                x_out = layer(x_out)
+        return x_out
+
+    def _encode_one_view(self, x_view):
+        # x_view: [B, 3, T, H, W] -> bottleneck feats [B, Cb, T', H', W']
+        if not self.temporal_compression:
+            return self._run_down_path(x_view, None, [0])
+        # Chunked time processing with a persistent per-view feat_cache:
+        # frame 0 alone, then 4-frame chunks -> T' = 1 + (T-1)//4.
+        feat_map = [None] * count_conv3d(self.encoder)
+        t_in = x_view.shape[2]
+        iter_ = 1 + (t_in - 1) // 4
+        out = None
+        for i in range(iter_):
+            feat_idx = [0]
+            if i == 0:
+                x_chunk = x_view[:, :, :1, :, :]
+            else:
+                x_chunk = x_view[:, :, 1 + 4 * (i - 1): 1 + 4 * i, :, :]
+            o = self._run_down_path(x_chunk, feat_map, feat_idx)
+            out = o if out is None else torch.cat([out, o], dim=2)
+        return out
+
     def encode(self, x, scale):
         """
         x: [B, V, 3, T, H, W]
@@ -2218,54 +2348,10 @@ class AttentionMultiViewVideoVan(nn.Module):
         b, v, c, t, h, w = x.shape
         assert v == self.num_views, f"AttentionMultiViewVideoVan expects {self.num_views} views, got {v}"
 
-        # We do not use encoder.forward; manually unroll conv1 + downsamples.
-        # Pass feat_cache so Wan's temporal stride-convs fire (temporal compression);
-        # without feat_cache those convs are skipped and T is preserved (legacy).
-        def run_down_path(x_in, feat_cache, feat_idx):
-            if feat_cache is not None:
-                idx = feat_idx[0]
-                cache_x = x_in[:, :, -CACHE_T:, :, :].clone()
-                if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                    cache_x = torch.cat(
-                        [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x],
-                        dim=2,
-                    )
-                x_out = self.encoder.conv1(x_in, feat_cache[idx])
-                feat_cache[idx] = cache_x
-                feat_idx[0] += 1
-            else:
-                x_out = self.encoder.conv1(x_in)
-            for layer in self.encoder.downsamples:
-                if feat_cache is not None:
-                    x_out = layer(x_out, feat_cache, feat_idx)
-                else:
-                    x_out = layer(x_out)
-            return x_out
-
-        def encode_one_view(x_view):
-            # x_view: [B, 3, T, H, W] -> bottleneck feats [B, Cb, T', H', W']
-            if not self.temporal_compression:
-                return run_down_path(x_view, None, [0])
-            # Chunked time processing with a persistent per-view feat_cache:
-            # frame 0 alone, then 4-frame chunks -> T' = 1 + (T-1)//4.
-            feat_map = [None] * count_conv3d(self.encoder)
-            t_in = x_view.shape[2]
-            iter_ = 1 + (t_in - 1) // 4
-            out = None
-            for i in range(iter_):
-                feat_idx = [0]
-                if i == 0:
-                    x_chunk = x_view[:, :, :1, :, :]
-                else:
-                    x_chunk = x_view[:, :, 1 + 4 * (i - 1): 1 + 4 * i, :, :]
-                o = run_down_path(x_chunk, feat_map, feat_idx)
-                out = o if out is None else torch.cat([out, o], dim=2)
-            return out
-
         def encode_one_view_ckpt(x_view):
-            if self.grad_checkpoint and self.training:
-                return torch_checkpoint(encode_one_view, x_view, use_reentrant=False)
-            return encode_one_view(x_view)
+            if self.grad_checkpoint_encoder and self.training:
+                return torch_checkpoint(self._encode_one_view, x_view, use_reentrant=False)
+            return self._encode_one_view(x_view)
 
         with ProfileTimer.block("encode.downsample_all_views"):
             feats = [encode_one_view_ckpt(x[:, i]) for i in range(v)]
@@ -2435,6 +2521,26 @@ class AttentionMultiViewVideoVan(nn.Module):
         eps = torch.randn_like(std)
         return eps * std + mu
 
+    def _decode_body(self, z_cond):
+        # conv2 on the full latent, then per-latent-frame decode. With
+        # temporal_compression a persistent feat_cache makes the temporal
+        # upsample convs fire (T' -> ~4*T'); otherwise 1 latent frame -> 1 out frame.
+        # Defined as a bound method (not a closure) so torch.utils.checkpoint stays
+        # torch.compile-compatible (see _encode_one_view note above).
+        x = self.conv2(z_cond)
+        iter_ = x.shape[2]
+        feat_map = [None] * count_conv3d(self.decoder) if self.temporal_compression else None
+        out = None
+        for i in range(iter_):
+            x_chunk = x[:, :, i : i + 1, :, :]
+            if feat_map is not None:
+                conv_idx = [0]
+                o = self.decoder(x_chunk, feat_cache=feat_map, feat_idx=conv_idx)
+            else:
+                o = self.decoder(x_chunk)
+            out = o if out is None else torch.cat([out, o], 2)
+        return out
+
     def decode(self, z, scale, view_idx: int = 0):
         """
         z: [B, z_dim, T', H', W']
@@ -2463,29 +2569,11 @@ class AttentionMultiViewVideoVan(nn.Module):
             scale = scale.to(dtype=z.dtype, device=z.device)
             z = z / scale[1] + scale[0]
 
-        def decode_body(z_cond):
-            # conv2 on the full latent, then per-latent-frame decode. With
-            # temporal_compression a persistent feat_cache makes the temporal
-            # upsample convs fire (T' -> ~4*T'); otherwise 1 latent frame -> 1 out frame.
-            x = self.conv2(z_cond)
-            iter_ = x.shape[2]
-            feat_map = [None] * count_conv3d(self.decoder) if self.temporal_compression else None
-            out = None
-            for i in range(iter_):
-                x_chunk = x[:, :, i : i + 1, :, :]
-                if feat_map is not None:
-                    conv_idx = [0]
-                    o = self.decoder(x_chunk, feat_cache=feat_map, feat_idx=conv_idx)
-                else:
-                    o = self.decoder(x_chunk)
-                out = o if out is None else torch.cat([out, o], 2)
-            return out
-
         with ProfileTimer.block("decode.temporal_loop"):
-            if self.grad_checkpoint and self.training:
-                out = torch_checkpoint(decode_body, z, use_reentrant=False)
+            if self.grad_checkpoint_decoder and self.training:
+                out = torch_checkpoint(self._decode_body, z, use_reentrant=False)
             else:
-                out = decode_body(z)
+                out = self._decode_body(z)
         return out
 
 

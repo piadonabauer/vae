@@ -705,6 +705,31 @@ def compute_metrics(x_orig, x_rec):
     }
 
 
+def should_log_update(step, cfg):
+    """Decide whether to emit wandb logs / reconstruction plots at this optimizer update.
+
+    Supports an *escalating* schedule via cfg["log_schedule_steps"] (a list of early
+    one-off update steps) plus cfg["log_every"] (steady interval after the last early
+    point). Example: log_schedule_steps=[3, 9, 15], log_every=21 -> log at updates
+    3, 9, 15, then every 21 (36, 57, ...). With ~20s/update that's roughly 1, 3, 5 min
+    then every ~7 min. If log_schedule_steps is unset/empty, falls back to the plain
+    `step % log_every == 0` behavior.
+    """
+    if step is None or step <= 0:
+        return False
+    every = int(cfg.get("log_every", 10)) or 1
+    early = cfg.get("log_schedule_steps", None)
+    if early:
+        early = sorted({int(s) for s in early if int(s) > 0})
+        if step in early:
+            return True
+        last = early[-1]
+        if step < last:
+            return False
+        return (step - last) % every == 0
+    return step % every == 0
+
+
 def compute_metrics_per_frame(x_orig, x_rec, max_val=1.0):
     """
     Compute PSNR, SSIM, and MSE per frame (no temporal averaging).
@@ -2121,6 +2146,19 @@ def main():
     _psnr_stop_log_once = False
     _profile_timing_done = False
     _profile_timing_step = int(cfg.get("profile_timing_step", 50))
+    # Live per-block GPU memory printing from step 0 (independent of profile_timing).
+    # Use this to find WHERE an OOM happens: the last "[mem] ..." line printed before
+    # the crash is the block that pushed allocation over the GPU limit. Requires eager
+    # mode (optimization=False) for meaningful numbers; torch.compile fuses/reorders ops
+    # and graph-breaks on the timer's cuda.synchronize, so per-block attribution is lost.
+    if cfg.get("profile_memory_live", False) and coordinator.is_master():
+        ProfileTimer.enable(reset=True)
+        ProfileTimer.set_live_memory(True)
+        logger.warning(
+            "[profile] profile_memory_live=True: printing per-block GPU memory every step "
+            "from step 0. Set optimization=False for valid per-method numbers, and turn this "
+            "OFF for real training (the per-block cuda.synchronize adds overhead)."
+        )
     # One-time average wall time over first 10 steps; set log_step_time False to disable.
     _log_step_time_once = cfg.get("log_step_time", True)
     _step_time_bench_done = False
@@ -2751,17 +2789,16 @@ def main():
                     batch_eval_this_step = (
                         eval_every > 0
                         and (global_step + 1) % accumulation_steps == 0
-                        and actual_update_step % eval_every == 0
+                        and should_log_update(actual_update_step, cfg)
                         and coordinator.is_master()
                         and use_video == 1
                         and "psnr" in loss_dict
                     )
 
-                    # -- plot train reconstruction every log_every steps (fixed train samples: 1 or 3 people) --
-                    log_every_steps = cfg.get("log_every", 10)
+                    # -- plot train reconstruction on the log schedule (fixed train samples: 1 or 3 people) --
                     plot_reconstruction = (
                         (global_step + 1) % accumulation_steps == 0
-                        and actual_update_step % log_every_steps == 0
+                        and should_log_update(actual_update_step, cfg)
                         and coordinator.is_master()
                         and use_video == 1
                     )
@@ -2960,7 +2997,7 @@ def main():
                     # We log periodically to avoid overwhelming the logs, but include timing stats
                     # to help identify bottlenecks. Logging itself is fast, so we don't time it.
                     if (global_step + 1) % accumulation_steps == 0:
-                        if coordinator.is_master() and actual_update_step % cfg.get("log_every", 1) == 0:
+                        if coordinator.is_master() and should_log_update(actual_update_step, cfg):
                             avg_loss = {k: v / log_step for k, v in running_loss.items()}
                             
                             # Compute average timing stats over the logged steps

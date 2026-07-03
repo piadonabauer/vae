@@ -68,7 +68,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -96,9 +96,27 @@ NERSEMBLE_PKG_SRC = (
     / "src"
 )
 
+# Candidate locations for the ``nersemble_data`` package source, tried in order when
+# the package is not already importable (e.g. not pip-installed). Override with the
+# ``NERSEMBLE_PKG_SRC`` environment variable.
+NERSEMBLE_PKG_SRC_CANDIDATES = [
+    NERSEMBLE_PKG_SRC,
+    REPO_ROOT.parent / "nersemble-data" / "src",
+    Path.home() / "nersemble-data" / "src",
+]
+
 # ---------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------
+
+
+def center_square_crop(img: Image.Image) -> Image.Image:
+    """Crop the largest centered square from a PIL image (no resize)."""
+    w, h = img.size
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    return img.crop((left, top, left + side, top + side))
 
 
 def crop_pad_to_square(img: Image.Image, target_size: int) -> Image.Image:
@@ -106,15 +124,17 @@ def crop_pad_to_square(img: Image.Image, target_size: int) -> Image.Image:
     Crop the largest center square from PIL image and resize to target_size x target_size
     without skewing.
     """
-    w, h = img.size
-    side = min(w, h)
-    left = (w - side) // 2
-    top = (h - side) // 2
-    cropped = img.crop((left, top, left + side, top + side))  # PIL crop
-
-    if side != target_size:
+    cropped = center_square_crop(img)
+    if cropped.size[0] != target_size:
         cropped = cropped.resize((target_size, target_size), Image.BILINEAR)
     return cropped
+
+
+def resize_square(img: Image.Image, target_size: Optional[int]) -> Image.Image:
+    """Resize an already-square image to ``target_size`` (no-op when ``target_size`` is None)."""
+    if target_size is None or img.size[0] == target_size:
+        return img
+    return img.resize((target_size, target_size), Image.BILINEAR)
 
 
 # -----------------------------------------------------------------------------
@@ -219,6 +239,161 @@ def remove_background(
 
 
 # -----------------------------------------------------------------------------
+# Color correction (NeRSemble Cheung2004 per-camera CCM)
+# -----------------------------------------------------------------------------
+
+
+def load_color_calibration_map(
+    nersemble_root: Path, participant_id: int
+) -> Dict[str, np.ndarray]:
+    """
+    Load the per-camera color-correction matrices (``{serial: 3x3 CCM}``) for a participant.
+
+    Reads ``<root>/<pid>/calibration/color_calibration.json`` directly (same content as
+    ``NeRSembleParticipantDataManager.load_color_calibration``); matches the color-calibration
+    usage documented in the NeRSemble repo README (§4.3).
+    """
+    p_dir = _resolve_participant_dir_name(nersemble_root, participant_id)
+    calib_path = Path(nersemble_root) / p_dir / "calibration" / "color_calibration.json"
+    if not calib_path.exists():
+        raise RuntimeError(f"Color calibration not found: {calib_path}")
+    raw = json.loads(calib_path.read_text())
+    return {serial: np.array(ccm, dtype=np.float64) for serial, ccm in raw.items()}
+
+
+def _srgb_to_linear_torch(x: "torch.Tensor") -> "torch.Tensor":
+    return torch.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
+
+
+def _linear_to_srgb_torch(x: "torch.Tensor") -> "torch.Tensor":
+    x = x.clamp(min=0.0)
+    return torch.where(x <= 0.0031308, x * 12.92, 1.055 * x ** (1.0 / 2.4) - 0.055)
+
+
+def _color_correct_batch_torch(
+    frames: Sequence[Image.Image], ccm: np.ndarray, device: str
+) -> List[Image.Image]:
+    """
+    GPU color correction for a 3x3 (linear) Cheung2004 CCM.
+
+    Numerically matches ``nersemble_data``'s ``correct_color`` (sRGB EOTF/OETF + CCM in
+    linear space) to within 8-bit rounding, but processes all frames in one batched pass.
+    """
+    arrs = np.stack([np.asarray(f.convert("RGB")) for f in frames]).astype(np.float32) / 255.0
+    t = torch.from_numpy(arrs).to(device)  # [N, H, W, 3]
+    ccm_t = torch.as_tensor(np.asarray(ccm, dtype=np.float32), device=device)
+    lin = _srgb_to_linear_torch(t)
+    corr = lin @ ccm_t.T  # per-pixel (CCM @ rgb)
+    out = _linear_to_srgb_torch(corr).clamp(0.0, 1.0)
+    out = (out * 255.0).round().to(torch.uint8).cpu().numpy()
+    return [Image.fromarray(o) for o in out]
+
+
+def apply_color_correction_frames(
+    frames: Sequence[Image.Image],
+    ccm: np.ndarray,
+    device: Optional[str] = None,
+) -> List[Image.Image]:
+    """
+    Apply a Cheung2004 CCM to each RGB PIL frame (NeRSemble ``correct_color``).
+
+    When ``device`` is a CUDA device and the CCM is the standard 3x3 (linear) matrix, color
+    correction runs batched on the GPU (much faster than the per-frame CPU path); otherwise
+    it falls back to ``nersemble_data``'s ``correct_color`` exactly.
+    """
+    ccm_arr = np.asarray(ccm)
+    if device is not None and str(device).startswith("cuda") and ccm_arr.shape == (3, 3):
+        return _color_correct_batch_torch(frames, ccm_arr, str(device))
+
+    _ensure_nersemble_pkg_on_path()
+    from nersemble_data.util.color_correction import correct_color  # type: ignore
+
+    out: List[Image.Image] = []
+    for img in frames:
+        arr = np.asarray(img)
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+        out.append(Image.fromarray(correct_color(arr, ccm_arr)))
+    return out
+
+
+# -----------------------------------------------------------------------------
+# Background removal dispatch (white background)
+# -----------------------------------------------------------------------------
+
+BG_REMOVAL_METHODS = ("rvm", "alpha", "none")
+
+
+def composite_white_with_alpha(
+    frames: Sequence[Image.Image], alpha_frames: Sequence[Image.Image]
+) -> List[Image.Image]:
+    """
+    Composite RGB ``frames`` onto a white background using precomputed alpha mattes.
+
+    ``alpha_frames`` are single-channel (or grayscale) PIL images in ``[0, 255]`` that are
+    spatially aligned with ``frames`` (same H x W) and in the same temporal order.
+    """
+    if len(alpha_frames) != len(frames):
+        raise ValueError(
+            f"alpha/rgb frame count mismatch: {len(alpha_frames)} alpha vs {len(frames)} rgb"
+        )
+    out: List[Image.Image] = []
+    for rgb, a in zip(frames, alpha_frames):
+        rgb_arr = np.asarray(rgb.convert("RGB")).astype(np.float32) / 255.0
+        a_arr = np.asarray(a.convert("L")).astype(np.float32) / 255.0
+        if a_arr.shape[:2] != rgb_arr.shape[:2]:
+            a_img = Image.fromarray((a_arr * 255).astype(np.uint8)).resize(
+                rgb.size, Image.BILINEAR
+            )
+            a_arr = np.asarray(a_img).astype(np.float32) / 255.0
+        a_arr = a_arr[..., None]
+        comp = rgb_arr * a_arr + (1.0 - a_arr)  # white = 1.0
+        out.append(Image.fromarray((np.clip(comp, 0, 1) * 255).astype(np.uint8)))
+    return out
+
+
+def apply_background_removal(
+    frames: Sequence[Image.Image],
+    method: str,
+    converter: "Converter | None",
+    *,
+    alpha_frames: Optional[Sequence[Image.Image]] = None,
+    tag: str = "cam",
+) -> List[Image.Image]:
+    """
+    Replace the background with solid white using the selected method.
+
+    - ``rvm``:   RobustVideoMatting alpha matte, composited on white (no precomputed mattes
+                 needed; runs the matting network on the frames directly).
+    - ``alpha``: composite using precomputed per-frame alpha mattes supplied via
+                 ``alpha_frames`` (e.g. NeRSemble alpha videos). Use this when matte videos
+                 are available alongside the RGB videos.
+    - ``none``:  pass frames through unchanged.
+    """
+    if method == "none":
+        return list(frames)
+    if method == "rvm":
+        if converter is None:
+            raise ValueError("bg-removal-method=rvm requires a valid Converter instance.")
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            return remove_background(frames, converter, tmp, tag=tag)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    if method == "alpha":
+        if not alpha_frames:
+            raise ValueError(
+                "bg-removal-method=alpha requires precomputed alpha mattes, but none were "
+                "found for this camera (expected an alpha video alongside the RGB video). "
+                "This dataset has no alpha frames; use --bg-removal-method rvm instead."
+            )
+        return composite_white_with_alpha(frames, alpha_frames)
+    raise ValueError(
+        f"Unknown bg-removal method {method!r}; expected one of {BG_REMOVAL_METHODS}."
+    )
+
+
+# -----------------------------------------------------------------------------
 # NeRSemble data
 # -----------------------------------------------------------------------------
 
@@ -228,12 +403,33 @@ class SequenceInfo:
     sequence_name: str
 
 
-def _ensure_nersemble_pkg_on_path() -> Path:
-    if not NERSEMBLE_PKG_SRC.exists():
-        raise RuntimeError(f"nersemble-data src not found at {NERSEMBLE_PKG_SRC}")
-    if str(NERSEMBLE_PKG_SRC) not in sys.path:
-        sys.path.insert(0, str(NERSEMBLE_PKG_SRC))
-    return NERSEMBLE_PKG_SRC
+def _ensure_nersemble_pkg_on_path() -> Optional[Path]:
+    """
+    Make ``nersemble_data`` importable.
+
+    Prefers an already-importable package (e.g. ``pip install nersemble_data``); otherwise
+    falls back to known source checkouts (``NERSEMBLE_PKG_SRC`` env var, then a few common
+    locations).
+    """
+    try:
+        import nersemble_data  # noqa: F401
+
+        return None
+    except Exception:
+        pass
+
+    env_src = os.environ.get("NERSEMBLE_PKG_SRC")
+    candidates = ([Path(env_src)] if env_src else []) + NERSEMBLE_PKG_SRC_CANDIDATES
+    for cand in candidates:
+        if cand and Path(cand).exists():
+            if str(cand) not in sys.path:
+                sys.path.insert(0, str(cand))
+            return Path(cand)
+
+    raise RuntimeError(
+        "nersemble_data package not found. Install it (`pip install nersemble_data`) or set "
+        f"the NERSEMBLE_PKG_SRC env var. Tried: {[str(c) for c in candidates]}"
+    )
 
 
 def build_nersemble_managers(nersemble_root: Path):
@@ -530,36 +726,66 @@ def extract_tar_calibration_only(
         nersemble_root = extract_root / rel_root
         return nersemble_root.resolve()
 
-def select_middle_upper_cameras(nersemble_root: Path, participant_id: int, upper_views: int = 2) -> List[str]:
-    """
-    Select the two middle cameras among the top `upper_views` cameras by height.
-    """
+def _resolve_participant_dir_name(nersemble_root: Path, participant_id: int) -> str:
     _ensure_nersemble_pkg_on_path()
-    from nersemble_data.data.nersemble_data import resolve_participant_subdir  # type: ignore
+    try:
+        from nersemble_data.data.nersemble_data import resolve_participant_subdir  # type: ignore
 
-    p_dir = resolve_participant_subdir(str(nersemble_root), participant_id)
-    calib_path = nersemble_root / p_dir / "calibration" / "camera_params.json"
+        return resolve_participant_subdir(str(nersemble_root), participant_id)
+    except Exception:
+        return f"{participant_id:03d}"
+
+
+def load_camera_centers(nersemble_root: Path, participant_id: int) -> Dict[str, np.ndarray]:
+    """Return ``{serial: camera_center_xyz}`` (world space) from ``camera_params.json``."""
+    p_dir = _resolve_participant_dir_name(nersemble_root, participant_id)
+    calib_path = Path(nersemble_root) / p_dir / "calibration" / "camera_params.json"
     if not calib_path.exists():
         raise RuntimeError(f"Camera calibration not found: {calib_path}")
 
     camera_params = json.loads(calib_path.read_text())
-    centers = {s: np.linalg.inv(np.array(w2c, dtype=np.float32))[:3,3] for s,w2c in camera_params["world_2_cam"].items()}
-    
-    # Sort cameras by height descending (highest first)
-    sorted_serials = sorted(centers.keys(), key=lambda s: centers[s][1], reverse=True)
-    
-    # Take top N upper cameras
-    top_cameras = sorted_serials[:upper_views]
-    
-    # Pick middle two adjacent cameras from top_cameras
-    if len(top_cameras) < 2:
-        return top_cameras
-    mid = len(top_cameras)//2
-    if len(top_cameras) % 2 == 0:
-        return top_cameras[mid-1:mid+1]  # even -> middle two
-    else:
-        # odd -> middle and next one
-        return top_cameras[mid:mid+2] if mid+2 <= len(top_cameras) else top_cameras[mid-1:mid+1]
+    return {
+        s: np.linalg.inv(np.array(w2c, dtype=np.float64))[:3, 3]
+        for s, w2c in camera_params["world_2_cam"].items()
+    }
+
+
+def select_upper_middle_cameras(
+    nersemble_root: Path, participant_id: int, n_views: int
+) -> List[str]:
+    """
+    Select ``n_views`` upper, horizontally-central cameras, ordered left -> right.
+
+    The NeRSemble rig (16 cameras) splits cleanly into an upper and a lower row of 8
+    cameras each by camera height (world ``y``). We keep the upper row, take the
+    ``n_views`` cameras closest to the horizontal centre (smallest ``|x|``), and finally
+    sort them left-to-right (ascending ``x``) for a stable, view-consistent order.
+
+    With ``n_views=4`` this yields the four frontal upper cameras
+    (``222200047, 222200037, 220700191, 222200036``); ``n_views=8`` yields the full
+    upper row.
+    """
+    if n_views <= 0:
+        raise ValueError(f"n_views must be positive, got {n_views}")
+
+    centers = load_camera_centers(nersemble_root, participant_id)
+    serials = list(centers.keys())
+
+    # Upper row = top half by height, but never fewer than the requested view count.
+    n_upper = max(n_views, len(serials) // 2)
+    upper = sorted(serials, key=lambda s: centers[s][1], reverse=True)[:n_upper]
+
+    # Most horizontally-central among the upper row, then stable left-to-right order.
+    central = sorted(upper, key=lambda s: abs(centers[s][0]))[:n_views]
+    central.sort(key=lambda s: centers[s][0])
+    return central
+
+
+def select_middle_upper_cameras(
+    nersemble_root: Path, participant_id: int, upper_views: int = 2
+) -> List[str]:
+    """Backwards-compatible alias for :func:`select_upper_middle_cameras`."""
+    return select_upper_middle_cameras(nersemble_root, participant_id, n_views=upper_views)
 
 
 def camera_serials_for_upper_views(
@@ -570,11 +796,8 @@ def camera_serials_for_upper_views(
 ) -> List[str]:
     if explicit_serials is not None and len(explicit_serials) > 0:
         return list(explicit_serials)
-    if upper_views == 2:
-        return select_middle_upper_cameras(nersemble_root, participant_id, upper_views=2)
-    return select_middle_upper_cameras(
-        nersemble_root, participant_id, upper_views=upper_views or 1000
-    )
+    n = upper_views if (upper_views and upper_views > 0) else 2
+    return select_upper_middle_cameras(nersemble_root, participant_id, n_views=n)
 
 
 def prepare_temp_nersemble_from_tar(
@@ -611,18 +834,16 @@ def prepare_temp_nersemble_from_tar(
 import cv2
 
 
-def process_mp4_to_tensor(
+def decode_subsampled_frames(
     input_path: Path,
-    converter: Converter | None,
-    image_size: int | None = None,
     target_fps: float = 24.0,
     target_frames: int = 13,
-    remove_bg: bool = True,
-) -> torch.Tensor:
+    grayscale: bool = False,
+) -> List[Image.Image]:
     """
-    Load an MP4, temporally subsample, run RVM, optional square resize.
+    Decode a video, temporally subsample to ~``target_frames`` evenly-spaced frames.
 
-    Returns float tensor ``[T, C, H, W]`` in ``[0, 1]``.
+    Returns full-resolution PIL frames (RGB, or ``L`` when ``grayscale`` for alpha mattes).
     """
     cap = cv2.VideoCapture(str(input_path))
     if not cap.isOpened():
@@ -638,6 +859,7 @@ def process_mp4_to_tensor(
         )
     else:
         indices_to_keep = np.arange(total_frames // subsample_factor)
+    keep_set = set(int(i) for i in indices_to_keep)
 
     frames_all: List[Image.Image] = []
     frame_idx = 0
@@ -648,9 +870,13 @@ def process_mp4_to_tensor(
         if not ret:
             break
         if frame_idx % subsample_factor == 0:
-            if keep_idx in indices_to_keep:
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames_all.append(Image.fromarray(frame_rgb))
+            if keep_idx in keep_set:
+                if grayscale:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    frames_all.append(Image.fromarray(gray))
+                else:
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frames_all.append(Image.fromarray(frame_rgb))
             keep_idx += 1
         frame_idx += 1
     cap.release()
@@ -658,28 +884,102 @@ def process_mp4_to_tensor(
 
     if len(frames_all) == 0:
         raise RuntimeError(f"No frames loaded from {input_path}")
+    return frames_all
 
-    matted_frames = frames_all
-    if remove_bg:
-        if converter is None:
-            raise ValueError("remove_bg=True requires a valid Converter instance.")
-        t0 = time.time()
-        temp_dir = Path(tempfile.mkdtemp())
-        try:
-            matted_frames = remove_background(
-                frames_all, converter, temp_dir, tag=input_path.stem
-            )
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        print(f"[timing] Background removal: {len(matted_frames)} frames in {time.time()-t0:.2f}s")
 
-    rows: List[torch.Tensor] = []
-    for img in matted_frames:
-        if image_size is not None:
-            img = crop_pad_to_square(img, image_size)
-        arr = np.asarray(img).astype(np.float32) / 255.0
-        rows.append(torch.from_numpy(arr).permute(2, 0, 1))
+def frames_to_tchw(frames: Sequence[Image.Image]) -> torch.Tensor:
+    """List of RGB PIL frames -> float tensor ``[T, C, H, W]`` in ``[0, 1]``."""
+    rows = [
+        torch.from_numpy(np.asarray(img).astype(np.float32) / 255.0).permute(2, 0, 1)
+        for img in frames
+    ]
     return torch.stack(rows, dim=0).contiguous()
+
+
+def process_camera_to_square_frames(
+    input_path: Path,
+    converter: Converter | None,
+    *,
+    target_fps: float = 24.0,
+    target_frames: int = 13,
+    ccm: Optional[np.ndarray] = None,
+    bg_method: str = "rvm",
+    alpha_path: Optional[Path] = None,
+    cc_device: Optional[str] = None,
+) -> List[Image.Image]:
+    """
+    Full-resolution per-camera pipeline (run once per camera):
+
+      decode + temporal subsample -> color correction -> centre square crop ->
+      background removal (white).
+
+    Returns full-resolution **square** PIL frames; callers resize to each target size.
+    The expensive steps (decode + matting) therefore happen a single time regardless of
+    how many output resolutions are requested.
+    """
+    frames = decode_subsampled_frames(input_path, target_fps, target_frames)
+
+    if ccm is not None:
+        t0 = time.time()
+        if cc_device is None and converter is not None:
+            cc_device = converter.device
+        frames = apply_color_correction_frames(frames, ccm, device=cc_device)
+        print(f"[timing] Color correction: {len(frames)} frames in {time.time()-t0:.2f}s")
+
+    frames = [center_square_crop(f) for f in frames]
+
+    alpha_frames: Optional[List[Image.Image]] = None
+    if bg_method == "alpha":
+        if alpha_path is None or not Path(alpha_path).exists():
+            raise ValueError(
+                f"bg-removal-method=alpha but no alpha matte video found at {alpha_path}."
+            )
+        alpha_frames = decode_subsampled_frames(
+            Path(alpha_path), target_fps, target_frames, grayscale=True
+        )
+        alpha_frames = [center_square_crop(a) for a in alpha_frames]
+
+    if bg_method != "none":
+        t0 = time.time()
+        frames = apply_background_removal(
+            frames, bg_method, converter, alpha_frames=alpha_frames, tag=input_path.stem
+        )
+        print(f"[timing] Background removal ({bg_method}): {len(frames)} frames in {time.time()-t0:.2f}s")
+
+    return frames
+
+
+def process_mp4_to_tensor(
+    input_path: Path,
+    converter: Converter | None,
+    image_size: int | None = None,
+    target_fps: float = 24.0,
+    target_frames: int = 13,
+    remove_bg: bool = True,
+    ccm: Optional[np.ndarray] = None,
+    bg_method: Optional[str] = None,
+    alpha_path: Optional[Path] = None,
+) -> torch.Tensor:
+    """
+    Load an MP4, temporally subsample, color-correct, remove background, optional resize.
+
+    Returns float tensor ``[T, C, H, W]`` in ``[0, 1]``. ``bg_method`` (rvm/alpha/none)
+    takes precedence over the legacy ``remove_bg`` boolean when provided.
+    """
+    if bg_method is None:
+        bg_method = "rvm" if remove_bg else "none"
+
+    frames = process_camera_to_square_frames(
+        input_path,
+        converter,
+        target_fps=target_fps,
+        target_frames=target_frames,
+        ccm=ccm,
+        bg_method=bg_method,
+        alpha_path=alpha_path,
+    )
+    frames = [resize_square(f, image_size) for f in frames]
+    return frames_to_tchw(frames)
 
 
 def write_tensor_preview_mp4(
@@ -764,17 +1064,40 @@ def process_sequence(
     explicit_camera_serials: Sequence[str] | None = None,
     images_subdir: str = "images",
     remove_bg: bool = True,
+    size_roots: Optional[Sequence[Tuple[Optional[int], Path]]] = None,
+    bg_method: Optional[str] = None,
+    color_correction: bool = False,
+    alpha_subdir: str = "alpha",
+    cc_device: Optional[str] = None,
 ):
     """
-    Process a NeRSemble sequence: pick middle-upper cameras, run RVM, then either
-    write per-camera MP4s (extracted-folder mode) or a single merged ``frames.pt`` (tar mode).
+    Process a NeRSemble sequence end-to-end for one or more output resolutions.
 
-    When ``test_dump_dir`` is set, write **one** PNG per sequence: time frames of the **first**
-    processed camera in a single horizontal strip (before writing ``frames.pt`` when applicable).
+    Pipeline (per camera, executed exactly once regardless of how many resolutions are
+    requested):
+
+      pick upper-middle cameras -> decode + keep ``target_frames`` -> per-camera color
+      correction -> centre square crop -> background removal (white) -> resize to each
+      target size.
+
+    ``size_roots`` is a list of ``(image_size, output_root)`` pairs; each resolution is
+    written under its own ``output_root``. When omitted it defaults to a single
+    ``[(image_size, output_root)]`` pair (backwards-compatible call style). For each
+    resolution this either writes per-camera MP4s (``write_mp4_per_camera``) or a single
+    merged ``frames.pt`` tensor ``[V, T, C, H, W]`` (``save_merged_pt``).
+
+    When ``test_dump_dir`` is set, write one filmstrip PNG (first camera, smallest size).
     """
     start_seq = time.time()
     _ensure_nersemble_pkg_on_path()
     from nersemble_data.data.nersemble_data import NeRSembleParticipantDataManager  # type: ignore
+
+    if bg_method is None:
+        bg_method = "rvm" if remove_bg else "none"
+
+    if size_roots is None:
+        size_roots = [(image_size, Path(output_root))]
+    size_roots = [(sz, Path(root)) for sz, root in size_roots]
 
     serials = camera_serials_for_upper_views(
         nersemble_root,
@@ -782,16 +1105,35 @@ def process_sequence(
         upper_views,
         explicit_serials=explicit_camera_serials,
     )
+
+    ccm_map: Dict[str, np.ndarray] = {}
+    if color_correction:
+        ccm_map = load_color_calibration_map(nersemble_root, participant_id)
+
     pm = NeRSembleParticipantDataManager(str(nersemble_root), participant_id)
-    seq_images_default = Path(pm.get_sequence_images_dir(sequence_name))
+
+    # Default sequence-images dir. Newer nersemble_data exposes ``get_sequence_images_dir``;
+    # the public package (v0.0.6) only has ``get_images_path`` -> derive the folder from it.
+    seq_images_default: Optional[Path] = None
+    try:
+        seq_images_default = Path(pm.get_sequence_images_dir(sequence_name))
+    except AttributeError:
+        try:
+            probe_serial = serials[0] if serials else "220700191"
+            seq_images_default = Path(pm.get_images_path(sequence_name, probe_serial)).parent
+        except Exception:
+            seq_images_default = None
 
     # Resolve sequence image dir robustly for both extracted and temp-extracted tar layouts.
     # Some tar exports differ in where sequence folders are rooted.
     seq_candidates: List[Path] = []
-    seq_candidates.append(
-        seq_images_default if images_subdir == "images" else (seq_images_default.parent / images_subdir)
-    )
-    seq_candidates.append(seq_images_default)
+    if seq_images_default is not None:
+        seq_candidates.append(
+            seq_images_default
+            if images_subdir == "images"
+            else (seq_images_default.parent / images_subdir)
+        )
+        seq_candidates.append(seq_images_default)
 
     try:
         from nersemble_data.data.nersemble_data import resolve_participant_subdir  # type: ignore
@@ -834,31 +1176,35 @@ def process_sequence(
             f"Tried: {[str(p) for p in seq_candidates]}"
         )
 
-    participant_dir = output_root / f"p{participant_id:03d}"
-    print(f"participant_dir: {participant_dir}")
-    seq_dir = participant_dir / sequence_name
+    # Per-resolution output dirs.
+    def _seq_dir(root: Path) -> Path:
+        return Path(root) / f"p{participant_id:03d}" / sequence_name
 
-    merged_pt_path = seq_dir / "frames.pt"
-    if skip_existing and seq_dir.exists():
-        if save_merged_pt and merged_pt_path.exists():
-            print(f"[preprocess] Skipping (frames.pt exists): p{participant_id:03d} {sequence_name}")
-            return seq_dir
-        if not save_merged_pt:
-            existing_pt = list(seq_dir.glob("*.pt"))
-            if existing_pt:
-                print(f"[preprocess] Skipping (already has .pt): p{participant_id:03d} {sequence_name}")
-                return seq_dir
-            expected_mp4s = [seq_dir / f"cam_{serial}_processed.mp4" for serial in serials]
-            if all(p.exists() for p in expected_mp4s):
-                print(
-                    f"[preprocess] Skipping (all camera MP4s exist): p{participant_id:03d} {sequence_name}"
-                )
-                return seq_dir
+    def _is_done(root: Path) -> bool:
+        sd = _seq_dir(root)
+        if not sd.exists():
+            return False
+        if save_merged_pt:
+            return (sd / "frames.pt").exists()
+        if list(sd.glob("*.pt")):
+            return True
+        return all((sd / f"cam_{serial}_processed.mp4").exists() for serial in serials)
 
-    seq_dir.mkdir(parents=True, exist_ok=True)
+    pending = list(size_roots)
+    if skip_existing:
+        pending = [(sz, root) for sz, root in size_roots if not _is_done(root)]
+        if not pending:
+            print(f"[preprocess] Skipping (all sizes done): p{participant_id:03d} {sequence_name}")
+            return _seq_dir(size_roots[0][1])
 
-    views: List[torch.Tensor] = []
+    for _, root in pending:
+        _seq_dir(root).mkdir(parents=True, exist_ok=True)
+
+    # Smallest pending size gets the optional filmstrip preview.
+    preview_size = min((sz for sz, _ in pending if sz is not None), default=None)
+    per_size_views: Dict[Path, List[torch.Tensor]] = {root: [] for _, root in pending}
     test_strip_written = False
+
     for serial in serials:
         # Some extracted layouts point seq_path to the sequence root while others
         # point directly to the images folder. Try both robustly.
@@ -876,43 +1222,61 @@ def process_sequence(
                 + ")"
             )
             continue
-        cam_video_out = seq_dir / f"cam_{serial}_processed.mp4"
 
-        if write_mp4_per_camera and cam_video_out.exists():
-            print(f"[preprocess] Skipping already processed video: {cam_video_out}")
-            continue
+        alpha_path: Optional[Path] = None
+        if bg_method == "alpha":
+            alpha_candidates = [
+                cam_video_in.with_name(f"cam_{serial}_alpha.mp4"),
+                seq_path / alpha_subdir / f"cam_{serial}.mp4",
+                seq_path.parent / alpha_subdir / f"cam_{serial}.mp4",
+            ]
+            alpha_path = next((p for p in alpha_candidates if p.exists()), None)
 
         print(f"[preprocess] Processing camera {serial} for {sequence_name}")
         t0 = time.time()
-        tensor = process_mp4_to_tensor(
+        # Decode + color correct + crop + matte ONCE at full resolution.
+        full_frames = process_camera_to_square_frames(
             cam_video_in,
             converter,
-            image_size=image_size,
             target_frames=target_frames,
-            remove_bg=remove_bg,
+            ccm=ccm_map.get(serial),
+            bg_method=bg_method,
+            alpha_path=alpha_path,
+            cc_device=cc_device,
         )
-        views.append(tensor)
-        print(f"[timing] Camera {serial} processed in {time.time()-t0:.2f}s")
+        print(f"[timing] Camera {serial} matted in {time.time()-t0:.2f}s")
 
-        if write_mp4_per_camera:
-            write_tensor_preview_mp4(tensor, cam_video_out)
+        # Emit every requested resolution from the single matted clip.
+        for sz, root in pending:
+            tensor = frames_to_tchw([resize_square(f, sz) for f in full_frames])
+            per_size_views[root].append(tensor)
 
-        if test_dump_dir is not None and not test_strip_written:
-            strip_name = f"p{participant_id:03d}__{sequence_name}__cam_{serial}_frames.png"
-            write_timeline_strip_png(tensor, test_dump_dir / strip_name)
-            test_strip_written = True
+            if write_mp4_per_camera:
+                write_tensor_preview_mp4(tensor, _seq_dir(root) / f"cam_{serial}_processed.mp4")
+
+            if (
+                test_dump_dir is not None
+                and not test_strip_written
+                and sz == preview_size
+            ):
+                strip_name = f"p{participant_id:03d}__{sequence_name}__cam_{serial}_frames.png"
+                write_timeline_strip_png(tensor, test_dump_dir / strip_name)
+                test_strip_written = True
 
     if save_merged_pt:
-        if len(views) == 0:
-            raise RuntimeError(
-                f"No camera views processed for p{participant_id:03d} {sequence_name}"
-            )
-        stacked = torch.stack(views, dim=0)
-        torch.save(stacked.cpu(), merged_pt_path)
-        print(f"[preprocess] Wrote merged tensor {stacked.shape} -> {merged_pt_path}")
+        for sz, root in pending:
+            views = per_size_views[root]
+            if len(views) == 0:
+                raise RuntimeError(
+                    f"No camera views processed for p{participant_id:03d} {sequence_name}"
+                )
+            stacked = torch.stack(views, dim=0)
+            merged_pt_path = _seq_dir(root) / "frames.pt"
+            torch.save(stacked.cpu(), merged_pt_path)
+            print(f"[preprocess] Wrote merged tensor {stacked.shape} -> {merged_pt_path}")
 
     print(f"[timing] Sequence {sequence_name} done in {time.time()-start_seq:.2f}s")
-    return seq_dir
+    return _seq_dir(size_roots[0][1])
 
 # -----------------------------------------------------------------------------
 # CLI
@@ -1015,7 +1379,51 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--disable-background-removal",
         action="store_true",
-        help="Skip RVM and process raw RGB frames only.",
+        help="Skip background removal and process raw RGB frames only (alias for --bg-removal-method none).",
+    )
+    p.add_argument(
+        "--bg-removal-method",
+        type=str,
+        choices=list(BG_REMOVAL_METHODS),
+        default="rvm",
+        help=(
+            "How to replace the background with white: 'rvm' (RobustVideoMatting, no "
+            "precomputed mattes needed), 'alpha' (composite precomputed alpha-matte videos -- "
+            "this dataset has none, so it errors unless matte videos are provided), or 'none'. "
+            "Overridden to 'none' by --disable-background-removal."
+        ),
+    )
+    p.add_argument(
+        "--color-correction",
+        action="store_true",
+        help=(
+            "Apply NeRSemble per-camera color correction (Cheung2004 CCM from "
+            "color_calibration.json) before background removal, as in the NeRSemble README."
+        ),
+    )
+    p.add_argument(
+        "--save-merged-pt",
+        action="store_true",
+        help=(
+            "In extracted-folder mode, save one merged frames.pt tensor [V,T,C,H,W] per "
+            "sequence instead of per-camera processed MP4s (default in --from-tars mode)."
+        ),
+    )
+    p.add_argument(
+        "--alpha-subdir",
+        type=str,
+        default="alpha",
+        help="Subfolder holding per-camera alpha-matte videos for --bg-removal-method alpha.",
+    )
+    p.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        help=(
+            "Process this many participants in parallel (extracted-folder mode). Each worker "
+            "uses CPU cores for video decode and shares the GPU for matting/color-correction. "
+            "Good for large GPUs; e.g. 8 on a 96GB card."
+        ),
     )
     p.add_argument(
         "--num-participants",
@@ -1067,6 +1475,71 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     return p
+
+
+# ---------------------------------------------------------------------------
+# Parallel participant processing (extracted-folder mode)
+# ---------------------------------------------------------------------------
+
+_WORKER: dict = {}
+
+
+def _worker_init(cfg: dict) -> None:
+    """Pool initializer: build one RVM converter per worker and stash shared config."""
+    converter = None
+    if cfg["bg_method"] == "rvm":
+        converter = Converter("mobilenetv3", cfg["rvm_checkpoint"], device=cfg["device"])
+    _WORKER["cfg"] = cfg
+    _WORKER["converter"] = converter
+
+
+def _worker_process_participant(pid: int) -> Tuple[int, str]:
+    """Process all selected sequences for one participant (runs inside a pool worker)."""
+    cfg = _WORKER["cfg"]
+    converter = _WORKER["converter"]
+    _ensure_nersemble_pkg_on_path()
+    from nersemble_data.data.nersemble_data import NeRSembleParticipantDataManager  # type: ignore
+
+    nersemble_root = cfg["nersemble_root"]
+    size_roots = cfg["size_roots"]
+    pm = NeRSembleParticipantDataManager(str(nersemble_root), pid)
+    try:
+        sequences = pm.list_sequences()
+    except Exception as e:  # pragma: no cover - defensive
+        return pid, f"list_sequences failed: {e}"
+    if cfg["only_sequences"]:
+        allow = set(cfg["only_sequences"])
+        sequences = [s for s in sequences if s in allow]
+
+    msgs: List[str] = []
+    for seq in sequences:
+        if seq in TAR_IGNORE_SEQUENCE_NAMES:
+            continue
+        try:
+            process_sequence(
+                nersemble_root=nersemble_root,
+                participant_id=pid,
+                sequence_name=seq,
+                converter=converter,
+                output_root=size_roots[0][1],
+                size_roots=size_roots,
+                upper_views=cfg["upper_views"],
+                skip_existing=cfg["skip_existing"],
+                target_frames=cfg["frames"],
+                save_merged_pt=cfg["save_merged_pt"],
+                write_mp4_per_camera=not cfg["save_merged_pt"],
+                test_dump_dir=None,
+                explicit_camera_serials=cfg["camera_serials"],
+                images_subdir=cfg["images_subdir"],
+                bg_method=cfg["bg_method"],
+                color_correction=cfg["color_correction"],
+                alpha_subdir=cfg["alpha_subdir"],
+                cc_device=cfg["cc_device"],
+            )
+            msgs.append(f"{seq} ok")
+        except Exception as e:
+            msgs.append(f"{seq} ERROR: {e}")
+    return pid, ("; ".join(msgs) if msgs else "no sequences")
 
 
 def main():
@@ -1121,12 +1594,25 @@ def main():
         test_dump_dir.mkdir(parents=True, exist_ok=True)
         print(f"[preprocess] Test strip: one PNG per sequence (first camera) -> {test_dump_dir}")
 
-    remove_bg = not args.disable_background_removal
+    bg_method = "none" if args.disable_background_removal else args.bg_removal_method
+    cc_device = device if device.startswith("cuda") else None
+    # In parallel extracted mode each worker builds its own RVM model, so skip the
+    # main-process model (still needed for sequential and --from-tars runs).
+    use_workers = (not args.from_tars) and args.num_workers > 1
     converter: Converter | None = None
-    if remove_bg:
+    if bg_method == "rvm" and not use_workers:
         converter = Converter("mobilenetv3", str(args.rvm_checkpoint), device=device)
+    if bg_method == "rvm":
+        print("[preprocess] Background removal: RVM -> white")
+    elif bg_method == "alpha":
+        print("[preprocess] Background removal: precomputed alpha mattes -> white")
     else:
         print("[preprocess] Background removal disabled; using raw frames only.")
+    if args.color_correction:
+        cc_where = "GPU" if cc_device else "CPU"
+        print(f"[preprocess] Color correction: on (per-camera Cheung2004 CCM, {cc_where})")
+    if use_workers:
+        print(f"[preprocess] Parallel participants: {args.num_workers} workers")
 
     if args.from_tars:
         _ensure_nersemble_pkg_on_path()
@@ -1201,25 +1687,27 @@ def main():
                             explicit_camera_serials=args.camera_serials,
                             images_subdir=args.images_subdir,
                         )
-                        for img_sz, out_root in size_roots:
-                            out_path = process_sequence(
-                                nersemble_root=nersemble_local,
-                                participant_id=pid,
-                                sequence_name=seq,
-                                converter=converter,
-                                output_root=out_root,
-                                image_size=img_sz,
-                                upper_views=args.upper_views,
-                                skip_existing=args.skip_existing,
-                                target_frames=args.frames,
-                                save_merged_pt=True,
-                                write_mp4_per_camera=False,
-                                test_dump_dir=test_dump_dir,
-                                explicit_camera_serials=args.camera_serials,
-                                images_subdir=args.images_subdir,
-                                remove_bg=remove_bg,
-                            )
-                            print(f"[preprocess] Saved ({img_sz}px): {out_path}")
+                        out_path = process_sequence(
+                            nersemble_root=nersemble_local,
+                            participant_id=pid,
+                            sequence_name=seq,
+                            converter=converter,
+                            output_root=size_roots[0][1],
+                            size_roots=size_roots,
+                            upper_views=args.upper_views,
+                            skip_existing=args.skip_existing,
+                            target_frames=args.frames,
+                            save_merged_pt=True,
+                            write_mp4_per_camera=False,
+                            test_dump_dir=test_dump_dir,
+                            explicit_camera_serials=args.camera_serials,
+                            images_subdir=args.images_subdir,
+                            bg_method=bg_method,
+                            color_correction=args.color_correction,
+                            alpha_subdir=args.alpha_subdir,
+                            cc_device=cc_device,
+                        )
+                        print(f"[preprocess] Saved {[sz for sz, _ in size_roots]}px: {out_path}")
                 except Exception as e:
                     print(f"[preprocess] ERROR: p{pid:03d} {seq}: {e}")
                     continue
@@ -1237,11 +1725,38 @@ def main():
         start, end = task_id * chunk_size, (task_id + 1) * chunk_size
         participants = participants[start:end]
 
-    total_sequences = sum(
-        len(ParticipantManager(str(args.nersemble_root), pid).list_sequences())
-        for pid in participants
-    )
-    print(f"[preprocess] Processing {len(participants)} participants, ~{total_sequences} sequences")
+    print(f"[preprocess] Processing {len(participants)} participants")
+
+    if use_workers:
+        import multiprocessing as _mp
+
+        worker_cfg = {
+            "nersemble_root": Path(args.nersemble_root),
+            "size_roots": size_roots,
+            "upper_views": args.upper_views,
+            "skip_existing": args.skip_existing,
+            "frames": args.frames,
+            "save_merged_pt": args.save_merged_pt,
+            "camera_serials": args.camera_serials,
+            "images_subdir": args.images_subdir,
+            "bg_method": bg_method,
+            "color_correction": args.color_correction,
+            "alpha_subdir": args.alpha_subdir,
+            "cc_device": cc_device,
+            "device": device,
+            "rvm_checkpoint": str(args.rvm_checkpoint),
+            "only_sequences": list(args.only_sequences) if args.only_sequences else None,
+        }
+        n_workers = max(1, min(args.num_workers, len(participants)))
+        ctx = _mp.get_context("spawn")  # required for CUDA in subprocesses
+        with ctx.Pool(
+            processes=n_workers, initializer=_worker_init, initargs=(worker_cfg,)
+        ) as pool:
+            for pid, status in pool.imap_unordered(
+                _worker_process_participant, participants
+            ):
+                print(f"[preprocess] p{pid:03d}: {status}")
+        return
 
     for pid in participants:
         pm = ParticipantManager(str(args.nersemble_root), pid)
@@ -1255,25 +1770,26 @@ def main():
                 continue
             print(f"[preprocess] Processing p{pid:03d} {seq}")
             try:
-                nersemble_root = args.nersemble_root
-                for img_sz, out_root in size_roots:
-                    out_path = process_sequence(
-                        nersemble_root=nersemble_root,
-                        participant_id=pid,
-                        sequence_name=seq,
-                        converter=converter,
-                        output_root=out_root,
-                        image_size=img_sz,
-                        upper_views=args.upper_views,
-                        skip_existing=args.skip_existing,
-                        target_frames=args.frames,
-                        save_merged_pt=False,
-                        write_mp4_per_camera=True,
-                        test_dump_dir=test_dump_dir,
-                        explicit_camera_serials=args.camera_serials,
-                        images_subdir=args.images_subdir,
-                        remove_bg=remove_bg,
-                    )
+                process_sequence(
+                    nersemble_root=args.nersemble_root,
+                    participant_id=pid,
+                    sequence_name=seq,
+                    converter=converter,
+                    output_root=size_roots[0][1],
+                    size_roots=size_roots,
+                    upper_views=args.upper_views,
+                    skip_existing=args.skip_existing,
+                    target_frames=args.frames,
+                    save_merged_pt=args.save_merged_pt,
+                    write_mp4_per_camera=not args.save_merged_pt,
+                    test_dump_dir=test_dump_dir,
+                    explicit_camera_serials=args.camera_serials,
+                    images_subdir=args.images_subdir,
+                    bg_method=bg_method,
+                    color_correction=args.color_correction,
+                    alpha_subdir=args.alpha_subdir,
+                    cc_device=cc_device,
+                )
             except Exception as e:
                 print(f"[preprocess] ERROR: p{pid:03d} {seq}: {e}")
                 continue

@@ -267,6 +267,8 @@ class MultiviewWanVideoVAE(nn.Module):
         full_finetune_decoder: bool = False,
         temporal_compression: bool = True,
         crossview_grad_checkpoint: bool = False,
+        crossview_grad_checkpoint_encoder: bool = None,
+        crossview_grad_checkpoint_decoder: bool = None,
         view_attn_num_heads: int = None,
         **kwargs,
     ):
@@ -305,6 +307,8 @@ class MultiviewWanVideoVAE(nn.Module):
                 num_views=view_in,
                 temporal_compression=temporal_compression,
                 grad_checkpoint=crossview_grad_checkpoint,
+                grad_checkpoint_encoder=crossview_grad_checkpoint_encoder,
+                grad_checkpoint_decoder=crossview_grad_checkpoint_decoder,
                 view_attn_num_heads=view_attn_num_heads,
             )
 
@@ -327,6 +331,39 @@ class MultiviewWanVideoVAE(nn.Module):
                 print(
                     "[MultiviewWanVideoVAE] full_finetune_decoder=True: unfrozen base weights in "
                     "crossview_vae.decoder LoRA wrappers (LoRA deltas remain trainable)."
+                )
+
+            # --------------------------------------------------
+            # Freeze the PRE-FUSION encoder (encoder.conv1 + downsamples) so we
+            # reuse the pretrained Wan features. On the crossview path these flags
+            # used to be no-ops (only printed in the design summary); here we make
+            # them actually take effect. NOTE: encoder.middle / encoder.head are
+            # POST-fusion bottleneck layers (LoRA-after wrapped) and are left
+            # untouched; fusion blocks, view embeddings/LoRA, and the decoder are
+            # also untouched.
+            prefusion = [self.crossview_vae.encoder.conv1, self.crossview_vae.encoder.downsamples]
+            n_frozen = 0
+            if not train_spatial:
+                # Freeze the entire pre-fusion encoder (spatial AND temporal convs).
+                for mod in prefusion:
+                    for p in mod.parameters():
+                        if p.requires_grad:
+                            p.requires_grad = False
+                            n_frozen += p.numel()
+                print(
+                    f"[MultiviewWanVideoVAE] train_spatial=False: froze entire pre-fusion encoder "
+                    f"(conv1 + downsamples), {n_frozen/1e6:.2f}M params."
+                )
+            elif freeze_temporal:
+                # Freeze only the temporal convs in the pre-fusion encoder.
+                for mod in prefusion:
+                    for name, p in mod.named_parameters():
+                        if p.requires_grad and ("temporal" in name.lower() or "time_conv" in name.lower()):
+                            p.requires_grad = False
+                            n_frozen += p.numel()
+                print(
+                    f"[MultiviewWanVideoVAE] freeze_temporal=True (train_spatial=True): froze temporal "
+                    f"convs in pre-fusion encoder, {n_frozen/1e6:.2f}M params."
                 )
 
             # For the cross-view encoder path, we do NOT use latent_fusion / latent_expand / group_fusion;
@@ -695,6 +732,8 @@ def build_multiview_wan_video_vae(
     full_finetune_decoder: bool = False,
     temporal_compression: bool = True,
     crossview_grad_checkpoint: bool = False,
+    crossview_grad_checkpoint_encoder: bool = None,
+    crossview_grad_checkpoint_decoder: bool = None,
     view_attn_num_heads: int = None,
     **kwargs,
 ):
@@ -740,6 +779,8 @@ def build_multiview_wan_video_vae(
         full_finetune_decoder=full_finetune_decoder,
         temporal_compression=temporal_compression,
         crossview_grad_checkpoint=crossview_grad_checkpoint,
+        crossview_grad_checkpoint_encoder=crossview_grad_checkpoint_encoder,
+        crossview_grad_checkpoint_decoder=crossview_grad_checkpoint_decoder,
         view_attn_num_heads=view_attn_num_heads,
         **kwargs,
     )

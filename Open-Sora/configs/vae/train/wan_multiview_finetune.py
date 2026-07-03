@@ -23,8 +23,13 @@ model = dict(
     view_mixing_strategy="embedding",  # Key: embeddings guide what each view should decode to
     from_scratch=False,
     from_pretrained="/home/coder/Wan2.1_VAE.pth",
+    # Crossview path: freeze the ENTIRE pre-fusion encoder (encoder.conv1 +
+    # downsamples, spatial AND temporal convs) to reuse the pretrained Wan
+    # features. train_spatial=False -> freeze spatial too; freeze_temporal kept
+    # True for the (now redundant) temporal-only case. These now actually apply
+    # on the crossview path (previously they were only printed).
     freeze_temporal=True,
-    train_spatial=True,
+    train_spatial=False,
     # New cross-view encoder with in-encoder fusion + LoRA
     use_crossview_encoder=True,  # use MultiViewVideoVan instead of latent_fusion path
     # Fusion mode options (only used when use_crossview_encoder=True):
@@ -40,7 +45,15 @@ model = dict(
     # Real activation checkpointing inside the cross-view encoder/decoder
     # (per-view down-path + per-view decoder). Large memory cut, ~20-30% slower.
     # Leave False first; flip True only if you still OOM at the batch size you want.
-    crossview_grad_checkpoint=False,
+    crossview_grad_checkpoint=True,  # REQUIRED: profiling showed encode.downsample_all_views holds +39GB at batch 8 (un-checkpointed per-view encoder, T=9). This is the ONLY checkpoint switch this VAE honors (grad_checkpoint=True is a no-op here); it checkpoints each view's encode + the decode body, freeing forward activations and recomputing in backward.
+    # Per-stage override of crossview_grad_checkpoint (None -> follow the master flag above).
+    # EMPIRICAL (260629 profiling): turning the DECODER checkpoint OFF to save the ~1.75s
+    # backward recompute OOMs even at batch 16 (>94.8 GB) — the full-res upsample-resblock
+    # activations across 4 views x 9 frames are simply too large to retain. The decoder MUST
+    # stay checkpointed at any useful batch size, so both stages are left checkpointed here.
+    # (Plumbing kept so you can flip the decoder off only if you ever drop to batch <= 8.)
+    crossview_grad_checkpoint_encoder=False,
+    crossview_grad_checkpoint_decoder=None,
     # Heads for the cross-view fusion attention (None -> auto, head_dim ~64 so
     # SDPA stays on Flash/mem-efficient backends; critical at 512px).
     view_attn_num_heads=None,
@@ -48,7 +61,7 @@ model = dict(
     use_lora_before=False,       # LoRA on Encoder3d stem before fusion (encoder.conv1 + downsamples); additive to use_lora_after
     use_lora_after=True,         # apply LoRA to bottleneck/decoder ("later" part)
     # Replace additive per-view latent embedding in decoder with view-specific latent LoRA adapters.
-    use_viewwise_decoder_lora=False,
+    use_viewwise_decoder_lora=True,
     lora_rank=32,                # configurable LoRA rank for all LoRA adapters
     # Phase 2 (optional): train original decoder conv/attn inside DiffSynth LoRA wrappers (base weights),
     # while keeping view-conditioned decode (view_idx + nn.Embedding in AttentionMultiViewVideoVan).
@@ -252,12 +265,17 @@ pin_memory_cache_pre_alloc_numels = None  # Small dataset, don't need caching
 seed = 42
 # Best-effort reproducibility (cudnn, TF32, cuBLAS workspace, deterministic algos warn_only).
 # Set False to restore cudnn benchmark / TF32 for throughput. Multi-GPU ZeRO + BF16 are still noisy.
-deterministic = True
+deterministic = False
 outputs = "outputs"
 # Optional: fixed experiment folder name under outputs/ (else auto timestamp + config name)
 # experiment_name = "cross_attn_lora_after_16_all_people_9t_2v_64p"
 epochs = 100000 # 10000  # One epoch = one pass over ALL samples (.pt files). steps_per_epoch = num_samples // batch_size. Total steps = epochs × steps_per_epoch. (9 participants = many samples, not 9.)
-log_every = 100 # 1000  # Log every 10 steps # CHANGE to 100
+# Escalating log schedule (handled by should_log_update in train.py): log at these early
+# update steps, then every `log_every` updates after the last one. Each update ~= 20s wall
+# (accumulation_steps microbatches x ~10s), so [3,9,15] + log_every=21 => roughly
+# 1 min, 3 min, 5 min, then every ~7 min. Set log_schedule_steps=None for plain modulo.
+log_schedule_steps = [3, 9, 15]
+log_every = 21  # steady interval (in update steps) after the last log_schedule_steps point (~7 min)
 # Master switch: no checkpoint dirs written when False (periodic + final). Set True to save.
 save_ckpt = True
 # Save a checkpoint at the end of every Nth epoch (if epoch-mean train PSNR is healthy).
@@ -285,7 +303,7 @@ wandb_project = "wan_multiview_vae"
 wandb_expr_name = None #"gen_none__perc1p5__k1em6_256px"
 # wandb_expr_name = "manual_override"
 # Only call wandb.init after this many optimizer steps (avoids empty runs on short tests; resume past step inits immediately)
-wandb_min_steps_before_init = 10
+wandb_min_steps_before_init = 2  # init wandb early (~40s) so the first scheduled log at update 3 (~1 min) reaches wandb
 log_step_time = True  # Once: print avg wall time over the first 10 steps (set False to disable; uses tqdm.write)
 
 # One-time design + parameter breakdown on the first training step (after ColossalAI booster wrap):
@@ -378,7 +396,7 @@ if str(discriminator_choice).lower() == "train":
 # all_people (many steps/epoch) → 100+.
 # NOTE: epoch-end checkpoints are skipped until the first PSNR sample is available, so if
 # eval_every is larger than the number of optimizer steps so far, no checkpoint is ever saved.
-eval_every = 100  # 1 = evaluate on every optimizer update (low overhead for small datasets)
+eval_every = 20  # >0 just enables the per-batch PSNR/SSIM JSONL snapshot; its cadence now follows the log schedule (should_log_update), not this modulo. Set to 0 to disable the snapshot.
 # full_eval_every: separate dataloader over val (or train) — mean/std over clips. Heavier.
 full_eval_every = 500
 # 0 = score every clip in the val (or train) holdout set (e.g. all _val_participants). N>0 = cap for quick tests.
@@ -439,8 +457,8 @@ train_psnr_guard_min_epochs = 0
 # OOM instantly at 512. With temporal_compression + multi-head fusion attention you
 # should be able to push this up on the 96GB card; use accumulation_steps for a larger
 # effective batch without more memory.
-batch_size = 8  # 128px, temporal_compression=False + no crossview ckpt + reduce-overhead CUDA graphs is memory-heavy; 32 OOMs. Ramp up toward max if it fits. Phase 2 (512px): set to 2.
-accumulation_steps = 1  # raise for a larger EFFECTIVE batch with no extra memory
+batch_size = 32  # 128px, temporal_compression=False + no crossview ckpt + reduce-overhead CUDA graphs is memory-heavy; 32 OOMs. Ramp up toward max if it fits. Phase 2 (512px): set to 2.
+accumulation_steps = 2  # raise for a larger EFFECTIVE batch with no extra memory
 
 # profile = True       # existing schedule-based profiler (TensorBoard trace, can't combine with profile_step)
 profile_step = False   # Kineto trace: overwhelming JSON + op table (legacy; use profile_timing instead)
@@ -448,6 +466,12 @@ profile_step = False   # Kineto trace: overwhelming JSON + op table (legacy; use
 # Runs once at profile_timing_step (after warmup). Disables wandb automatically.
 profile_timing = False  # MUST stay False for wandb: train.py force-disables wandb when this is True
 profile_timing_step = 50  # global_step to profile (0-indexed loop counter)
+# Live per-block GPU memory printing from step 0 (prints "[mem] <block> delta/cur/peak/reserved").
+# Use to locate an OOM/crash: the LAST "[mem]" line before the traceback is the offending block.
+# Also adds a MEMORY BREAKDOWN table to the profile_timing report (net MB retained per method).
+# REQUIRES optimization=False to be meaningful (torch.compile breaks per-block attribution).
+# Turn OFF for real training (per-block cuda.synchronize adds overhead).
+profile_memory_live = False
 
 # ---------- performance optimizations ----------
 # Set optimization=True to enable all four optimizations at once:
@@ -467,8 +491,8 @@ optimization = False
 # stable and you've found your max batch, try "reduce-overhead" (CUDA graphs) for speed
 # — but expect to LOWER batch_size, since the graph memory pool adds pressure and the
 # dynamic temporal-chunk shapes (1-frame vs 4-frame) force multiple captured graphs.
-optimization_compile_mode = "reduce-overhead"  # CUDA graphs; ema_decay set -> channels_last_3d auto-skipped
+optimization_compile_mode = "default"  # NO CUDA graphs: required because forward calls the compiled module many times per step (encode view-loop + decode per-view + per-frame loop); reduce-overhead's static CUDA-graph pool gets overwritten across those segments and crashes backward with "accessing tensor output of CUDAGraphs that has been overwritten".
 # None -> torch auto-detects (legacy). True -> one shape-flexible graph: avoids the
 # per-chunk recompiles from the temporal feat_cache loop and stays compatible with
 # gradient checkpointing (no CUDA graphs in "default" mode). Try with mode="default".
-optimization_compile_dynamic = None
+optimization_compile_dynamic = True
