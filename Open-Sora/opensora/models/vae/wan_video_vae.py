@@ -23,7 +23,6 @@ from diffsynth.models.wan_video_vae import (
     LoRAAttentionBlock,
     LoRAConv2d,
     LoRAConv3d,
-    StridedLoRAConv3d,
     ProfileTimer,
     WanVideoVAE,
 )
@@ -271,16 +270,12 @@ class MultiviewWanVideoVAE(nn.Module):
         crossview_grad_checkpoint_encoder: bool = None,
         crossview_grad_checkpoint_decoder: bool = None,
         view_attn_num_heads: int = None,
-        use_strided_temporal_lora: bool = False,
-        use_temporal_latent_pos_embed: bool = False,
-        max_temporal_latent: int = 64,
-        use_temporal_refinement: bool = False,
-        temporal_refinement_hidden: int = 32,
-        temporal_refinement_kernel: int = 5,
-        use_latent_temporal_attention: bool = False,
-        latent_temporal_attn_heads: int = 4,
-        use_latent_context_warmup: bool = False,
-        use_decoder_frame_feedback: bool = False,
+        use_noncausal_decode: bool = False,
+        use_temporal_reflection_pad: bool = False,
+        use_temporal_side_channel: bool = False,
+        side_channel_dim: int = 4,
+        use_decoder_temporal_attention: bool = False,
+        use_learned_cache_update: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -321,16 +316,12 @@ class MultiviewWanVideoVAE(nn.Module):
                 grad_checkpoint_encoder=crossview_grad_checkpoint_encoder,
                 grad_checkpoint_decoder=crossview_grad_checkpoint_decoder,
                 view_attn_num_heads=view_attn_num_heads,
-                use_strided_temporal_lora=use_strided_temporal_lora,
-                use_temporal_latent_pos_embed=use_temporal_latent_pos_embed,
-                max_temporal_latent=max_temporal_latent,
-                use_temporal_refinement=use_temporal_refinement,
-                temporal_refinement_hidden=temporal_refinement_hidden,
-                temporal_refinement_kernel=temporal_refinement_kernel,
-                use_latent_temporal_attention=use_latent_temporal_attention,
-                latent_temporal_attn_heads=latent_temporal_attn_heads,
-                use_latent_context_warmup=use_latent_context_warmup,
-                use_decoder_frame_feedback=use_decoder_frame_feedback,
+                use_noncausal_decode=use_noncausal_decode,
+                use_temporal_reflection_pad=use_temporal_reflection_pad,
+                use_temporal_side_channel=use_temporal_side_channel,
+                side_channel_dim=side_channel_dim,
+                use_decoder_temporal_attention=use_decoder_temporal_attention,
+                use_learned_cache_update=use_learned_cache_update,
             )
 
             # Optionally load Wan 2.1 weights into the internal encoder/decoder
@@ -375,26 +366,6 @@ class MultiviewWanVideoVAE(nn.Module):
                     f"[MultiviewWanVideoVAE] train_spatial=False: froze entire pre-fusion encoder "
                     f"(conv1 + downsamples), {n_frozen/1e6:.2f}M params."
                 )
-                # use_strided_temporal_lora=True: even with train_spatial=False, keep the
-                # LoRA delta params on strided temporal convs trainable (base stays frozen).
-                if use_strided_temporal_lora:
-                    n_unfrozen = 0
-                    for mod in prefusion:
-                        for m in mod.modules():
-                            if isinstance(m, StridedLoRAConv3d):
-                                for p in m.lora_down.parameters():
-                                    p.requires_grad = True
-                                    n_unfrozen += p.numel()
-                                for p in m.lora_mid.parameters():
-                                    p.requires_grad = True
-                                    n_unfrozen += p.numel()
-                                for p in m.lora_up.parameters():
-                                    p.requires_grad = True
-                                    n_unfrozen += p.numel()
-                    print(
-                        f"[MultiviewWanVideoVAE] use_strided_temporal_lora=True: unfroze strided "
-                        f"temporal LoRA deltas in pre-fusion encoder, {n_unfrozen/1e6:.3f}M params."
-                    )
             elif freeze_temporal:
                 # Freeze only the temporal convs in the pre-fusion encoder.
                 for mod in prefusion:
@@ -776,16 +747,12 @@ def build_multiview_wan_video_vae(
     crossview_grad_checkpoint_encoder: bool = None,
     crossview_grad_checkpoint_decoder: bool = None,
     view_attn_num_heads: int = None,
-    use_strided_temporal_lora: bool = False,
-    use_temporal_latent_pos_embed: bool = False,
-    max_temporal_latent: int = 64,
-    use_temporal_refinement: bool = False,
-    temporal_refinement_hidden: int = 32,
-    temporal_refinement_kernel: int = 5,
-    use_latent_temporal_attention: bool = False,
-    latent_temporal_attn_heads: int = 4,
-    use_latent_context_warmup: bool = False,
-    use_decoder_frame_feedback: bool = False,
+    use_noncausal_decode: bool = False,
+    use_temporal_reflection_pad: bool = False,
+    use_temporal_side_channel: bool = False,
+    side_channel_dim: int = 4,
+    use_decoder_temporal_attention: bool = False,
+    use_learned_cache_update: bool = False,
     **kwargs,
 ):
     """
@@ -833,16 +800,12 @@ def build_multiview_wan_video_vae(
         crossview_grad_checkpoint_encoder=crossview_grad_checkpoint_encoder,
         crossview_grad_checkpoint_decoder=crossview_grad_checkpoint_decoder,
         view_attn_num_heads=view_attn_num_heads,
-        use_strided_temporal_lora=use_strided_temporal_lora,
-        use_temporal_latent_pos_embed=use_temporal_latent_pos_embed,
-        max_temporal_latent=max_temporal_latent,
-        use_temporal_refinement=use_temporal_refinement,
-        temporal_refinement_hidden=temporal_refinement_hidden,
-        temporal_refinement_kernel=temporal_refinement_kernel,
-        use_latent_temporal_attention=use_latent_temporal_attention,
-        latent_temporal_attn_heads=latent_temporal_attn_heads,
-        use_latent_context_warmup=use_latent_context_warmup,
-        use_decoder_frame_feedback=use_decoder_frame_feedback,
+        use_noncausal_decode=use_noncausal_decode,
+        use_temporal_reflection_pad=use_temporal_reflection_pad,
+        use_temporal_side_channel=use_temporal_side_channel,
+        side_channel_dim=side_channel_dim,
+        use_decoder_temporal_attention=use_decoder_temporal_attention,
+        use_learned_cache_update=use_learned_cache_update,
         **kwargs,
     )
 

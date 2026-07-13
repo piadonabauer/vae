@@ -81,43 +81,52 @@ model = dict(
     # Still set use_viewwise_decoder_lora / use_view_embedding in the legacy path as needed; crossview always has decode embeddings.
     full_finetune_decoder=False,
     # -----------------------------------------------------------------------
-    # Temporal compression quality improvements (all False = original behavior)
+    # Temporal-compression quality flags — round 2 (all False = exact baseline)
     # -----------------------------------------------------------------------
-    # Idea 1 — LoRA on strided encoder temporal convs (downsample3d time_conv,
-    #   stride=(2,1,1)).  Adds trainable StridedLoRAConv3d delta even when
-    #   train_spatial=False so the encoder's temporal compression adapts.
-    #   Requires use_lora=True.  Adds ~3×lora_rank params per strided conv.
-    use_strided_temporal_lora=False,
-    # Idea 2 — Learnable temporal position embeddings on the latent z before
-    #   decoding.  [max_temporal_latent × z_dim] parameter table, zero-init.
-    #   Helps the decoder distinguish "first frame" vs interior vs last frame.
-    use_temporal_latent_pos_embed=False,
-    max_temporal_latent=64,             # max latent T' the table covers
-    # Idea 3 — Post-decode temporal refinement head: small non-causal residual
-    #   Conv3d(3,hidden,(k,1,1)) over the *full* reconstructed video.  Runs
-    #   after the chunked decode loop so it can smooth chunk-boundary artifacts.
-    #   Zero-init → identity at init; cheap (3 channels only).
-    use_temporal_refinement=False,
-    temporal_refinement_hidden=32,      # channels in the hidden layer
-    temporal_refinement_kernel=5,       # temporal kernel size (symmetric padding)
-    # Idea 4 — Latent temporal attention: self-attention over the T' latent frames
-    #   *before* decode, mirroring the cross-view ViewAttention in the encoder.
-    #   Each spatial position independently attends over T' (cheap: T'=3 at 9 frames).
-    #   Zero-init output projection → identity at init.
-    use_latent_temporal_attention=False,
-    latent_temporal_attn_heads=4,
-    # Idea 5 — Latent context warmup: before the real decode loop, compute a
-    #   "synthetic past frame" = warmup_proj(temporal_mean(x)) and run it through the
-    #   decoder to pre-fill all feat_cache slots.  Frame 0 normally decodes cold (all
-    #   caches None); this gives it warm context.  Output of the warmup pass discarded.
-    use_latent_context_warmup=False,
-    # Idea 6 — Decoder frame feedback: after decoding latent frame i → RGB, pool the
-    #   output back to latent resolution and inject as a residual into x_chunk[i+1].
-    #   Explicit autoregressive signal: each decode is conditioned on the actual pixels
-    #   produced so far, not just the feat_cache.  Zero-init → no effect at init.
-    #   NOTE: creates a recurrent graph — use with gradient clipping.
-    use_decoder_frame_feedback=False,
+    # Idea 1 — Non-causal full-sequence decode: remove the chunk loop entirely.
+    #   All T' latent frames are decoded in ONE pass; every decoder CausalConv3d
+    #   switches from all-past to symmetric past+future temporal padding (runtime
+    #   switch on the padding buffer, pretrained weights untouched). No cold-start
+    #   frame 0, no chunk boundaries. Memory profile ≈ temporal_compression=False.
+    #   Requires temporal_compression=True.
+    use_noncausal_decode=False,
+    # Idea 2 — Temporal reflection padding: prepend 4 reflected real frames
+    #   [f4,f3,f2,f1] before encoding (keeps T ≡ 1 mod 4 → one extra leading latent
+    #   frame), decode, crop the first 4 output frames. Encoder AND decoder caches
+    #   warm up on genuine video statistics instead of a cold cache. Zero new
+    #   parameters, ~10% extra compute. Requires temporal_compression=True.
+    use_temporal_reflection_pad=False,
+    # Idea 3 — High-frequency temporal side channel: tiny full-temporal-rate latent
+    #   (side_channel_dim ch, spatial /16) from the view-averaged input, injected
+    #   into the decoder right after the last temporal upsample via a zero-init
+    #   1×1×1 conv. Carries the temporal detail (blinks, fast motion) that 4×
+    #   temporal compression discards; the main 16ch @ T' latent stays untouched.
+    #   Works with any decode mode (causal chunked, non-causal, tc=False).
+    use_temporal_side_channel=False,
+    side_channel_dim=4,                 # channels of the side latent
+    # Idea 4 — Temporal attention in the decoder bottleneck: temporal counterpart of
+    #   the spatial middle AttentionBlock, attending across frames at 384 channels
+    #   (decoder feature space, not the 16ch latent). Zero-init projection.
+    #   REQUIRES use_noncausal_decode=True (chunked decode shows the middle block
+    #   one frame at a time — nothing to attend over).
+    use_decoder_temporal_attention=False,
+    # Idea 6 — Learned ConvGRU cache updater: replaces the hand-coded feat_cache
+    #   update ("overwrite with the last 2 frames of activations") with a gated
+    #   learned update cache = GRU(cache, activations) per decoder cache slot.
+    #   Near-identity at init (update gate bias -4). Only for the causal chunked
+    #   path — mutually exclusive with use_noncausal_decode.
+    use_learned_cache_update=False,
 )
+
+# Idea 5 — Teacher distillation (training-side; no architecture change).
+# Path to a temporal_compression=False checkpoint (a .pt/.pth/.safetensors state
+# dict, or a checkpoint dir like .../epochX-global_stepY containing model/).
+# The teacher is built with the same model config but temporal_compression=False,
+# frozen, and an extra loss distill_weight * L1(student_recon, teacher_recon) is
+# added — a dense per-frame signal for what good temporal reconstruction looks
+# like. None = disabled (baseline).
+distill_teacher_ckpt = None
+distill_weight = 1.0
 
 # ============
 # data config 

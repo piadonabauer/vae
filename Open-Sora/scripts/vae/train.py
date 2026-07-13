@@ -85,7 +85,7 @@ from opensora.models.vae.stylegan2_disc_loader import build_stylegan2_ada_discri
 from opensora.models.vae.utils import DiagonalGaussianDistribution
 from opensora.models.vae.wan_video_vae import build_multiview_wan_video_vae, ProfileTimer  # Register multi-view VAE model
 from opensora.registry import DATASETS, MODELS, build_module
-from opensora.utils.ckpt import CheckpointIO, model_sharding, record_model_param_shape, rm_checkpoints
+from opensora.utils.ckpt import CheckpointIO, load_checkpoint, model_sharding, record_model_param_shape, rm_checkpoints
 from opensora.utils.config import config_to_name, create_experiment_workspace, parse_configs
 from opensora.utils.logger import create_logger
 from opensora.utils.misc import (
@@ -1637,6 +1637,35 @@ def main():
 
     vae_loss_fn = VAELoss(**cfg.vae_loss_config, device=device, dtype=dtype)
 
+    # == optional distillation teacher (Idea 5) ==
+    # A frozen temporal_compression=False copy of the model. Its reconstructions are
+    # clean along the temporal axis, so distill_weight * L1(student_rec, teacher_rec)
+    # gives the compressed student a dense per-frame signal for what good temporal
+    # reconstruction looks like. No inference-time cost (training-only loss).
+    teacher_model = None
+    distill_weight = float(cfg.get("distill_weight", 1.0))
+    if cfg.get("distill_teacher_ckpt", None):
+        teacher_cfg = dict(cfg.model)
+        teacher_cfg["temporal_compression"] = False
+        # The teacher is a plain baseline: strip any round-2 idea flags.
+        for _k in (
+            "use_noncausal_decode",
+            "use_temporal_reflection_pad",
+            "use_temporal_side_channel",
+            "side_channel_dim",
+            "use_decoder_temporal_attention",
+            "use_learned_cache_update",
+        ):
+            teacher_cfg.pop(_k, None)
+        logger.info(
+            "[distill] Building frozen teacher (temporal_compression=False) and loading %s",
+            cfg.distill_teacher_ckpt,
+        )
+        teacher_model = build_module(teacher_cfg, MODELS, device_map=device, torch_dtype=dtype)
+        load_checkpoint(teacher_model, cfg.distill_teacher_ckpt)
+        teacher_model = teacher_model.to(device=device, dtype=dtype).eval().requires_grad_(False)
+        logger.info("[distill] Teacher ready (frozen, eval mode); distill_weight=%s", distill_weight)
+
     # == build EMA model ==
     # EMA is deepcopied BEFORE channels-last conversion: model_sharding calls
     # param.data.view(-1) which requires contiguous tensors.
@@ -1855,6 +1884,7 @@ def main():
         gen=0.0,
         gen_w=0.0,
         disc=0.0,
+        distill=0.0,
         debug=0.0,
     )
     
@@ -2537,6 +2567,15 @@ def main():
                         recon_loss = ret["recon_loss"]
                         perceptual_loss = ret["perceptual_loss"]
                         vae_loss += nll_loss + kl_loss
+
+                        # Idea 5 — teacher distillation: match the compressed student's
+                        # output to the frozen temporal_compression=False teacher's.
+                        distill_loss = None
+                        if teacher_model is not None:
+                            with torch.no_grad():
+                                x_rec_teacher, _, _ = teacher_model(x)
+                            distill_loss = F.l1_loss(x_rec, x_rec_teacher)
+                            vae_loss = vae_loss + distill_weight * distill_loss
                         loss_time = time.time() - loss_start
                     timing_stats["loss_compute"].append(loss_time)
 
@@ -2765,6 +2804,8 @@ def main():
                     log_loss("nll_rec", recon_loss, loss_dict, use_video)
                     log_loss("nll_per", perceptual_loss, loss_dict, use_video)
                     log_loss("kl", kl_loss, loss_dict, use_video)
+                    if distill_loss is not None:
+                        log_loss("distill", distill_loss, loss_dict, use_video)
                     if use_discriminator:
                         log_loss("gen_w", generator_loss, loss_dict, use_video)
                         log_loss("gen", g_loss, loss_dict, use_video)
@@ -2963,6 +3004,7 @@ def main():
                             "gen",
                             "gen_w",
                             "disc",
+                            "distill",
                         )
                         def _loss_item(v):
                             if v is None:
@@ -3088,6 +3130,9 @@ def main():
                                     wandb_log_dict["loss/disc"] = avg_loss.get("disc", 0.0)
                                     wandb_log_dict["loss/gen"] = avg_loss.get("gen", 0.0)
                                     wandb_log_dict["loss/gen_w"] = avg_loss.get("gen_w", 0.0)
+
+                                if teacher_model is not None:
+                                    wandb_log_dict["loss/distill"] = avg_loss.get("distill", 0.0)
 
                                 # Add timing stats to wandb - super useful for bottleneck analysis!
                                 # You can plot these in wandb to see which operation takes the most time
