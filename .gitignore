@@ -23,3 +23,12 @@ Thumbs.db
 
 tmp/
 .tmp/
+
+elias
+.elias/
+
+.flash-attention
+flash-attention/
+
+RobustVideoMatting/
+Open-Sora/slurm_logs/

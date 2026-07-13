@@ -1715,6 +1715,20 @@ def main():
             # Some training entrypoints may not import the discriminator module by default.
             import opensora.models.vae.discriminator  # noqa: F401
 
+            # For the multiview disc, auto-detect num_views from the first dataset sample so the
+            # view_merge conv is sized correctly regardless of how many cameras are in the data.
+            if disc_type == "N_Layer_discriminator_multiview_4d" and not disc_cfg.get("num_views"):
+                try:
+                    _probe = dataset[0]
+                    _probe_vid = _probe["video"] if isinstance(_probe, dict) else _probe
+                    _detected_views = int(_probe_vid.shape[0])
+                    disc_cfg["num_views"] = _detected_views
+                    logger.info("[disc] auto-detected num_views=%d from dataset probe", _detected_views)
+                except Exception as _probe_err:
+                    logger.warning(
+                        "[disc] Could not auto-detect num_views (%s); falling back to constructor default", _probe_err
+                    )
+
             discriminator = build_module(disc_cfg, MODELS).to(device, dtype).train()
         log_model_params(discriminator)
         generator_loss_fn = GeneratorLoss(**cfg.gen_loss_config)
@@ -2057,6 +2071,10 @@ def main():
             config=cfg.to_dict(),
             dir=exp_dir,
         )
+        # Register samples_seen as the primary x-axis so all charts are comparable
+        # across runs with different batch sizes (e.g. bs=1 disc runs vs bs=16 idea runs).
+        wandb.define_metric("samples_seen")
+        wandb.define_metric("*", step_metric="samples_seen")
         wandb.config.update(
             {"loss_config": _loss_config_dict(cfg), "loss_signature_slug": loss_slug},
             allow_val_change=True,
@@ -2118,6 +2136,10 @@ def main():
 
     dist.barrier()
     accumulation_steps = int(cfg.get("accumulation_steps", 1))
+    # Samples seen per optimizer update = micro-batch × accumulation × num_processes.
+    # Used as the canonical x-axis in WandB so runs with different batch sizes are
+    # comparable (e.g. bs=1 for disc runs vs bs=16 for idea runs).
+    effective_batch_size = cfg.get("batch_size", 1) * accumulation_steps * accelerator.num_processes
     actual_update_step = 0
     debug_stats_start_step = int(cfg.get("debug_stats_start_step", 0))
     debug_stats_every = max(1, int(cfg.get("debug_stats_every", 500)))
@@ -2557,10 +2579,11 @@ def main():
                                 )
                         fake_logits = discriminator(disc_input.contiguous())
 
+                        _model_inner = getattr(model, "module", model)
                         generator_loss, g_loss = generator_loss_fn(
                             fake_logits,
                             nll_loss,
-                            model.module.get_last_layer(),
+                            _model_inner.get_last_layer(),
                             actual_update_step,
                             is_training=model.training,
                         )
@@ -2568,7 +2591,7 @@ def main():
                         adaptive_w = None
                         # Optional: two extra autograd.grad calls on the last layer (expensive); keep off for speed.
                         if cfg.get("gan_log_adaptive_grad_metrics", False):
-                            last_layer = model.module.get_last_layer()
+                            last_layer = _model_inner.get_last_layer()
                             g_recon = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
                             g_adv = torch.autograd.grad(g_loss, last_layer, retain_graph=True)[0]
                             adaptive_w = torch.norm(g_recon) / (torch.norm(g_adv) + 1e-4)
@@ -3047,6 +3070,7 @@ def main():
                                 wandb_log_dict = {
                                         "iter": global_step,
                                         "global_step": actual_update_step,
+                                        "samples_seen": actual_update_step * effective_batch_size,
                                         "epoch": epoch,
                                         "epoch_float": epoch_float,
                                         "lr": optimizer.param_groups[0]["lr"],
@@ -3179,6 +3203,7 @@ def main():
                                 prefix = f"eval/{eval_ds_label}"
                                 log_dict = {
                                     "global_step": actual_update_step,
+                                    "samples_seen": actual_update_step * effective_batch_size,
                                     "epoch_float": epoch_float,
                                     f"{prefix}/psnr_mean": eval_metrics["psnr_mean"],
                                     f"{prefix}/psnr_std": eval_metrics["psnr_std"],

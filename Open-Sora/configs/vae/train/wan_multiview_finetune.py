@@ -7,6 +7,19 @@
 # (3) Ensure all .pt files have same shape [V,C,T,H,W] and value range [0,1].
 # batch_size must be <= num_samples or steps_per_epoch is 0.
 
+# ── Speed preset ──────────────────────────────────────────────────────────────
+# FAST_MODE = True  → "reduce-overhead" (CUDA graphs) + decoder checkpoint OFF.
+#   CUDA graphs capture forward+backward as one static sequence. Activations are
+#   static buffers read in-place — only one view's activations live at a time (~8 GB)
+#   instead of all 4 views simultaneously (~34 GB). This is how batch=64 fit in 46 GB.
+#   Requires dynamic=False (static shapes) and recompile_limit≥32 (decoder has 11+
+#   distinct ResidualBlock shapes; default limit=8 caused eager fallback → OOM).
+#   First step is very slow (graph capture + 11+ compilations); then ~2× faster than
+#   no_compile per the May benchmark (2.89 s/step vs 5.66 s/step at batch=1).
+# FAST_MODE = False → "default" Triton fusion + per-frame decoder checkpoint (safe).
+#   Use if FAST_MODE=True still has issues (recompile/graph errors on first step).
+FAST_MODE = False
+
 
 fixed_seq_eval_every_epochs = 0 # CHANGE to 200
 
@@ -22,7 +35,7 @@ model = dict(
     use_view_group_fusion=False,  # If False: only latent_fusion + latent_expand (simplest setup)
     view_mixing_strategy="embedding",  # Key: embeddings guide what each view should decode to
     from_scratch=False,
-    from_pretrained="/home/coder/Wan2.1_VAE.pth",
+    from_pretrained="/home/piado/scratch/Wan2.1_VAE.pth", #,h",
     # Crossview path: freeze the ENTIRE pre-fusion encoder (encoder.conv1 +
     # downsamples, spatial AND temporal convs) to reuse the pretrained Wan
     # features. train_spatial=False -> freeze spatial too; freeze_temporal kept
@@ -41,7 +54,7 @@ model = dict(
     # Temporal compression: when True the cross-view encoder/decoder run Wan's
     # chunked feat_cache path so the temporal stride-convs actually fire
     # (4x: 9 frames -> 3 latent frames -> 9 frames out). False = legacy (T kept = 9).
-    temporal_compression=False,
+    temporal_compression=True,
     # Real activation checkpointing inside the cross-view encoder/decoder
     # (per-view down-path + per-view decoder). Large memory cut, ~20-30% slower.
     # Leave False first; flip True only if you still OOM at the batch size you want.
@@ -67,6 +80,43 @@ model = dict(
     # while keeping view-conditioned decode (view_idx + nn.Embedding in AttentionMultiViewVideoVan).
     # Still set use_viewwise_decoder_lora / use_view_embedding in the legacy path as needed; crossview always has decode embeddings.
     full_finetune_decoder=False,
+    # -----------------------------------------------------------------------
+    # Temporal compression quality improvements (all False = original behavior)
+    # -----------------------------------------------------------------------
+    # Idea 1 — LoRA on strided encoder temporal convs (downsample3d time_conv,
+    #   stride=(2,1,1)).  Adds trainable StridedLoRAConv3d delta even when
+    #   train_spatial=False so the encoder's temporal compression adapts.
+    #   Requires use_lora=True.  Adds ~3×lora_rank params per strided conv.
+    use_strided_temporal_lora=False,
+    # Idea 2 — Learnable temporal position embeddings on the latent z before
+    #   decoding.  [max_temporal_latent × z_dim] parameter table, zero-init.
+    #   Helps the decoder distinguish "first frame" vs interior vs last frame.
+    use_temporal_latent_pos_embed=False,
+    max_temporal_latent=64,             # max latent T' the table covers
+    # Idea 3 — Post-decode temporal refinement head: small non-causal residual
+    #   Conv3d(3,hidden,(k,1,1)) over the *full* reconstructed video.  Runs
+    #   after the chunked decode loop so it can smooth chunk-boundary artifacts.
+    #   Zero-init → identity at init; cheap (3 channels only).
+    use_temporal_refinement=False,
+    temporal_refinement_hidden=32,      # channels in the hidden layer
+    temporal_refinement_kernel=5,       # temporal kernel size (symmetric padding)
+    # Idea 4 — Latent temporal attention: self-attention over the T' latent frames
+    #   *before* decode, mirroring the cross-view ViewAttention in the encoder.
+    #   Each spatial position independently attends over T' (cheap: T'=3 at 9 frames).
+    #   Zero-init output projection → identity at init.
+    use_latent_temporal_attention=False,
+    latent_temporal_attn_heads=4,
+    # Idea 5 — Latent context warmup: before the real decode loop, compute a
+    #   "synthetic past frame" = warmup_proj(temporal_mean(x)) and run it through the
+    #   decoder to pre-fill all feat_cache slots.  Frame 0 normally decodes cold (all
+    #   caches None); this gives it warm context.  Output of the warmup pass discarded.
+    use_latent_context_warmup=False,
+    # Idea 6 — Decoder frame feedback: after decoding latent frame i → RGB, pool the
+    #   output back to latent resolution and inject as a residual into x_chunk[i+1].
+    #   Explicit autoregressive signal: each decode is conditioned on the actual pixels
+    #   produced so far, not just the feat_cache.  Zero-init → no effect at init.
+    #   NOTE: creates a recurrent graph — use with gradient clipping.
+    use_decoder_frame_feedback=False,
 )
 
 # ============
@@ -75,7 +125,8 @@ model = dict(
 from opensora.utils.nersemble_bucket import resolve_nersemble_bucket
 
 # Optional: parent of ``64-res`` / ``128-res`` (default: NeRSemble v2 processed root).
-nersemble_processed_base = "/home/coder/nersemble-data/processed/4view"
+nersemble_processed_base = "/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames"
+# "/home/coder/nersemble-data/processed/4view"
 
 # ``DATA_ROOT``, ``train_target_hw``, ``train_target_frames`` are derived from ``bucket_config``:
 # - ``256px_...`` + T frames → load ``.../256-res``, train at 256×256, T frames (e.g. 9).
@@ -457,21 +508,21 @@ train_psnr_guard_min_epochs = 0
 # OOM instantly at 512. With temporal_compression + multi-head fusion attention you
 # should be able to push this up on the 96GB card; use accumulation_steps for a larger
 # effective batch without more memory.
-batch_size = 32  # 128px, temporal_compression=False + no crossview ckpt + reduce-overhead CUDA graphs is memory-heavy; 32 OOMs. Ramp up toward max if it fits. Phase 2 (512px): set to 2.
+batch_size = 16  # 128px, temporal_compression=False + no crossview ckpt + reduce-overhead CUDA graphs is memory-heavy; 32 OOMs. Ramp up toward max if it fits. Phase 2 (512px): set to 2.
 accumulation_steps = 2  # raise for a larger EFFECTIVE batch with no extra memory
 
 # profile = True       # existing schedule-based profiler (TensorBoard trace, can't combine with profile_step)
-profile_step = False   # Kineto trace: overwhelming JSON + op table (legacy; use profile_timing instead)
+profile_step = False # CHANGE   # Kineto trace: overwhelming JSON + op table (legacy; use profile_timing instead)
 # User-friendly CUDA-synchronized block timing (attention-focused, readable txt + json).
 # Runs once at profile_timing_step (after warmup). Disables wandb automatically.
-profile_timing = False  # MUST stay False for wandb: train.py force-disables wandb when this is True
+profile_timing = False # CHANGE  # MUST stay False for wandb: train.py force-disables wandb when this is True
 profile_timing_step = 50  # global_step to profile (0-indexed loop counter)
 # Live per-block GPU memory printing from step 0 (prints "[mem] <block> delta/cur/peak/reserved").
 # Use to locate an OOM/crash: the LAST "[mem]" line before the traceback is the offending block.
 # Also adds a MEMORY BREAKDOWN table to the profile_timing report (net MB retained per method).
 # REQUIRES optimization=False to be meaningful (torch.compile breaks per-block attribution).
 # Turn OFF for real training (per-block cuda.synchronize adds overhead).
-profile_memory_live = False
+profile_memory_live = False # CHANGE # NOT COMPATIBLE WITH REDUCE-OVERHEAD
 
 # ---------- performance optimizations ----------
 # Set optimization=True to enable all four optimizations at once:
@@ -491,8 +542,31 @@ optimization = False
 # stable and you've found your max batch, try "reduce-overhead" (CUDA graphs) for speed
 # — but expect to LOWER batch_size, since the graph memory pool adds pressure and the
 # dynamic temporal-chunk shapes (1-frame vs 4-frame) force multiple captured graphs.
-optimization_compile_mode = "default"  # NO CUDA graphs: required because forward calls the compiled module many times per step (encode view-loop + decode per-view + per-frame loop); reduce-overhead's static CUDA-graph pool gets overwritten across those segments and crashes backward with "accessing tensor output of CUDAGraphs that has been overwritten".
+optimization_compile_mode = "default"  # "default": Triton op-fusion, no CUDA graphs. Compatible with dynamic temporal loops (range(T'), range(iter_)) and gradient checkpointing. "reduce-overhead" (CUDA graphs) hangs with temporal_compression loops — dynamic shapes cause infinite sympy pow_by_natural loops in Dynamo — and also crashes backward with "accessing tensor output of CUDAGraphs that has been overwritten".
 # None -> torch auto-detects (legacy). True -> one shape-flexible graph: avoids the
 # per-chunk recompiles from the temporal feat_cache loop and stays compatible with
 # gradient checkpointing (no CUDA graphs in "default" mode). Try with mode="default".
 optimization_compile_dynamic = True
+
+# ── FAST_MODE overrides (applied last so they win over everything above) ──────
+if FAST_MODE:
+    # CUDA-graph compile ("reduce-overhead") + decoder checkpoint OFF.
+    # WHY reduce-overhead saves memory (not obvious): CUDA graphs capture forward+backward
+    # as one static sequence. Activations are static buffers accessed in-place — the graph
+    # doesn't need to keep all 4 views × 9 frames simultaneously. Memory ≈ one view's
+    # activations (~8 GB) instead of all four (~34 GB). This is how batch=64 fit in 46 GB.
+    #
+    # Two things broke it since the May benchmark:
+    #   1. ResidualBlock.forward has 11 distinct channel shapes in the current decoder but
+    #      the dynamo recompile_limit defaults to 8 → shapes 9-11 fall back to eager mode
+    #      → those sub-graphs don't get CUDA graph coverage → activations accumulate → OOM.
+    #      Fix: raise recompile_limit to 32.
+    #   2. dynamic=True + CUDA graphs → pow_by_natural sympy loop in GroupNorm ops.
+    #      Fix: use dynamic=False (fixed batch size, no symbolic shapes needed).
+    model["temporal_compression"] = False
+    model["crossview_grad_checkpoint_decoder"] = False  # compile reduces per-frame activation size enough
+    optimization = True
+    optimization_compile_mode = "default"           # Triton op-fusion; reduce-overhead (CUDA graphs) OOMs
+                                                    # at batch>=16 even during capture (peak=~43GB, no headroom)
+    optimization_compile_dynamic = True             # flexible graph across varied decoder upsampling shapes
+    profile_memory_live = False                     # profiling overhead not useful during fast training

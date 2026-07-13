@@ -38,6 +38,7 @@ class NLayerDiscriminator3D(nn.Module):
         norm_layer=nn.BatchNorm3d,
         conv_cls="conv3d",
         dropout=0.30,
+        gradient_checkpointing=False,
     ):
         """
         Construct a 3D PatchGAN discriminator
@@ -92,9 +93,11 @@ class NLayerDiscriminator3D(nn.Module):
             nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw),
         ]
         self.main = nn.Sequential(*sequence)
+        self.gradient_checkpointing = gradient_checkpointing
 
     def forward(self, x):
-        """Standard forward."""
+        if self.gradient_checkpointing and self.training:
+            return torch.utils.checkpoint.checkpoint(self.main, x, use_reentrant=False)
         return self.main(x)
 
 
@@ -129,6 +132,7 @@ class NLayerDiscriminatorMultiview4D(nn.Module):
         norm_layer=nn.BatchNorm3d,
         dropout=0.30,
         view_embed_dim=8,
+        gradient_checkpointing=False,
     ):
         super().__init__()
         self.num_views = int(num_views)
@@ -189,6 +193,7 @@ class NLayerDiscriminatorMultiview4D(nn.Module):
             nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw),
         ]
         self.tail = nn.Sequential(*sequence)
+        self.gradient_checkpointing = gradient_checkpointing
 
     def forward(self, x):
         if x.dim() != 6:
@@ -219,6 +224,8 @@ class NLayerDiscriminatorMultiview4D(nn.Module):
         y = y.squeeze(2)
         _, c3, h1, w1 = y.shape
         y = y.view(b, t, c3, h1, w1).permute(0, 2, 1, 3, 4).contiguous()
+        if self.gradient_checkpointing and self.training:
+            return torch.utils.checkpoint.checkpoint(self.tail, y, use_reentrant=False)
         return self.tail(y)
 
 

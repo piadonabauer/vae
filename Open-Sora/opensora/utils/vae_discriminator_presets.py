@@ -18,8 +18,11 @@ def resolve_vae_discriminator_bundle(choice: Choice) -> Dict[str, Any]:
 
     choice:
       - ``None`` or ``\"None\"`` (case-insensitive): no discriminator.
-      - ``\"Train\"``: 3D PatchGAN from scratch (``N_Layer_discriminator_3D``).
-      - ``\"TrainMultiview4D\"`` / ``\"TrainMv4d\"``: joint two-view 3D disc with view-axis merge (``N_Layer_discriminator_multiview_4d``); use ``disc_multiview_mode=\"joint_4d\"``.
+      - ``\"Train\"``: 3D PatchGAN from scratch (ndf=64, n_layers=5, ~18M params).
+      - ``\"TrainLight\"``: lightweight 3D PatchGAN (ndf=32, n_layers=3, ~4M params, grad-ckpt). ~8x cheaper than Train.
+      - ``\"TrainMultiview4D\"`` / ``\"TrainMv4d\"``: joint multiview 3D disc with view-axis merge (ndf=64, n_layers=5). num_views auto-detected.
+      - ``\"TrainLight4D\"``: lightweight multiview 4D disc (ndf=32, n_layers=3, grad-ckpt). Best default for limited VRAM.
+      - ``\"TrainPerFrame\"``: cheapest — 2D PatchGAN applied per-frame independently (no temporal signal).
       - ``\"TrainMultiviewStack\"``: 6-channel stacked-view 3D PatchGAN; use ``disc_multiview_mode=\"stack_channels\"``.
       - ``\"StyleGAN2\"``: pretrained NVlabs StyleGAN2-ADA 2D disc, per-frame.
       - ``\"PatchGAN\"``: LDM-style ``NLayerDiscriminator`` with **random init**, per-frame (HF VAE repos omit disc weights).
@@ -79,17 +82,95 @@ def resolve_vae_discriminator_bundle(choice: Choice) -> Dict[str, Any]:
 
     if sn in ("train_multiview_4d", "train_mv4d", "trainmultiview4d"):
         # Joint multi-view 3D disc: sees both views + per-view embeddings (use with disc_multiview_mode=joint_4d).
+        # num_views is intentionally omitted here; train.py probes the dataset at startup and injects the
+        # correct value automatically, so the disc works with any number of views.
         return dict(
             discriminator=dict(
                 type="N_Layer_discriminator_multiview_4d",
                 from_pretrained=None,
-                num_views=2,
                 rgb_channels=3,
                 n_layers=5,
                 ndf=64,
                 view_embed_dim=8,
             ),
             disc_per_frame_2d=False,
+            disc_lr_scheduler=dict(warmup_steps=0),
+            gen_loss_config=dict(gen_start=3000, disc_weight=0.05),
+            disc_loss_config=dict(disc_start=3000, disc_loss_type="hinge", disc_factor=0.05),
+            optim_discriminator=dict(
+                cls="AdamW",
+                lr=1e-4,
+                eps=1e-8,
+                weight_decay=0.0,
+                betas=(0.9, 0.98),
+            ),
+        )
+
+    if sn in ("train_light", "trainlight"):
+        # Lightweight 3D PatchGAN: ndf=32, n_layers=3 + gradient checkpointing.
+        # ~4M params, ~8x cheaper activations than Train.  Good first choice when Train OOMs.
+        return dict(
+            discriminator=dict(
+                type="N_Layer_discriminator_3D",
+                from_pretrained=None,
+                input_nc=3,
+                ndf=32,
+                n_layers=3,
+                conv_cls="conv3d",
+                gradient_checkpointing=True,
+            ),
+            disc_per_frame_2d=False,
+            disc_lr_scheduler=dict(warmup_steps=0),
+            gen_loss_config=dict(gen_start=3000, disc_weight=0.05),
+            disc_loss_config=dict(disc_start=3000, disc_loss_type="hinge", disc_factor=0.05),
+            optim_discriminator=dict(
+                cls="AdamW",
+                lr=1e-4,
+                eps=1e-8,
+                weight_decay=0.0,
+                betas=(0.9, 0.98),
+            ),
+        )
+
+    if sn in ("train_light_4d", "trainlight4d", "train_light_mv4d"):
+        # Lightweight multiview 4D disc: ndf=32, n_layers=3 + gradient checkpointing.
+        # num_views auto-detected by train.py from the dataset.
+        return dict(
+            discriminator=dict(
+                type="N_Layer_discriminator_multiview_4d",
+                from_pretrained=None,
+                rgb_channels=3,
+                n_layers=3,
+                ndf=32,
+                view_embed_dim=8,
+                gradient_checkpointing=True,
+            ),
+            disc_per_frame_2d=False,
+            disc_lr_scheduler=dict(warmup_steps=0),
+            gen_loss_config=dict(gen_start=3000, disc_weight=0.05),
+            disc_loss_config=dict(disc_start=3000, disc_loss_type="hinge", disc_factor=0.05),
+            optim_discriminator=dict(
+                cls="AdamW",
+                lr=1e-4,
+                eps=1e-8,
+                weight_decay=0.0,
+                betas=(0.9, 0.98),
+            ),
+        )
+
+    if sn in ("train_per_frame", "trainperframe", "per_frame"):
+        # Cheapest option: 2D PatchGAN applied per-frame independently (no temporal signal).
+        # Uses the LDM-style head (ndf=64, n_layers=3, 2D convs).  Very low memory cost.
+        return dict(
+            discriminator=dict(
+                type="pretrained_sd_vae_nlayer_discriminator",
+                random_init_only=True,
+                input_nc=3,
+                ndf=64,
+                n_layers=3,
+                freeze_layers=0,
+            ),
+            disc_per_frame_2d=True,
             disc_lr_scheduler=dict(warmup_steps=0),
             gen_loss_config=dict(gen_start=3000, disc_weight=0.05),
             disc_loss_config=dict(disc_start=3000, disc_loss_type="hinge", disc_factor=0.05),
@@ -174,7 +255,8 @@ def resolve_vae_discriminator_bundle(choice: Choice) -> Dict[str, Any]:
 
     raise ValueError(
         f"Invalid discriminator preset {choice!r}. "
-        "Use None, 'Train', 'TrainMultiview4D', 'TrainMultiviewStack', 'StyleGAN2', 'PatchGAN', "
+        "Use None, 'Train', 'TrainLight', 'TrainMultiview4D', 'TrainLight4D', "
+        "'TrainPerFrame', 'TrainMultiviewStack', 'StyleGAN2', 'PatchGAN', "
         "or a full discriminator dict."
     )
 

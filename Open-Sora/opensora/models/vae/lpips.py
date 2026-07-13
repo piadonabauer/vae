@@ -9,6 +9,7 @@ import torch.nn as nn
 from torchvision import models
 from tqdm import tqdm
 
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 from opensora.acceleration.checkpoint import checkpoint
 
 URL_MAP = {"vgg_lpips": "https://heibox.uni-heidelberg.de/f/607503859c864bc1b30b/?dl=1"}
@@ -93,6 +94,57 @@ class LPIPS(nn.Module):
             val += res[l]
         return val
 
+    def forward_memory_efficient(self, input, target):
+        """
+        Memory-efficient variant that processes one VGG slice at a time instead of
+        computing all 5 feature maps upfront and holding them simultaneously.
+
+        The original forward_old materialises ~33 GB of VGG tensors for N=1152
+        images (batch=32 × 4 views × 9 frames) at 128px in eager mode:
+          - outs0 + outs1 feature maps: ~9 GB
+          - VGG backward intermediates (conv outputs + MaxPool indices): ~10 GB
+          - feats0, feats1, diffs (5 layers × 3 dicts): ~14 GB
+        This variant keeps at most ONE slice's tensors alive at a time, cutting
+        peak LPIPS memory from ~33 GB to ~3-5 GB (largest single slice = relu1_2).
+
+        Works correctly under both eager and torch.compile.
+        """
+        in0 = self.scaling_layer(input)   # no grad (input = original video)
+        in1 = self.scaling_layer(target)  # with grad (target = reconstruction)
+
+        slices = [
+            self.net.slice1, self.net.slice2, self.net.slice3,
+            self.net.slice4, self.net.slice5,
+        ]
+        lins = self.lins
+
+        val = None
+        h0, h1 = in0, in1
+        for kk, (slice_net, lin) in enumerate(zip(slices, lins)):
+            # h0 has requires_grad=False; run without autograd overhead.
+            with torch.no_grad():
+                h0 = slice_net(h0)
+
+            # h1 has requires_grad=True; use checkpoint so that the VGG
+            # intermediate activations within this slice are freed during
+            # forward and recomputed on demand during backward.  This keeps
+            # at most one slice's intermediates in memory at a time.
+            h1 = torch_checkpoint(slice_net, h1, use_reentrant=False)
+
+            # Compute this slice's perceptual contribution and accumulate.
+            with torch.no_grad():
+                f0 = normalize_tensor(h0)
+            f1 = normalize_tensor(h1)
+            diff = (f0 - f1) ** 2
+            contrib = spatial_average(lin.model(diff), keepdim=True)
+            val = contrib if val is None else val + contrib
+
+            # Detach h0 — its grad history is not needed for the next slice.
+            h0 = h0.detach()
+            # h1 keeps its grad_fn so gradients flow back to the reconstruction.
+
+        return val
+
     def get_layer_loss(self, input, target, i):
         input, target = getattr(self.net, f"slice{i+1}")(input), getattr(self.net, f"slice{i+1}")(target)
         feats0, feats1 = normalize_tensor(input), normalize_tensor(target)
@@ -102,11 +154,7 @@ class LPIPS(nn.Module):
 
     def forward(self, input, target):
         input, target = (self.scaling_layer(input), self.scaling_layer(target))
-
-        # Use the old forward method without checkpointing to avoid issues with
-        # checkpoint recomputation not properly handling the 'i' argument
-        # Since LPIPS is frozen (requires_grad=False), checkpointing doesn't save much memory anyway
-        return self.forward_old(input, target)
+        return self.forward_memory_efficient(input, target)
 
 
 class ScalingLayer(nn.Module):

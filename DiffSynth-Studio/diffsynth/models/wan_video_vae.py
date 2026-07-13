@@ -1872,6 +1872,59 @@ class LoRAConv3d(nn.Module):
         return base_out + lora_out
 
 
+class StridedLoRAConv3d(nn.Module):
+    """
+    LoRA adapter for *strided* 3D convolutions (e.g. temporal downsampling ``time_conv`` in
+    ``Resample(mode='downsample3d')`` with ``stride=(2,1,1)``).
+
+    Standard ``LoRAConv3d`` uses a stride-1 1×1×1 parallel path, which cannot be added to the
+    strided base output (shape mismatch in T). This class fixes that with a three-step path:
+
+        x  --[1×1×1 down: C→rank]-->  --[3×1×1 stride=(2,1,1): rank→rank]-->  --[1×1×1 up: rank→C_out]--> lora_out
+
+    The strided middle conv matches the base conv's temporal output size so
+    ``base_out + lora_out`` is valid. ``lora_up`` is zero-initialized, so the adapter
+    starts as an identity (zero delta).
+    """
+
+    def __init__(self, base_conv: "CausalConv3d | nn.Conv3d", rank: int = 16, alpha: float = 1.0):
+        super().__init__()
+        assert isinstance(base_conv, (CausalConv3d, nn.Conv3d))
+        self.base_conv = base_conv
+        for p in self.base_conv.parameters():
+            p.requires_grad = False
+
+        in_channels = base_conv.in_channels
+        out_channels = base_conv.out_channels
+        stride = tuple(base_conv.stride)
+        self.rank = rank
+        self.alpha = alpha
+
+        # Channel reduction (no spatial/temporal stride)
+        self.lora_down = nn.Conv3d(in_channels, rank, kernel_size=1, bias=False)
+        # Temporal stride matching the base conv (kernel 3×1×1, same stride, no padding — matches
+        # the causal-padded input the base conv sees when called from Resample.forward)
+        t_stride = stride[0]
+        self.lora_mid = nn.Conv3d(rank, rank, kernel_size=(3, 1, 1), stride=(t_stride, 1, 1), bias=False)
+        # Channel expansion
+        self.lora_up = nn.Conv3d(rank, out_channels, kernel_size=1, bias=False)
+
+        nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.lora_mid.weight, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_up.weight)
+
+    def forward(self, x, *args, **kwargs):
+        # Base conv (CausalConv3d handles internal causal padding and optional cache_x).
+        base_out = self.base_conv(x, *args, **kwargs) if isinstance(
+            self.base_conv, CausalConv3d
+        ) else self.base_conv(x)
+        # LoRA delta: down → strided mid → up.  Input x already has the cached frame
+        # prepended externally (Resample.forward does the cat before calling time_conv),
+        # so lora_mid sees the same T as the base conv and produces the same output T.
+        lora_out = self.lora_up(self.lora_mid(self.lora_down(x))) * self.alpha
+        return base_out + lora_out
+
+
 class LoRAConv2d(nn.Module):
     """
     LoRA adapter for 2D convolutions (e.g. spatial downsample in ``Resample``).
@@ -2031,6 +2084,64 @@ class FusionResidualBlock3d(nn.Module):
         return x + h
 
 
+class LatentTemporalAttention(nn.Module):
+    """
+    Self-attention over the T' latent frames before decoding
+    (``use_latent_temporal_attention=True``).
+
+    The encoder already has cross-view attention (``ViewAttention``) so each view can
+    attend to every other view before the latent is formed.  The *decoder*, however,
+    processes each latent frame completely independently — frame 0 never influences how
+    frame 2 is decoded, except through the causal ``feat_cache``.  This module closes
+    that gap: before the decode loop, every latent frame attends to every other frame.
+
+    Reshape: [B, C, T', H', W'] → [B·H'·W', T', C] → pre-norm MHA over T' → add residual.
+    Each spatial position attends independently (no cross-pixel mixing), so the cost
+    scales with T'² × (H'·W') — negligible at typical latent sizes (T'=3, H'=W'=16).
+
+    Zero-init on the output projection → exact identity at initialisation.
+    """
+
+    def __init__(self, z_dim: int, num_heads: int = 4):
+        super().__init__()
+        self.norm = nn.LayerNorm(z_dim)
+        self.attn = nn.MultiheadAttention(z_dim, num_heads, batch_first=True)
+        nn.init.zeros_(self.attn.out_proj.weight)
+        nn.init.zeros_(self.attn.out_proj.bias)
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        B, C, T, H, W = z.shape
+        z_hwt = z.permute(0, 3, 4, 2, 1).reshape(B * H * W, T, C)
+        attn_out, _ = self.attn(self.norm(z_hwt), self.norm(z_hwt), self.norm(z_hwt))
+        z_hwt = z_hwt + attn_out
+        return z_hwt.reshape(B, H, W, T, C).permute(0, 4, 3, 1, 2).contiguous()
+
+
+class TemporalRefinementHead(nn.Module):
+    """
+    Lightweight post-decode temporal smoother (``use_temporal_refinement=True``).
+
+    Runs as a zero-init residual over the *full* reconstructed video after the
+    chunked ``_decode_body`` loop, so it has non-causal access to the whole
+    temporal axis and can smooth over chunk-boundary artifacts.
+
+    Architecture: ``Conv3d(C, hidden, (k,1,1)) → SiLU → Conv3d(hidden, C, (k,1,1))``
+    with a skip connection and zero-init on the final conv, ensuring identity at init.
+    """
+
+    def __init__(self, channels: int = 3, hidden: int = 32, kernel_t: int = 5):
+        super().__init__()
+        pad_t = kernel_t // 2
+        self.conv1 = nn.Conv3d(channels, hidden, (kernel_t, 1, 1), padding=(pad_t, 0, 0))
+        self.act = nn.SiLU()
+        self.conv2 = nn.Conv3d(hidden, channels, (kernel_t, 1, 1), padding=(pad_t, 0, 0))
+        nn.init.zeros_(self.conv2.weight)
+        nn.init.zeros_(self.conv2.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.conv2(self.act(self.conv1(x)))
+
+
 class AttentionMultiViewVideoVan(nn.Module):
     """
     Two-view 3D VAE with encoder-side cross-view fusion and optional LoRA.
@@ -2065,6 +2176,16 @@ class AttentionMultiViewVideoVan(nn.Module):
         grad_checkpoint_encoder: bool | None = None,
         grad_checkpoint_decoder: bool | None = None,
         view_attn_num_heads: int | None = None,
+        use_strided_temporal_lora: bool = False,
+        use_temporal_latent_pos_embed: bool = False,
+        max_temporal_latent: int = 64,
+        use_temporal_refinement: bool = False,
+        temporal_refinement_hidden: int = 32,
+        temporal_refinement_kernel: int = 5,
+        use_latent_temporal_attention: bool = False,
+        latent_temporal_attn_heads: int = 4,
+        use_latent_context_warmup: bool = False,
+        use_decoder_frame_feedback: bool = False,
     ):
         super().__init__()
         # Back-compat: old name "joint_attention" is the same as "self_attention".
@@ -2102,6 +2223,12 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.use_lora_after = use_lora_after
         self.use_viewwise_decoder_lora = use_viewwise_decoder_lora
         self.num_views = int(num_views)
+        self.use_strided_temporal_lora = use_strided_temporal_lora
+        self.use_temporal_latent_pos_embed = use_temporal_latent_pos_embed
+        self.use_temporal_refinement = use_temporal_refinement
+        self.use_latent_temporal_attention = use_latent_temporal_attention
+        self.use_latent_context_warmup = use_latent_context_warmup
+        self.use_decoder_frame_feedback = use_decoder_frame_feedback
         self._encode_call_count = 0
         self._encode_logged = False  # used instead of _encode_call_count to avoid torch.compile recompilation
 
@@ -2228,6 +2355,64 @@ class AttentionMultiViewVideoVan(nn.Module):
             self.view_lora_down = None
             self.view_lora_up = None
 
+        # --- Idea 2: temporal latent position embeddings ---
+        # Learnable [max_T', z_dim] table added to z (frame-by-frame) before decoding.
+        # Zero-init → identity at init; helps the decoder distinguish temporal position.
+        if self.use_temporal_latent_pos_embed:
+            self.temporal_pos_embed = nn.Parameter(
+                torch.zeros(max_temporal_latent, z_dim)
+            )
+        else:
+            self.temporal_pos_embed = None
+
+        # --- Idea 3: post-decode temporal refinement head ---
+        # Lightweight non-causal residual conv over the full reconstructed video.
+        # Zero-init → identity at init; smooths chunk-boundary artifacts.
+        if self.use_temporal_refinement:
+            self.temporal_refine = TemporalRefinementHead(
+                channels=3,
+                hidden=temporal_refinement_hidden,
+                kernel_t=temporal_refinement_kernel,
+            )
+        else:
+            self.temporal_refine = None
+
+        # --- Idea 4: latent temporal attention ---
+        # Self-attention over T' latent frames before decode; mirrors ViewAttention in encoder.
+        # Zero-init output projection → identity at init.
+        if self.use_latent_temporal_attention:
+            self.latent_temporal_attn = LatentTemporalAttention(
+                z_dim=z_dim, num_heads=latent_temporal_attn_heads
+            )
+        else:
+            self.latent_temporal_attn = None
+
+        # --- Idea 5: latent context warmup ---
+        # Predict a synthetic "past frame" from the temporal mean of the latent.
+        # Decoded first to pre-fill all feat_cache slots before the real frames run.
+        # Two-layer residual: CausalConv3d(z_dim→z_dim) + SiLU + CausalConv3d zero-init.
+        if self.use_latent_context_warmup:
+            _wc2 = CausalConv3d(z_dim, z_dim, 1)
+            nn.init.zeros_(_wc2.weight)
+            nn.init.zeros_(_wc2.bias)
+            self.warmup_proj = nn.Sequential(
+                CausalConv3d(z_dim, z_dim, 1),
+                nn.SiLU(),
+                _wc2,
+            )
+        else:
+            self.warmup_proj = None
+
+        # --- Idea 6: decoder frame feedback ---
+        # After decoding latent frame i → RGB, pool it back to latent resolution and
+        # add as a learned residual to x_chunk[i+1].  Zero-init → no effect at init.
+        if self.use_decoder_frame_feedback:
+            self.feedback_proj = nn.Conv3d(3, z_dim, kernel_size=1, bias=True)
+            nn.init.zeros_(self.feedback_proj.weight)
+            nn.init.zeros_(self.feedback_proj.bias)
+        else:
+            self.feedback_proj = None
+
         # Optional: wrap middle + decoder with LoRA
         if self.use_lora:
             self._enable_lora()
@@ -2238,13 +2423,16 @@ class AttentionMultiViewVideoVan(nn.Module):
             """Wrap CausalConv3d / Conv3d / Conv2d in the subtree (incl. Resample spatial convs)."""
             for name, child in list(module.named_children()):
                 if isinstance(child, (CausalConv3d, nn.Conv3d)):
-                    # LoRAConv3d adds a stride-1 1x1x1 parallel path, which only matches the base
-                    # conv's output shape when the base preserves spatial/temporal size. Temporally
-                    # (or spatially) strided 3D convs -- e.g. the Resample downsample3d time_conv with
-                    # stride=(2,1,1) -- downsample T, so base_out and lora_out shapes differ and
-                    # "base_out + lora_out" crashes. Leave those frozen (no LoRA); LoRAConv2d already
-                    # handles strided 2D spatial downsamples correctly.
                     if any(s != 1 for s in child.stride):
+                        # Strided 3D conv (e.g. encoder downsample3d time_conv stride=(2,1,1)).
+                        # use_strided_temporal_lora=True wraps these with StridedLoRAConv3d which
+                        # uses a matching-stride middle conv so shapes align; False = leave frozen.
+                        if self.use_strided_temporal_lora:
+                            setattr(
+                                module,
+                                name,
+                                StridedLoRAConv3d(child, rank=self.lora_rank, alpha=1.0),
+                            )
                         continue
                     setattr(
                         module,
@@ -2521,6 +2709,15 @@ class AttentionMultiViewVideoVan(nn.Module):
         eps = torch.randn_like(std)
         return eps * std + mu
 
+    def _decode_one_frame(self, x_chunk):
+        """Single-frame decoder forward — used as the checkpointed unit for temporal_compression=False.
+
+        Defined as a bound method (not a closure) so torch.utils.checkpoint can wrap a plain
+        method reference without capturing local free variables (required for torch.compile
+        compatibility, same reasoning as _encode_one_view).
+        """
+        return self.decoder(x_chunk)
+
     def _decode_body(self, z_cond):
         # conv2 on the full latent, then per-latent-frame decode. With
         # temporal_compression a persistent feat_cache makes the temporal
@@ -2530,15 +2727,63 @@ class AttentionMultiViewVideoVan(nn.Module):
         x = self.conv2(z_cond)
         iter_ = x.shape[2]
         feat_map = [None] * count_conv3d(self.decoder) if self.temporal_compression else None
+
+        # --- Idea 5: latent context warmup ---
+        # Before the real decode loop, predict a "synthetic past frame" from the temporal
+        # mean of x and run it through the decoder to pre-fill all feat_cache slots.
+        # Normally frame 0 decodes with a cold (all-None) cache; this gives it warm context.
+        # The warmup output is discarded — only the mutated feat_map matters.
+        if self.use_latent_context_warmup and self.temporal_compression and feat_map is not None:
+            with ProfileTimer.block("decode.warmup"):
+                x_mean = x.mean(dim=2, keepdim=True)        # temporal mean [B, C, 1, H', W']
+                x_warmup = self.warmup_proj(x_mean)          # learned synthetic past frame
+                warm_idx = [0]
+                _ = self.decoder(x_warmup, feat_cache=feat_map, feat_idx=warm_idx)
+
         out = None
+        prev_feedback = None
         for i in range(iter_):
             x_chunk = x[:, :, i : i + 1, :, :]
+
+            # --- Idea 6: decoder frame feedback ---
+            # Add a residual from the previous frame's decoded output (pooled back to
+            # latent resolution) so each frame's decode is conditioned on the actual
+            # pixels produced so far — explicit autoregressive signal beyond the feat_cache.
+            if self.use_decoder_frame_feedback and prev_feedback is not None:
+                x_chunk = x_chunk + prev_feedback
+
             if feat_map is not None:
+                # temporal_compression=True: feat_cache is mutated across frames — cannot
+                # per-frame checkpoint safely (checkpoint doesn't snapshot mutable args).
+                # The outer torch_checkpoint(_decode_body) in decode() handles this case.
                 conv_idx = [0]
                 o = self.decoder(x_chunk, feat_cache=feat_map, feat_idx=conv_idx)
             else:
-                o = self.decoder(x_chunk)
+                # temporal_compression=False: each frame is independent (no mutable state).
+                # Checkpoint each frame individually so peak memory = one frame's decoder
+                # activations (~8 GB at batch=32/128px) instead of all T' frames at once
+                # (~44 GB). The outer _decode_body checkpoint is a no-op on this path
+                # (decode() does not wrap _decode_body in checkpoint when temporal_compression
+                # is False — see decode() below).
+                if self.grad_checkpoint_decoder and self.training:
+                    o = torch_checkpoint(self._decode_one_frame, x_chunk, use_reentrant=False)
+                else:
+                    o = self.decoder(x_chunk)
+
+            if self.use_decoder_frame_feedback and self.feedback_proj is not None:
+                # Pool decoded output to latent spatial resolution, project 3→z_dim.
+                H_lat, W_lat = x_chunk.shape[3], x_chunk.shape[4]
+                o_pooled = F.adaptive_avg_pool3d(o, (1, H_lat, W_lat))   # [B, 3, 1, H', W']
+                prev_feedback = self.feedback_proj(o_pooled)              # [B, z_dim, 1, H', W']
+
             out = o if out is None else torch.cat([out, o], 2)
+
+        # --- Idea 3: temporal refinement head ---
+        # Non-causal residual conv over the full video; smooths chunk-boundary artifacts.
+        if self.use_temporal_refinement and self.temporal_refine is not None:
+            with ProfileTimer.block("decode.temporal_refine"):
+                out = self.temporal_refine(out)
+
         return out
 
     def decode(self, z, scale, view_idx: int = 0):
@@ -2560,6 +2805,22 @@ class AttentionMultiViewVideoVan(nn.Module):
                 emb = self.view_embed(view_idx_tensor).view(1, self.z_dim, 1, 1, 1)
                 z = z + emb
 
+        # --- Idea 4: latent temporal attention ---
+        # Self-attention over T' latent frames: each frame attends to all others before
+        # being decoded, mirroring how ViewAttention lets views attend to each other.
+        if self.use_latent_temporal_attention and self.latent_temporal_attn is not None:
+            with ProfileTimer.block("decode.latent_temporal_attn"):
+                z = self.latent_temporal_attn(z)
+
+        # --- Idea 2: temporal latent position embeddings ---
+        # Add learnable per-frame offset to z so the decoder knows where each latent
+        # frame sits in the sequence (e.g. first frame vs. interior vs. last frame).
+        if self.use_temporal_latent_pos_embed and self.temporal_pos_embed is not None:
+            T_prime = z.shape[2]
+            pos_emb = self.temporal_pos_embed[:T_prime]          # [T', z_dim]
+            pos_emb = pos_emb.permute(1, 0).reshape(1, self.z_dim, T_prime, 1, 1)
+            z = z + pos_emb.to(dtype=z.dtype, device=z.device)
+
         if isinstance(scale[0], torch.Tensor):
             scale = [s.to(dtype=z.dtype, device=z.device) for s in scale]
             z = z / scale[1].view(1, self.z_dim, 1, 1, 1) + scale[0].view(
@@ -2570,9 +2831,15 @@ class AttentionMultiViewVideoVan(nn.Module):
             z = z / scale[1] + scale[0]
 
         with ProfileTimer.block("decode.temporal_loop"):
-            if self.grad_checkpoint_decoder and self.training:
+            if self.grad_checkpoint_decoder and self.training and self.temporal_compression:
+                # temporal_compression=True: feat_cache is stateful across frames — must
+                # checkpoint the whole _decode_body as one unit (inner per-frame
+                # checkpointing would break mutable feat_cache semantics).
                 out = torch_checkpoint(self._decode_body, z, use_reentrant=False)
             else:
+                # temporal_compression=False: per-frame checkpointing is handled inside
+                # _decode_body via _decode_one_frame (no outer checkpoint needed/wanted —
+                # the outer would double the recompute cost for no memory benefit).
                 out = self._decode_body(z)
         return out
 
