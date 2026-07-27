@@ -1421,6 +1421,22 @@ def main():
         cfg.dataset = dataset_cfg
         cfg.val_dataset = val_dataset_cfg
 
+    # Subsample T inside the dataset (before DataLoader collate). Bucket target is
+    # usually 9 frames while many .pt files still store T=13; mixing them in one
+    # batch crashes workers with "Trying to resize storage that is not resizable".
+    _target_frames = cfg.get("train_target_frames", None)
+    if _target_frames is not None:
+        for _ds_key in ("dataset", "val_dataset"):
+            _ds = cfg.get(_ds_key, None)
+            if isinstance(_ds, dict) and _ds.get("target_frames", None) is None:
+                _ds = dict(_ds)
+                _ds["target_frames"] = int(_target_frames)
+                cfg[_ds_key] = _ds
+        print(
+            f"[wan_multiview] dataset target_frames={int(_target_frames)} "
+            "(normalize T before collate)"
+        )
+
     apply_pytorch_determinism(cfg)
 
     # == get dtype & device ==
@@ -1981,6 +1997,32 @@ def main():
 
         logger.info("Loaded checkpoint %s at epoch %s step %s", cfg.load, start_epoch, start_step)
 
+        # Optionally re-randomize view-fusion attention after loading a TC checkpoint,
+        # so the temporal backbone is kept but cross-view attention starts fresh.
+        if cfg.model.get("reinit_view_attention_after_load", False):
+            core = model.module if hasattr(model, "module") else model
+            cv = getattr(core, "crossview_vae", None)
+            n_reset = 0
+            for attr in ("cross_attn", "joint_attn"):
+                attn = getattr(cv, attr, None) if cv is not None else None
+                if attn is None:
+                    continue
+                for name, mod in attn.named_modules():
+                    if hasattr(mod, "reset_parameters"):
+                        mod.reset_parameters()
+                        n_reset += 1
+                # Keep residual identity at init for ViewAttention.proj if present
+                if hasattr(attn, "proj"):
+                    import torch.nn as nn
+                    nn.init.zeros_(attn.proj.weight)
+                    if getattr(attn.proj, "bias", None) is not None:
+                        nn.init.zeros_(attn.proj.bias)
+            logger.info(
+                "reinit_view_attention_after_load=True: reset fusion attention modules "
+                "(%d submodules with reset_parameters)",
+                n_reset,
+            )
+
         if cfg.get("lr", None) is not None:
             set_lr(optimizer, lr_scheduler, cfg.lr, cfg.get("initial_lr", None))
 
@@ -2095,12 +2137,24 @@ def main():
             min_w,
             wandb_name,
         )
-        wandb.init(
+        wandb_init_kwargs = dict(
             project=cfg.get("wandb_project", "vae"),
             name=wandb_name,
             config=cfg.to_dict(),
             dir=exp_dir,
         )
+        wandb_group = cfg.get("wandb_group", None) or os.environ.get("WANDB_RUN_GROUP")
+        if wandb_group:
+            wandb_init_kwargs["group"] = wandb_group
+        run_id_path = os.path.join(exp_dir, "wandb_run_id.txt")
+        if cfg.get("load", None) is not None and os.path.isfile(run_id_path):
+            with open(run_id_path, encoding="utf-8") as f:
+                prev_run_id = f.read().strip()
+            if prev_run_id:
+                wandb_init_kwargs["id"] = prev_run_id
+                wandb_init_kwargs["resume"] = "allow"
+                logger.info("Resuming wandb run id=%s", prev_run_id)
+        wandb.init(**wandb_init_kwargs)
         # Register samples_seen as the primary x-axis so all charts are comparable
         # across runs with different batch sizes (e.g. bs=1 disc runs vs bs=16 idea runs).
         wandb.define_metric("samples_seen")
@@ -2166,10 +2220,10 @@ def main():
 
     dist.barrier()
     accumulation_steps = int(cfg.get("accumulation_steps", 1))
-    # Samples seen per optimizer update = micro-batch × accumulation × num_processes.
-    # Used as the canonical x-axis in WandB so runs with different batch sizes are
-    # comparable (e.g. bs=1 for disc runs vs bs=16 for idea runs).
-    effective_batch_size = cfg.get("batch_size", 1) * accumulation_steps * accelerator.num_processes
+    # Samples seen per optimizer update = micro-batch × accumulation × world_size.
+    # Used as the canonical x-axis in WandB so runs with different batch sizes are comparable.
+    num_processes = dist.get_world_size() if dist.is_initialized() else 1
+    effective_batch_size = cfg.get("batch_size", 1) * accumulation_steps * num_processes
     actual_update_step = 0
     debug_stats_start_step = int(cfg.get("debug_stats_start_step", 0))
     debug_stats_every = max(1, int(cfg.get("debug_stats_every", 500)))

@@ -74,6 +74,12 @@ def setup_device() -> tuple[torch.device, DistCoordinator]:
             os.environ["RANK"] = "0"
             os.environ["WORLD_SIZE"] = "1"
             os.environ["LOCAL_RANK"] = "0"
+        elif os.environ.get("MASTER_PORT") is None:
+            # accelerate launch may set RANK without MASTER_PORT; fill defaults.
+            os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+            os.environ.setdefault("MASTER_PORT", "29500")
+            os.environ.setdefault("WORLD_SIZE", "1")
+            os.environ.setdefault("LOCAL_RANK", os.environ.get("RANK", "0"))
     
     # NOTE: A very large timeout is set to avoid some processes exit early
     if not dist.is_initialized():

@@ -116,6 +116,9 @@ model = dict(
     #   Near-identity at init (update gate bias -4). Only for the causal chunked
     #   path — mutually exclusive with use_noncausal_decode.
     use_learned_cache_update=False,
+    # After --load of a TC ckpt: re-randomize ViewAttention / JointViewAttention
+    # (proj stays zero-init identity; QKV random). Used by fusion-adapt sweeps.
+    reinit_view_attention_after_load=False,
 )
 
 # Idea 5 — Teacher distillation (training-side; no architecture change).
@@ -134,7 +137,7 @@ distill_weight = 1.0
 from opensora.utils.nersemble_bucket import resolve_nersemble_bucket
 
 # Optional: parent of ``64-res`` / ``128-res`` (default: NeRSemble v2 processed root).
-nersemble_processed_base = "/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-frames"
+nersemble_processed_base = "/datasets/lindell-proj/neumayr/nersemble_v2/processed/"
 # "/home/coder/nersemble-data/processed/4view"
 
 # ``DATA_ROOT``, ``train_target_hw``, ``train_target_frames`` are derived from ``bucket_config``:
@@ -160,7 +163,7 @@ train_target_frames = _resolved["train_target_frames"]
 # - some_people: train 17,31,32,33,35,36,37; evaluate on 18,30.
 # - all_people: all sequences from all participants except val participants.
 # - all_people_one_expression: all participants (minus val list); use expression_sequence for exact folder name.
-data_preset = "all_people_one_expression" #"single_sequence" #"all_people_one_expression"
+data_preset = "single_sequence" #"single_sequence" #"all_people_one_expression"
 # For all_people_one_expression: exact sequence folder per person (e.g. EMO-1-shout+laugh)
 all_people_expression_sequence = "EMO-1-shout+laugh"
 
