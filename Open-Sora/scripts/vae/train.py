@@ -705,6 +705,130 @@ def compute_metrics(x_orig, x_rec):
     }
 
 
+def compute_intra_chunk_bleed_metrics(x_orig, x_rec, chunk_size=4):
+    """
+    Diagnose temporal "bleeding" from temporal_compression=True.
+
+    Wan's causal chunked layout: frame 0 is decoded standalone from its own latent
+    frame, then every subsequent group of `chunk_size` real frames shares ONE
+    latent frame. If the decoder can't disentangle that one latent frame into
+    genuinely different output frames, consecutive frames *within* a chunk will
+    look far more similar to each other than the ground truth does at those same
+    positions ("bleeding"), while frames straddling a chunk boundary (each backed
+    by a different latent frame) are less affected.
+
+    This compares mean |frame[t] - frame[t-1]| in the reconstruction vs the
+    ground truth, split into "within-chunk" pairs and "across-chunk-boundary"
+    pairs:
+      - bleed_ratio_within  ~= rec-frame-to-frame-delta / gt-frame-to-frame-delta,
+        restricted to pairs inside the same chunk.
+      - bleed_ratio_across  ~= same, restricted to pairs that cross a chunk
+        boundary (acts as a rough control/baseline).
+    ~1.0 = reconstruction varies frame-to-frame as much as the ground truth
+    (healthy). ~0.0 = the reconstruction is nearly frozen across those frames
+    while the ground truth is not (severe bleeding). If bleed_ratio_within is
+    much lower than bleed_ratio_across, the bleeding is specifically a
+    within-chunk (temporal-compression) effect rather than generic blur.
+    """
+    with torch.no_grad():
+        xo = x_orig.detach().float()
+        xr = x_rec.detach().float()
+        if xo.dim() == 6:  # [B, V, C, T, H, W]
+            b, v, c, t, h, w = xo.shape
+            xo = xo.reshape(b * v, c, t, h, w)
+            xr = xr.reshape(xo.shape[0], c, xr.shape[-3] if xr.dim() == 6 else t, h, w) if xr.dim() != 6 else xr.reshape(b * v, c, t, h, w)
+        t = min(xo.shape[2], xr.shape[2])
+        if t < 2:
+            return {}
+        xo = xo[:, :, :t]
+        xr = xr[:, :, :t]
+
+        gt_diff = (xo[:, :, 1:] - xo[:, :, :-1]).abs().mean(dim=(0, 1, 3, 4))  # [T-1]
+        rec_diff = (xr[:, :, 1:] - xr[:, :, :-1]).abs().mean(dim=(0, 1, 3, 4))  # [T-1]
+
+        def chunk_id(tt):
+            return 0 if tt == 0 else 1 + (tt - 1) // chunk_size
+
+        within_idx = [i for i in range(t - 1) if chunk_id(i) == chunk_id(i + 1)]
+        across_idx = [i for i in range(t - 1) if chunk_id(i) != chunk_id(i + 1)]
+
+        eps = 1e-6
+        out = {}
+        if within_idx:
+            idx = torch.tensor(within_idx, device=xo.device)
+            gt_w = gt_diff[idx].mean()
+            rec_w = rec_diff[idx].mean()
+            out["bleed_ratio_within"] = (rec_w / (gt_w + eps)).item()
+            out["gt_diff_within"] = gt_w.item()
+            out["rec_diff_within"] = rec_w.item()
+        if across_idx:
+            idx = torch.tensor(across_idx, device=xo.device)
+            gt_a = gt_diff[idx].mean()
+            rec_a = rec_diff[idx].mean()
+            out["bleed_ratio_across"] = (rec_a / (gt_a + eps)).item()
+            out["gt_diff_across"] = gt_a.item()
+            out["rec_diff_across"] = rec_a.item()
+        return out
+
+
+def compute_temporal_diff_loss(x, x_rec, is_multiview):
+    """
+    L1 between consecutive-frame differences of ground truth vs reconstruction.
+
+    Zero new parameters. Directly penalizes the decoder for producing frames
+    that don't change from one timestep to the next when the ground truth does
+    change -- the failure mode of temporal-compression "bleeding" -- rather than
+    relying on per-frame L1/LPIPS, which is blind to whether frames vary
+    correctly relative to *each other*.
+    """
+    t_dim = 3 if is_multiview else 2
+    if x.shape[t_dim] < 2:
+        return torch.zeros((), device=x.device, dtype=x.dtype)
+    gt_diff = x.diff(dim=t_dim)
+    rec_diff = x_rec.diff(dim=t_dim)
+    return F.l1_loss(rec_diff, gt_diff)
+
+
+# Growing-interval cache for should_log_images: {(schedule, growth, max_gap): {...}}
+_IMAGE_LOG_STEPS_CACHE = {}
+
+
+def _get_image_log_steps(cfg, upto_step):
+    schedule = tuple(
+        sorted({int(s) for s in (cfg.get("image_log_schedule_steps", None) or cfg.get("log_schedule_steps", None) or []) if int(s) > 0})
+    )
+    growth = float(cfg.get("image_log_growth_factor", 1.5))
+    max_gap = int(cfg.get("image_log_max_interval", 2000))
+    base_gap = max(1, int(cfg.get("log_every", 10)))
+    cache_key = (schedule, growth, max_gap, base_gap)
+    cached = _IMAGE_LOG_STEPS_CACHE.get(cache_key)
+    if cached is None:
+        cached = {"steps": set(schedule), "last": max(schedule) if schedule else 0, "gap": base_gap}
+        _IMAGE_LOG_STEPS_CACHE[cache_key] = cached
+    while cached["last"] < upto_step:
+        cached["gap"] = min(max_gap, max(1, int(round(cached["gap"] * growth))))
+        cached["last"] += cached["gap"]
+        cached["steps"].add(cached["last"])
+    return cached["steps"]
+
+
+def should_log_images(step, cfg):
+    """
+    Like `should_log_update`, but for wandb reconstruction *images* specifically.
+
+    Uses the same early `log_schedule_steps`, then backs off geometrically
+    (multiply the gap by `image_log_growth_factor` each time, capped at
+    `image_log_max_interval`) instead of the constant `log_every` interval used
+    for scalar metrics. Long runs otherwise log full-resolution reconstruction
+    grids forever at a fixed cadence, which is what fills up local/cloud wandb
+    storage on multi-day sweeps. Scalars stay on the original fixed cadence
+    (cheap); only images taper off.
+    """
+    if step is None or step <= 0:
+        return False
+    return step in _get_image_log_steps(cfg, step)
+
+
 def should_log_update(step, cfg):
     """Decide whether to emit wandb logs / reconstruction plots at this optimizer update.
 
@@ -1901,6 +2025,7 @@ def main():
         gen_w=0.0,
         disc=0.0,
         distill=0.0,
+        temporal_diff=0.0,
         debug=0.0,
     )
     
@@ -2482,6 +2607,11 @@ def main():
                         loss_dict["psnr"] = _bm["psnr"]
                         loss_dict["ssim"] = _bm["ssim"]
                         loss_dict["mse"] = _bm["mse"]
+                        if is_multiview and cfg.get("temporal_compression", False):
+                            _bleed = compute_intra_chunk_bleed_metrics(
+                                x, x_rec, chunk_size=int(cfg.get("temporal_bleed_chunk_size", 4))
+                            )
+                            loss_dict.update(_bleed)
                         on_update_boundary = ((global_step + 1) % accumulation_steps == 0)
                         if cfg.get("train_psnr_guard", True) and on_update_boundary:
                             try:
@@ -2630,6 +2760,17 @@ def main():
                                 x_rec_teacher, _, _ = teacher_model(x)
                             distill_loss = F.l1_loss(x_rec, x_rec_teacher)
                             vae_loss = vae_loss + distill_weight * distill_loss
+
+                        # Idea 7 — temporal-difference loss: penalize wrong frame-to-frame
+                        # deltas directly (see compute_temporal_diff_loss docstring). Zero new
+                        # parameters; complements (does not replace) the discriminator/encoder
+                        # unfreeze experiments for the temporal-compression bleeding problem.
+                        temporal_diff_loss = None
+                        temporal_diff_loss_weight = float(cfg.get("temporal_diff_loss_weight", 0.0))
+                        if temporal_diff_loss_weight > 0.0:
+                            temporal_diff_loss = compute_temporal_diff_loss(x, x_rec, is_multiview)
+                            vae_loss = vae_loss + temporal_diff_loss_weight * temporal_diff_loss
+                            loss_dict["temporal_diff_loss"] = temporal_diff_loss.item()
                         loss_time = time.time() - loss_start
                     timing_stats["loss_compute"].append(loss_time)
 
@@ -2860,6 +3001,8 @@ def main():
                     log_loss("kl", kl_loss, loss_dict, use_video)
                     if distill_loss is not None:
                         log_loss("distill", distill_loss, loss_dict, use_video)
+                    if temporal_diff_loss is not None:
+                        log_loss("temporal_diff", temporal_diff_loss, loss_dict, use_video)
                     if use_discriminator:
                         log_loss("gen_w", generator_loss, loss_dict, use_video)
                         log_loss("gen", g_loss, loss_dict, use_video)
@@ -2913,10 +3056,13 @@ def main():
                         and "psnr" in loss_dict
                     )
 
-                    # -- plot train reconstruction on the log schedule (fixed train samples: 1 or 3 people) --
+                    # -- plot train reconstruction on the (tapering) image log schedule: fixed train
+                    # samples (1 or 3 people). Uses should_log_images (not should_log_update) so image
+                    # logging frequency backs off over a long run instead of staying at a fixed cadence
+                    # forever -- that's what fills up wandb/local storage on multi-day sweeps.
                     plot_reconstruction = (
                         (global_step + 1) % accumulation_steps == 0
-                        and should_log_update(actual_update_step, cfg)
+                        and should_log_images(actual_update_step, cfg)
                         and coordinator.is_master()
                         and use_video == 1
                     )
@@ -3188,6 +3334,9 @@ def main():
                                 if teacher_model is not None:
                                     wandb_log_dict["loss/distill"] = avg_loss.get("distill", 0.0)
 
+                                if temporal_diff_loss_weight > 0.0:
+                                    wandb_log_dict["loss/temporal_diff"] = avg_loss.get("temporal_diff", 0.0)
+
                                 # Add timing stats to wandb - super useful for bottleneck analysis!
                                 # You can plot these in wandb to see which operation takes the most time
                                 wandb_log_dict.update(avg_timing)
@@ -3207,7 +3356,16 @@ def main():
                                     wandb_log_dict["train_batch/psnr"] = loss_dict["psnr"]
                                     wandb_log_dict["train_batch/ssim"] = loss_dict["ssim"]
                                     wandb_log_dict["train_batch/mse"] = loss_dict["mse"]
-                                
+
+                                # Temporal-compression "bleeding" diagnostic (see
+                                # compute_intra_chunk_bleed_metrics): ~1.0 = healthy, ~0.0 = severe
+                                # bleeding. Only present when temporal_compression=True (multiview).
+                                if "bleed_ratio_within" in loss_dict:
+                                    wandb_log_dict["train_batch/bleed_ratio_within"] = loss_dict["bleed_ratio_within"]
+                                    wandb_log_dict["train_batch/bleed_ratio_across"] = loss_dict.get("bleed_ratio_across", 0.0)
+                                    wandb_log_dict["train_batch/gt_diff_within"] = loss_dict.get("gt_diff_within", 0.0)
+                                    wandb_log_dict["train_batch/rec_diff_within"] = loss_dict.get("rec_diff_within", 0.0)
+
                                 # Add train/test reconstruction visualizations as separate media keys.
                                 if "reconstruction_samples" in loss_dict:
                                     wandb_log_dict["train_reconstructions"] = loss_dict["reconstruction_samples"]
@@ -3504,6 +3662,7 @@ def main():
                     "fixed_seq/epoch": epoch + 1,
                     "epoch_float": float(epoch + 1),
                     "global_step": actual_update_step,
+                    "samples_seen": actual_update_step * effective_batch_size,
                     "fixed_seq/train/psnr_mean": float(np.mean(train_metrics_pf["psnr_per_frame"])),
                     "fixed_seq/train/ssim_mean": float(np.mean(train_metrics_pf["ssim_per_frame"])),
                     "fixed_seq/train/mse_mean": float(np.mean(train_metrics_pf["mse_per_frame"])),
@@ -3597,6 +3756,7 @@ def main():
                     prefix = f"final_eval/{label}"
                     final_log = {
                         "global_step": actual_update_step,
+                        "samples_seen": actual_update_step * effective_batch_size,
                         "epoch_float": float(epoch + 1),
                         f"{prefix}/psnr_mean": final_metrics["psnr_mean"],
                         f"{prefix}/psnr_std": final_metrics["psnr_std"],

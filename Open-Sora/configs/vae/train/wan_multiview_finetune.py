@@ -116,10 +116,30 @@ model = dict(
     #   Near-identity at init (update gate bias -4). Only for the causal chunked
     #   path — mutually exclusive with use_noncausal_decode.
     use_learned_cache_update=False,
+    # Idea 8 — Sub-frame position embedding: tiny (2*dim params per upsample3d stage,
+    #   e.g. ~1.5K total) learnable additive bias distinguishing the "even" vs "odd"
+    #   output frame produced from a single time_conv call in the decoder's temporal
+    #   upsample. Zero-init -> identical to baseline at step 0; only diverges if
+    #   training finds it useful. This is the smallest-possible-footprint way to
+    #   give the decoder an explicit handle for "which sub-frame am I producing"
+    #   instead of relying purely on implicitly-learned channel-split structure.
+    #   Compatible with both causal chunked decode and use_noncausal_decode.
+    use_subframe_position_embedding=False,
     # After --load of a TC ckpt: re-randomize ViewAttention / JointViewAttention
     # (proj stays zero-init identity; QKV random). Used by fusion-adapt sweeps.
     reinit_view_attention_after_load=False,
 )
+
+# Idea 7 — Temporal-difference loss (training-side; zero new parameters).
+# L1 between consecutive-frame deltas of ground truth vs reconstruction:
+# penalizes the decoder directly for producing frames that don't change when
+# the ground truth does (the "bleeding" symptom), on top of / instead of
+# relying on per-frame L1+LPIPS alone. 0.0 = disabled (baseline).
+temporal_diff_loss_weight = 0.0
+# Chunk size for the bleed-ratio wandb diagnostic (train_batch/bleed_ratio_within
+# and .../bleed_ratio_across); should match the temporal compression factor (Wan:
+# 4). Frame 0 is treated as its own standalone chunk regardless of this value.
+temporal_bleed_chunk_size = 4
 
 # Idea 5 — Teacher distillation (training-side; no architecture change).
 # Path to a temporal_compression=False checkpoint (a .pt/.pth/.safetensors state
@@ -474,6 +494,16 @@ final_eval_num_samples = 0
 
 # W&B / periodic log only: how many clips to show in reconstruction grids (not how many are scored in eval).
 num_reconstruction_vis_samples = 3
+
+# Image logging cadence (separate from scalar log_every): reconstruction grids are logged on
+# log_schedule_steps early on, then the gap grows by image_log_growth_factor each time (capped
+# at image_log_max_interval) instead of staying at a fixed interval forever. This keeps early
+# monitoring dense while preventing wandb/local storage from growing unbounded on long runs.
+# Set image_log_growth_factor = 1.0 to fall back to the old constant-cadence behavior.
+image_log_growth_factor = 1.5
+image_log_max_interval = 2000
+# None -> reuse log_schedule_steps for the initial dense phase.
+image_log_schedule_steps = None
 
 # ============
 # Performance logging & bottleneck / shape debugging

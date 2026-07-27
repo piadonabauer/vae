@@ -276,6 +276,7 @@ class MultiviewWanVideoVAE(nn.Module):
         side_channel_dim: int = 4,
         use_decoder_temporal_attention: bool = False,
         use_learned_cache_update: bool = False,
+        use_subframe_position_embedding: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -322,6 +323,7 @@ class MultiviewWanVideoVAE(nn.Module):
                 side_channel_dim=side_channel_dim,
                 use_decoder_temporal_attention=use_decoder_temporal_attention,
                 use_learned_cache_update=use_learned_cache_update,
+                use_subframe_position_embedding=use_subframe_position_embedding,
             )
 
             # Optionally load Wan 2.1 weights into the internal encoder/decoder
@@ -753,6 +755,7 @@ def build_multiview_wan_video_vae(
     side_channel_dim: int = 4,
     use_decoder_temporal_attention: bool = False,
     use_learned_cache_update: bool = False,
+    use_subframe_position_embedding: bool = False,
     **kwargs,
 ):
     """
@@ -806,6 +809,7 @@ def build_multiview_wan_video_vae(
         side_channel_dim=side_channel_dim,
         use_decoder_temporal_attention=use_decoder_temporal_attention,
         use_learned_cache_update=use_learned_cache_update,
+        use_subframe_position_embedding=use_subframe_position_embedding,
         **kwargs,
     )
 

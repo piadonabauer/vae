@@ -457,6 +457,20 @@ class Resample(nn.Module):
             self.time_conv = CausalConv3d(dim,
                                           dim * 2, (3, 1, 1),
                                           padding=(1, 0, 0))
+            # Idea 8 — sub-frame position embedding (opt-in, off by default: see
+            # `use_subframe_pos_embed` below). time_conv maps ONE input latent step to
+            # TWO output frames by doubling channels then splitting [0:dim] / [dim:2*dim]
+            # into "even"/"odd" output frames (see forward()). Whether those two halves
+            # decode to genuinely different frames is left entirely to what the conv
+            # weights implicitly learn; this adds an explicit, near-zero-cost (2*dim
+            # params) learnable bias per half so the network has an easier explicit
+            # handle for "which of the two frames am I producing" instead of relying
+            # only on implicit channel-split structure. Zero-init -> identity at init,
+            # so it's inert until both this parameter AND `use_subframe_pos_embed` are
+            # set (the latter is a plain attribute flipped by the owning model, mirroring
+            # how `use_noncausal_decode` flips `causal` / `full_temporal_upsample`).
+            self.subframe_pos_embed = nn.Parameter(torch.zeros(2, dim))
+            self.use_subframe_pos_embed = False
 
         elif mode == 'downsample2d':
             self.resample = nn.Sequential(
@@ -488,6 +502,8 @@ class Resample(nn.Module):
                 # neighbors: no cold-start frame and no chunk boundaries.
                 x = self.time_conv(x)
                 x = x.reshape(b, 2, c, t, h, w)
+                if getattr(self, 'use_subframe_pos_embed', False):
+                    x = x + self.subframe_pos_embed.to(x.dtype).view(1, 2, c, 1, 1, 1)
                 x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]), 3)
                 x = x.reshape(b, c, t * 2, h, w)
                 x = x[:, :, 1:, :, :]
@@ -522,6 +538,8 @@ class Resample(nn.Module):
                     feat_idx[0] += 1
 
                     x = x.reshape(b, 2, c, t, h, w)
+                    if getattr(self, 'use_subframe_pos_embed', False):
+                        x = x + self.subframe_pos_embed.to(x.dtype).view(1, 2, c, 1, 1, 1)
                     x = torch.stack((x[:, 0, :, :, :, :], x[:, 1, :, :, :, :]),
                                     3)
                     x = x.reshape(b, c, t * 2, h, w)
@@ -2243,6 +2261,7 @@ class AttentionMultiViewVideoVan(nn.Module):
         side_channel_dim: int = 4,
         use_decoder_temporal_attention: bool = False,
         use_learned_cache_update: bool = False,
+        use_subframe_position_embedding: bool = False,
     ):
         super().__init__()
         # Back-compat: old name "joint_attention" is the same as "self_attention".
@@ -2292,6 +2311,7 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.side_channel_dim = int(side_channel_dim)
         self.use_decoder_temporal_attention = use_decoder_temporal_attention
         self.use_learned_cache_update = use_learned_cache_update
+        self.use_subframe_position_embedding = use_subframe_position_embedding
         if use_decoder_temporal_attention and not use_noncausal_decode:
             raise ValueError(
                 "use_decoder_temporal_attention requires use_noncausal_decode=True: the causal "
@@ -2303,10 +2323,14 @@ class AttentionMultiViewVideoVan(nn.Module):
                 "use_learned_cache_update and use_noncausal_decode are mutually exclusive: the "
                 "non-causal full-sequence decode has no feat_cache to update."
             )
-        if (use_noncausal_decode or use_temporal_reflection_pad or use_learned_cache_update) and not temporal_compression:
+        if (
+            use_noncausal_decode or use_temporal_reflection_pad or use_learned_cache_update
+            or use_subframe_position_embedding
+        ) and not temporal_compression:
             raise ValueError(
-                "use_noncausal_decode / use_temporal_reflection_pad / use_learned_cache_update "
-                "only apply to the chunked feat_cache path; set temporal_compression=True."
+                "use_noncausal_decode / use_temporal_reflection_pad / use_learned_cache_update / "
+                "use_subframe_position_embedding only apply to the chunked feat_cache (or "
+                "non-causal full-sequence) decode path; set temporal_compression=True."
             )
 
         # Reuse the standard encoder/decoder stacks
@@ -2451,6 +2475,18 @@ class AttentionMultiViewVideoVan(nn.Module):
                     m.causal = False
                 if isinstance(m, Resample) and m.mode == "upsample3d":
                     m.full_temporal_upsample = True
+
+        # Idea 8 — sub-frame position embedding: a tiny (2*dim params per upsample3d
+        # stage) learnable additive bias distinguishing the "even" vs "odd" output
+        # frame produced from a single time_conv call (see Resample.__init__ /
+        # forward for the mechanism). Zero-init, so training starts identical to
+        # baseline; the only way this changes behavior is if gradient descent finds
+        # it useful to move the bias away from zero. Works with both the causal
+        # chunked decode and use_noncausal_decode (both branches are patched above).
+        if self.use_subframe_position_embedding:
+            for m in self.decoder.modules():
+                if isinstance(m, Resample) and m.mode == "upsample3d":
+                    m.use_subframe_pos_embed = True
 
         # Idea 3 — high-frequency temporal side channel: a tiny full-temporal-rate
         # latent (side_channel_dim ch, spatial /16 = half the main latent grid)
