@@ -55,7 +55,7 @@ class NLayerDiscriminator3D(nn.Module):
 
         kw = 3
         padw = 1
-        sequence = [nn.Conv3d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
+        sequence = [nn.Conv3d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, False)]
         nf_mult = 1
         nf_mult_prev = 1
         for n in range(1, n_layers):  # gradually increase the number of filters
@@ -72,7 +72,7 @@ class NLayerDiscriminator3D(nn.Module):
                     bias=use_bias,
                 ),
                 norm_layer(ndf * nf_mult),
-                nn.LeakyReLU(0.2, True),
+                nn.LeakyReLU(0.2, False),
                 nn.Dropout(dropout),
             ]
 
@@ -88,7 +88,7 @@ class NLayerDiscriminator3D(nn.Module):
                 bias=use_bias,
             ),
             norm_layer(ndf * nf_mult),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2, False),
             nn.Dropout(dropout),
             nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw),
         ]
@@ -157,7 +157,7 @@ class NLayerDiscriminatorMultiview4D(nn.Module):
             padding=(0, padw, padw),
         )
         use_bias = False
-        sequence = [nn.LeakyReLU(0.2, True)]
+        sequence = [nn.LeakyReLU(0.2, False)]
         nf_mult = 1
         nf_mult_prev = 1
         for n in range(1, n_layers):
@@ -173,7 +173,7 @@ class NLayerDiscriminatorMultiview4D(nn.Module):
                     bias=use_bias,
                 ),
                 norm_layer(ndf * nf_mult),
-                nn.LeakyReLU(0.2, True),
+                nn.LeakyReLU(0.2, False),
                 nn.Dropout(dropout),
             ]
         nf_mult_prev = nf_mult
@@ -188,7 +188,7 @@ class NLayerDiscriminatorMultiview4D(nn.Module):
                 bias=use_bias,
             ),
             norm_layer(ndf * nf_mult),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2, False),
             nn.Dropout(dropout),
             nn.Conv3d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw),
         ]

@@ -58,6 +58,11 @@ WANDB_RUN_GROUP="${WANDB_RUN_GROUP:-tc_bleed_fix_sweep_v1}"
 EFFECTIVE_BATCH=64
 TRAIN_EPOCHS="${TRAIN_EPOCHS:-170}"   # ~1020 optimizer updates at eff.batch=64 (same budget as tc_quality_sweep)
 MAX_OOM_RETRIES="${MAX_OOM_RETRIES:-3}"
+# Optional: set to a checkpoint path to resume from (restores weights + optimizer).
+# If empty, auto-detect searches ALL output dirs matching this task's run name and
+# picks the checkpoint with the highest epoch number (safe even when newer dirs are empty).
+# e.g.  LOAD_CKPT=outputs/tc_bf_baseline_frozen_enc_b8__job4504268_t1/epoch169-global_step1083
+LOAD_CKPT="${LOAD_CKPT:-}"
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   mkdir -p "${OPEN_SORA_ROOT}/slurm_logs"
@@ -112,14 +117,37 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   experiment_name="${wandb_run_name}__job${SLURM_JOB_ID}_t${SLURM_ARRAY_TASK_ID}"
 fi
 
+# Auto-resume: if LOAD_CKPT is not set, scan ALL output dirs matching this task's
+# run name and pick the checkpoint with the highest epoch number across all of them.
+if [[ -z "$LOAD_CKPT" ]]; then
+  best_epoch=-1
+  best_ck=""
+  for prev_dir in "${OPEN_SORA_ROOT}/outputs/${wandb_run_name}__job"*/; do
+    [[ -d "$prev_dir" ]] || continue
+    ck=$(ls "$prev_dir" 2>/dev/null | grep "^epoch" | sort -V | tail -1)
+    [[ -z "$ck" ]] && continue
+    ep=$(echo "$ck" | grep -oP 'epoch\K[0-9]+' || echo "0")
+    if (( ep > best_epoch )); then
+      best_epoch=$ep
+      best_ck="${prev_dir}${ck}"
+    fi
+  done
+  if [[ -n "$best_ck" ]]; then
+    LOAD_CKPT="$best_ck"
+    echo "[auto-resume] found checkpoint at epoch ${best_epoch}: $LOAD_CKPT"
+  fi
+fi
+
 MASTER_PORT=$((20000 + (${SLURM_JOB_ID:-$$} % 20000) + (${SLURM_ARRAY_TASK_ID:-1} % 1000)))
-export MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}" WORLD_SIZE=1 RANK=0 LOCAL_RANK=0
+export MASTER_PORT MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}" WORLD_SIZE=1 RANK=0 LOCAL_RANK=0
 
 echo "════════════════════════════════════════════════════════════════════"
 echo "  tc_bleed_fix_sweep task ${SLURM_ARRAY_TASK_ID:-?}/${n_exp} — ${wandb_name}"
 [[ -n "${SLURM_JOB_ID:-}" ]] && echo "  SLURM: ${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}  node: $(hostname)"
 echo "  starting batch=${start_batch_size} (effective batch fixed at ${EFFECTIVE_BATCH} regardless of fallback)"
 echo "  epochs=${TRAIN_EPOCHS}  wandb: project=${WANDB_PROJECT} group=${WANDB_RUN_GROUP} run=${wandb_run_name}"
+echo "  MASTER_PORT=${MASTER_PORT}"
+[[ -n "$LOAD_CKPT" ]] && echo "  RESUME from: ${LOAD_CKPT}"
 echo "  model overrides: ${model_args[*]:-<none>}"
 echo "════════════════════════════════════════════════════════════════════"
 [[ -n "${SLURM_JOB_ID:-}" ]] && nvidia-smi || true
@@ -138,6 +166,7 @@ run_with_oom_fallback() {
     local accum=$(( EFFECTIVE_BATCH / batch_size ))
     (( accum < 1 )) && accum=1
     local this_master_port=$(( MASTER_PORT + attempt ))
+    export MASTER_PORT=$this_master_port
 
     echo "[attempt $((attempt + 1))/$((MAX_OOM_RETRIES + 1))] batch_size=${batch_size} accumulation_steps=${accum} (effective=$(( batch_size * accum )))"
 
@@ -171,6 +200,7 @@ run_with_oom_fallback() {
       --log_schedule_steps "[5,10,20,50,100,200]" \
       --full_eval_every 250 \
       --fixed_seq_eval_every_epochs 0 \
+      ${LOAD_CKPT:+--load "$LOAD_CKPT" --load_optimizer False} \
       ${model_args[@]+"${model_args[@]}"} 2>&1 | tee "$log_file"
     local exit_code=${PIPESTATUS[0]}
     set -e
