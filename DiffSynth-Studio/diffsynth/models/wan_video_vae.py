@@ -2415,6 +2415,13 @@ class AttentionMultiViewVideoVan(nn.Module):
             self.view_conv_act = nn.SiLU()
             self.fusion_resblock1 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
             self.fusion_resblock2 = FusionResidualBlock3d(bottleneck_channels, bottleneck_channels, dropout)
+        elif fusion_mode == "none":
+            # Per-view reference mode for the paper experiments: no fusion at all.
+            # Only makes sense with num_views == 1 (the training wrapper folds the
+            # view axis into the batch); the encoder output goes straight to
+            # middle/head, so the model is plain Wan + whatever LoRA is enabled.
+            if self.num_views != 1:
+                raise ValueError("fusion_mode='none' requires num_views=1 (fold views into batch)")
         elif fusion_mode == "conv4d":
             # Factorized 4D fusion:
             # (B,C,T,V,H,W) -> spatial Conv2d over (H,W), then temporal Conv3d over (T,H,W),
@@ -2437,7 +2444,7 @@ class AttentionMultiViewVideoVan(nn.Module):
         else:
             raise ValueError(
                 f"Unsupported fusion_mode={fusion_mode}. "
-                "Use one of: cross_attention, self_attention, conv3d, conv4d."
+                "Use one of: cross_attention, self_attention, conv3d, conv4d, none."
             )
 
         # Optional per-view latent LoRA adapters for decoding.
@@ -2755,6 +2762,10 @@ class AttentionMultiViewVideoVan(nn.Module):
                 fused = fused_2d.view(b2, t2, c2, h2, w2).permute(0, 2, 1, 3, 4).contiguous()
                 fused = self.fusion_resblock1(fused)
                 fused = self.fusion_resblock2(fused)
+        elif self.fusion_mode == "none":
+            # Per-view reference: single view, no fusion (see __init__).
+            assert v == 1, f"fusion_mode='none' expects 1 view, got {v}"
+            fused = feats[0]
         else:
             with ProfileTimer.block("encode.fusion.conv4d"):
                 x_4d = torch.stack(feats, dim=3)
@@ -2933,7 +2944,11 @@ class AttentionMultiViewVideoVan(nn.Module):
         """
         if not (0 <= view_idx < self.num_views):
             raise IndexError(f"view_idx={view_idx} out of range for num_views={self.num_views}")
-        if self.use_viewwise_decoder_lora:
+        # fusion_mode='none' is the per-view reference: there is nothing view-specific
+        # to condition on, so skip both LoRA and embedding (keeps it plain Wan).
+        if self.fusion_mode == "none":
+            pass
+        elif self.use_viewwise_decoder_lora:
             with ProfileTimer.block("decode.view_condition"):
                 lora_delta = self.view_lora_up[view_idx](self.view_lora_down[view_idx](z))
                 z = z + lora_delta

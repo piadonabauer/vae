@@ -265,6 +265,10 @@ class MultiviewWanVideoVAE(nn.Module):
         use_viewwise_decoder_lora: bool = False,
         lora_rank: int = 16,
         full_finetune_decoder: bool = False,
+        # Per-view reference for the paper: views are folded into the batch and each
+        # one goes through plain Wan (+LoRA) with no fusion and no view conditioning.
+        # Same trainer/losses/eval as the fused model, so the comparison is clean.
+        independent_views: bool = False,
         temporal_compression: bool = True,
         crossview_grad_checkpoint: bool = False,
         crossview_grad_checkpoint_encoder: bool = None,
@@ -288,6 +292,14 @@ class MultiviewWanVideoVAE(nn.Module):
         self.use_view_group_fusion = use_view_group_fusion
         self.debug_shapes = debug_shapes
         self.use_crossview_encoder = use_crossview_encoder
+        self.independent_views = independent_views
+        if independent_views:
+            if not use_crossview_encoder:
+                raise ValueError("independent_views=True requires use_crossview_encoder=True")
+            # Build the inner model single-view with no fusion; the real view count
+            # (self.view_in) only matters for the fold/unfold in forward().
+            fusion_mode = "none"
+            use_viewwise_decoder_lora = False
 
         # Views going into latent_fusion: after group fusion (if used) or all views
         self.view_out = max(1, view_in // view_compression) if use_view_group_fusion else view_in
@@ -311,7 +323,7 @@ class MultiviewWanVideoVAE(nn.Module):
                 use_lora_before=use_lora_before,
                 use_lora_after=use_lora_after,
                 use_viewwise_decoder_lora=use_viewwise_decoder_lora,
-                num_views=view_in,
+                num_views=1 if independent_views else view_in,
                 temporal_compression=temporal_compression,
                 grad_checkpoint=crossview_grad_checkpoint,
                 grad_checkpoint_encoder=crossview_grad_checkpoint_encoder,
@@ -616,6 +628,22 @@ class MultiviewWanVideoVAE(nn.Module):
     # FORWARD
     # --------------------------------------------------
     def forward(self, x):
+        if self.use_crossview_encoder and self.independent_views:
+            # Per-view reference: fold views into batch, run each through the
+            # single-view model, unfold. One latent PER VIEW (V x the latent rate
+            # of the fused model) -- that is the point of this reference.
+            B, V, C, T, H, W = x.shape
+            x_flat = x.reshape(B * V, 1, C, T, H, W)
+            scale = [
+                torch.zeros(self.z_dim, dtype=x.dtype, device=x.device),
+                torch.ones(self.z_dim, dtype=x.dtype, device=x.device),
+            ]
+            mu, logvar = self.crossview_vae.encode(x_flat, scale)
+            z = self.crossview_vae.reparameterize(mu, logvar)
+            rec = self.crossview_vae.decode(z, scale, view_idx=0)  # [B*V, C, T, H, W]
+            x_rec = rec.reshape(B, V, C, T, H, W)
+            return x_rec, (mu, logvar), z
+
         if self.use_crossview_encoder:
             # x: [B, V, C, T, H, W] with V == view_in (typically 2)
             B, V, C, T, H, W = x.shape

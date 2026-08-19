@@ -771,6 +771,30 @@ def compute_intra_chunk_bleed_metrics(x_orig, x_rec, chunk_size=4):
         return out
 
 
+def compute_cross_view_similarity(x):
+    """
+    Mean pairwise cosine similarity between views of a multi-view clip.
+
+    Ghosting diagnostic for the paper: if the decoder collapses the views onto
+    their mean, the similarity of the *reconstruction* rises towards 1 while the
+    ground truth stays at its natural level (nearby cameras are similar but not
+    identical). Always report rec AND gt so the gap is interpretable.
+
+    x: [B, V, C, T, H, W]; returns a float, or None for single-view input.
+    """
+    if x.dim() != 6 or x.shape[1] < 2:
+        return None
+    with torch.no_grad():
+        b, v = x.shape[0], x.shape[1]
+        flat = x.detach().float().reshape(b, v, -1)
+        flat = F.normalize(flat, dim=-1)
+        sims = []
+        for i in range(v):
+            for j in range(i + 1, v):
+                sims.append((flat[:, i] * flat[:, j]).sum(-1).mean())
+        return torch.stack(sims).mean().item()
+
+
 def compute_temporal_diff_loss(x, x_rec, is_multiview):
     """
     L1 between consecutive-frame differences of ground truth vs reconstruction.
@@ -1250,7 +1274,16 @@ def evaluate_model(
         "ssim": [],
         "mse": [],
     }
-    
+    # Paper diagnostics, accumulated per batch (see Sec. "diagnostics" in the paper):
+    # bleed ratios (temporal), cross-view similarity (ghosting), per-frame PSNR profile.
+    diag = {
+        "bleed_ratio_within": [],
+        "bleed_ratio_across": [],
+        "xview_sim_rec": [],
+        "xview_sim_gt": [],
+        "psnr_per_frame": [],
+    }
+
     visualization_samples = []
     num_collected = 0
     eval_all = num_eval_samples is None or (
@@ -1288,7 +1321,28 @@ def evaluate_model(
             all_metrics["psnr"].extend(metrics["psnr_per_sample"])
             all_metrics["ssim"].extend(metrics["ssim_per_sample"])
             all_metrics["mse"].append(metrics["mse"])
-            
+
+            # Diagnostics. Metrics expect [0,1]; undo the [-1,1] scaling first.
+            if value_range == "[-1,1]":
+                x01 = ((x.float() + 1.0) / 2.0).clamp(0, 1)
+                xr01 = ((x_rec.float() + 1.0) / 2.0).clamp(0, 1)
+            else:
+                x01 = x.float().clamp(0, 1)
+                xr01 = x_rec.float().clamp(0, 1)
+            bleed = compute_intra_chunk_bleed_metrics(x01, xr01)
+            if "bleed_ratio_within" in bleed:
+                diag["bleed_ratio_within"].append(bleed["bleed_ratio_within"])
+            if "bleed_ratio_across" in bleed:
+                diag["bleed_ratio_across"].append(bleed["bleed_ratio_across"])
+            if is_multiview:
+                sim_rec = compute_cross_view_similarity(xr01)
+                sim_gt = compute_cross_view_similarity(x01)
+                if sim_rec is not None:
+                    diag["xview_sim_rec"].append(sim_rec)
+                    diag["xview_sim_gt"].append(sim_gt)
+            pf = compute_metrics_per_frame(x01, xr01)
+            diag["psnr_per_frame"].append([float(p) for p in pf["psnr_per_frame"]])
+
             # Visualization: first batch only; clip count is separate from metric coverage.
             if len(visualization_samples) == 0:
                 n_vis = min(max(1, int(vis_max_samples)), int(x.shape[0]))
@@ -1308,6 +1362,16 @@ def evaluate_model(
         "mse_mean": np.mean(all_metrics["mse"]),
         "mse_std": np.std(all_metrics["mse"]),
     }
+    for key in ("bleed_ratio_within", "bleed_ratio_across", "xview_sim_rec", "xview_sim_gt"):
+        if diag[key]:
+            aggregated[key] = float(np.mean(diag[key]))
+    if diag["psnr_per_frame"]:
+        # Mean profile over batches; batches can have different T (buckets), so
+        # average only over batches with the most common length.
+        lengths = [len(p) for p in diag["psnr_per_frame"]]
+        t_common = max(set(lengths), key=lengths.count)
+        profile = np.mean([p for p in diag["psnr_per_frame"] if len(p) == t_common], axis=0)
+        aggregated["psnr_per_frame"] = [float(v) for v in profile]
     
     # Return to training mode
     if hasattr(model, "module"):
@@ -3445,13 +3509,12 @@ def main():
                                     "actual_update_step": int(actual_update_step),
                                     "global_step": int(global_step),
                                     "epoch": int(epoch),
+                                    # Dump everything numeric (incl. bleed ratios, cross-view
+                                    # similarity, per-frame PSNR profile) so collect_results.py
+                                    # never needs a code change when a metric is added.
                                     "metrics": {
-                                        "psnr_mean": float(eval_metrics["psnr_mean"]),
-                                        "psnr_std": float(eval_metrics["psnr_std"]),
-                                        "ssim_mean": float(eval_metrics["ssim_mean"]),
-                                        "ssim_std": float(eval_metrics["ssim_std"]),
-                                        "mse_mean": float(eval_metrics["mse_mean"]),
-                                        "mse_std": float(eval_metrics["mse_std"]),
+                                        k: (float(v) if not isinstance(v, list) else v)
+                                        for k, v in eval_metrics.items()
                                     },
                                     "loss_config": _loss_config_dict(cfg),
                                 },
@@ -3470,6 +3533,19 @@ def main():
                                     f"{prefix}/mse_std": eval_metrics["mse_std"],
                                     f"{prefix}/reconstructions": eval_results["visualizations"],
                                 }
+                                # Paper diagnostics (present when applicable: bleed ratios
+                                # need T>=2, cross-view similarity needs V>=2).
+                                for k in (
+                                    "bleed_ratio_within",
+                                    "bleed_ratio_across",
+                                    "xview_sim_rec",
+                                    "xview_sim_gt",
+                                ):
+                                    if k in eval_metrics:
+                                        log_dict[f"{prefix}/{k}"] = eval_metrics[k]
+                                if "psnr_per_frame" in eval_metrics:
+                                    for fi, pv in enumerate(eval_metrics["psnr_per_frame"]):
+                                        log_dict[f"{prefix}/psnr_frame{fi}"] = pv
                                 wandb.log(log_dict, step=actual_update_step)
 
             if cfg.get("profile", False):
@@ -3741,13 +3817,10 @@ def main():
                         "kind": "final_eval",
                         "split": label,
                         "actual_update_step": int(actual_update_step),
+                        # Generic dump, same as full_eval: includes the paper diagnostics.
                         "metrics": {
-                            "psnr_mean": float(final_metrics["psnr_mean"]),
-                            "psnr_std": float(final_metrics["psnr_std"]),
-                            "ssim_mean": float(final_metrics["ssim_mean"]),
-                            "ssim_std": float(final_metrics["ssim_std"]),
-                            "mse_mean": float(final_metrics["mse_mean"]),
-                            "mse_std": float(final_metrics["mse_std"]),
+                            k: (float(v) if not isinstance(v, list) else v)
+                            for k, v in final_metrics.items()
                         },
                         "loss_config": _loss_config_dict(cfg),
                     },
