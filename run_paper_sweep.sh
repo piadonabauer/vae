@@ -25,9 +25,21 @@
 #           NOTE: not tested end-to-end; if epochs=0 skips final_eval, run arm 1
 #           with --epochs 1 --save_ckpt False instead and ignore the train step.
 #
+# Two-stage discipline: run every arm with OVERFIT=1 first (single_sequence, must
+# reach near-perfect reconstruction) before launching the real generalization run.
+# The overfit gate catches implementation problems for the cost of a few GPU-hours.
+#
+# Staged init (default for the joint arms 4-6): warm-start from the converged E1b
+# per-view TC checkpoint -- temporal axis first, view axis second. The script finds
+# the E1b checkpoint automatically, or set INIT_CKPT=/path/to/epochN-.... Missing
+# fusion keys keep their fresh (zero) init; the view attention is re-randomized.
+# INIT_CKPT=none disables warm start (that is ablation E7b).
+# ORDER MATTERS: arm 2 must finish before arms 4-6 start.
+#
 # Usage (from /project, Slurm rejects /home submits):
-#   sbatch ./run_paper_sweep.sh            # all arms
-#   sbatch --export=ALL,TASK=4 ./run_paper_sweep.sh   # single arm
+#   sbatch --export=ALL,TASK=4,OVERFIT=1 ./run_paper_sweep.sh   # stage 1: overfit gate
+#   sbatch --export=ALL,TASK=4 ./run_paper_sweep.sh             # stage 2: real run
+#   sbatch ./run_paper_sweep.sh                                 # all arms (stage 2)
 
 set -euo pipefail
 
@@ -36,10 +48,20 @@ CONFIG="${CONFIG:-configs/vae/train/wan_multiview_finetune.py}"
 VAE_VENV="${VAE_VENV:-/home/piado/projects/aip-lindell/piado/vae/snth/bin/activate}"
 DRY_RUN="${DRY_RUN:-0}"
 
-TRAIN_EPOCHS="${TRAIN_EPOCHS:-170}"
-EFFECTIVE_BATCH=64
-# batch:accum pairs to try after an OOM, largest first. Effective batch stays 64.
-BATCH_LADDER=( "16:4" "8:8" "4:16" "2:32" )
+OVERFIT="${OVERFIT:-0}"
+INIT_CKPT="${INIT_CKPT:-}"
+
+if [[ "$OVERFIT" == "1" ]]; then
+  # Stage-1 overfit gate: one sequence, batch 1, no val set. Cheap; the only
+  # question is whether train PSNR goes ~perfect. No warm start here on purpose:
+  # the gate should test the architecture itself.
+  TRAIN_EPOCHS="${TRAIN_EPOCHS:-2000}"
+  BATCH_LADDER=( "1:1" )
+else
+  TRAIN_EPOCHS="${TRAIN_EPOCHS:-170}"
+  # batch:accum pairs to try after an OOM, largest first. Effective batch stays 64.
+  BATCH_LADDER=( "16:4" "8:8" "4:16" "2:32" )
+fi
 
 TASK="${TASK:-${SLURM_ARRAY_TASK_ID:-}}"
 if [[ -z "$TASK" ]]; then
@@ -61,13 +83,21 @@ cd "$OPEN_SORA_ROOT"
 
 # Shared protocol flags. T=9 on purpose: latent T'=3 = frame 0 + two 4-frame
 # chunks, so bleeding within chunks AND across a boundary are both measurable.
+if [[ "$OVERFIT" == "1" ]]; then
+  DATA_ARGS=( --data_preset single_sequence )   # 1 clip, no val set
+else
+  DATA_ARGS=(
+    --data_preset all_people_one_expression
+    --dataset_presets.all_people_one_expression.expected_views 2
+    --dataset_presets.all_people_one_expression.skip_mismatched_views True
+    --val_dataset_presets.all_people_one_expression.expected_views 2
+    --val_dataset_presets.all_people_one_expression.skip_mismatched_views True
+  )
+fi
+
 COMMON=(
   --bucket_config "{'128px_ar1:1': {9: (1.0, 1)}}"
-  --data_preset all_people_one_expression
-  --dataset_presets.all_people_one_expression.expected_views 2
-  --dataset_presets.all_people_one_expression.skip_mismatched_views True
-  --val_dataset_presets.all_people_one_expression.expected_views 2
-  --val_dataset_presets.all_people_one_expression.skip_mismatched_views True
+  "${DATA_ARGS[@]}"
   --model.view_in 2
   --model.use_lora True
   --model.use_lora_after True
@@ -126,12 +156,40 @@ case "$TASK" in
     echo "Unknown TASK=$TASK"; exit 1 ;;
 esac
 
+[[ "$OVERFIT" == "1" ]] && run_name="${run_name}_overfit"
+
+# Staged init for the joint arms (4-6): default to the best E1b checkpoint unless
+# the caller pins INIT_CKPT or disables it with INIT_CKPT=none. Skipped in overfit
+# mode (the gate tests the architecture, not the curriculum).
+WARMSTART_ARGS=()
+if [[ "$OVERFIT" != "1" && "$TASK" =~ ^[456]$ && "$INIT_CKPT" != "none" ]]; then
+  if [[ -z "$INIT_CKPT" ]]; then
+    best_ep=-1
+    for d in "${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job"*/; do
+      [[ -d "$d" ]] || continue
+      ck=$(ls "$d" 2>/dev/null | grep "^epoch" | sort -V | tail -1)
+      [[ -z "$ck" ]] && continue
+      ep=$(echo "$ck" | grep -oP 'epoch\K[0-9]+' || echo 0)
+      if (( ep > best_ep )); then best_ep=$ep; INIT_CKPT="${d}${ck}"; fi
+    done
+  fi
+  if [[ -n "$INIT_CKPT" ]]; then
+    echo "[init] warm start from: $INIT_CKPT"
+    WARMSTART_ARGS=( --load "$INIT_CKPT" --load_optimizer False
+                     --model.reinit_view_attention_after_load True )
+  else
+    echo "[init] WARNING: no E1b checkpoint found -- falling back to Wan-only init."
+    echo "[init] Run TASK=2 first, or pass INIT_CKPT explicitly (INIT_CKPT=none to silence)."
+  fi
+fi
+
 experiment_name="$run_name"
 [[ -n "${SLURM_JOB_ID:-}" ]] && experiment_name="${run_name}__job${SLURM_JOB_ID}_t${TASK}"
 MASTER_PORT=$((21000 + (${SLURM_JOB_ID:-$$} % 20000) + TASK))
 export MASTER_PORT MASTER_ADDR=127.0.0.1 WORLD_SIZE=1 RANK=0 LOCAL_RANK=0
 
-# Resume if an earlier job for this arm left a checkpoint behind.
+# Resume if an earlier job for this arm left a checkpoint behind. A resume beats
+# the warm start (the run already contains it).
 LOAD_CKPT=""
 best_epoch=-1
 for prev_dir in "${OPEN_SORA_ROOT}/outputs/${run_name}__job"*/; do
@@ -141,9 +199,14 @@ for prev_dir in "${OPEN_SORA_ROOT}/outputs/${run_name}__job"*/; do
   ep=$(echo "$ck" | grep -oP 'epoch\K[0-9]+' || echo 0)
   if (( ep > best_epoch )); then best_epoch=$ep; LOAD_CKPT="${prev_dir}${ck}"; fi
 done
-[[ -n "$LOAD_CKPT" ]] && echo "[resume] epoch ${best_epoch}: $LOAD_CKPT"
+if [[ -n "$LOAD_CKPT" ]]; then
+  echo "[resume] epoch ${best_epoch}: $LOAD_CKPT"
+  LOAD_ARGS=( --load "$LOAD_CKPT" --load_optimizer False )
+else
+  LOAD_ARGS=( "${WARMSTART_ARGS[@]}" )
+fi
 
-echo "TASK=${TASK}  ${run_name}  epochs=${TRAIN_EPOCHS}  eff.batch=${EFFECTIVE_BATCH}"
+echo "TASK=${TASK}  ${run_name}  epochs=${TRAIN_EPOCHS}  overfit=${OVERFIT}"
 echo "model args: ${MODEL_ARGS[*]}"
 
 for spec in "${BATCH_LADDER[@]}"; do
@@ -161,7 +224,7 @@ for spec in "${BATCH_LADDER[@]}"; do
     --experiment_name "$experiment_name" --wandb_expr_name "$run_name" \
     --wandb_project wan_multiview_vae_paper \
     --batch_size "$bs" --accumulation_steps "$acc" \
-    ${LOAD_CKPT:+--load "$LOAD_CKPT" --load_optimizer False} \
+    "${LOAD_ARGS[@]}" \
     "${COMMON[@]}" "${MODEL_ARGS[@]}" 2>&1 | tee "$log_tail"
   rc=${PIPESTATUS[0]}
   set -e
