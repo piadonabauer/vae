@@ -26,7 +26,7 @@ answer at all — then E4, then the confirmation reruns E2/E3/E7/E10.
 | Precision / EMA / seed | bf16, ema_decay 0.9999 (eval with EMA), seed 42 |
 | Loss | perceptual 1.5, kl 1e-6, view_consistency 0, discriminator none (except E7). NOTE: the presentation found lower perceptual/KL better — if your best-config numbers used e.g. kl 1e-7, adopt THAT here and state it once; whatever you pick, freeze it for every run |
 | LoRA | use_lora=True, use_lora_after=True, use_lora_before=False, rank 32, viewwise decoder LoRA on |
-| Eval | `full_eval_every=500`; report **best val** and **final-EMA val** |
+| Eval | `full_eval_every=250` (matches `run_paper_sweep.sh`); report **best val** and **final-EMA val** |
 
 **Two-stage discipline (applies to EVERY arm):**
 - Stage 1 — overfit gate: run the arm on `single_sequence` first (cheap: 1 sample). PASS =
@@ -39,7 +39,7 @@ answer at all — then E4, then the confirmation reruns E2/E3/E7/E10.
 **Initialization (default = staged warm-start):** joint arms (E1-d, E5b/c) initialize from
 the converged per-view TC checkpoint (E1-b) with `reinit_view_attention_after_load`; set
 `INIT_CKPT=<path to E1-b ckpt>` when launching. Training from Wan weights only (new modules
-zero-init) is the ablation E7b-2. This creates a dependency: **E1-b must finish before the
+zero-init) is the ablation E7b. This creates a dependency: **E1-b must finish before the
 joint arms start.**
 
 **Report for every run:** val PSNR / SSIM / MSE (mean ± std over clips), bleed_ratio_within,
@@ -47,9 +47,9 @@ bleed_ratio_across, cross-view recon cosine similarity (+ GT reference level), p
 PSNR profile (at least frame0 vs mean of frames 1-8). Log all to wandb with a fixed naming
 scheme, e.g. `paper/E1a_perview_tcF`.
 
-Note: cross-view similarity currently computed in `VAELoss._compute_view_consistency_loss`
-only when weight>0 — expose it as a pure metric (always computed, never in the loss) before
-running. Same for bleed metrics on eval (not just train batches). Consider adding LPIPS to
+Note: all of these are wired into `full_eval`/`final_eval` on this branch (train.py computes
+bleed ratios, cross-view similarity rec+gt, and the per-frame PSNR profile; everything lands
+in `outputs/<run>/eval_metrics.jsonl` and wandb). Remaining nice-to-have: LPIPS in
 `compute_metrics` so eval has a perceptual metric.
 
 ---
