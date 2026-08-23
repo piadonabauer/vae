@@ -82,8 +82,18 @@ joint arms start.**
 
 **Report for every run:** val PSNR / SSIM / MSE (mean ± std over clips), bleed_ratio_within,
 bleed_ratio_across, cross-view recon cosine similarity (+ GT reference level), per-frame-index
-PSNR profile (at least frame0 vs mean of frames 1-8). Log all to wandb with a fixed naming
-scheme, e.g. `paper/E1a_perview_tcF`.
+PSNR profile (at least frame0 vs mean of frames 1-8), per-frame-pair |Δframe| profiles for GT
+and rec (the raw bleeding curves for figure F4). Log all to wandb with a fixed naming scheme,
+e.g. `paper/E1a_perview_tcF`. LPIPS is computed OFFLINE from the clip dumps (below) with
+`scripts/vae/lpips_from_dump.py` — it is promised in the draft's metrics paragraph, so run it
+before filling any table.
+
+**Clip dumps (raw material for all qualitative figures):** every full/final eval saves the
+evaluated clips (GT + reconstruction, uint8, ~20 MB for the 10-clip val set) into the run dir:
+`latest_full_eval_dump.pt` (rolling), `best_val_eval_dump.pt` (kept at the best-val step —
+matches the "best val" table row), `final_eval_dump_{train,val}.pt`. F1 insets, the F5
+qualitative grid, difference maps, LPIPS, and the supplement video are all offline CPU
+scripts over these files — no checkpoint re-decoding needed.
 
 Note: all of these are wired into `full_eval`/`final_eval` on this branch (train.py computes
 bleed ratios, cross-view similarity rec+gt, and the per-frame PSNR profile; everything lands

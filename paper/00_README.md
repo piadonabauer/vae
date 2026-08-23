@@ -78,8 +78,14 @@ python scripts/vae/collect_results.py            # scans outputs/paper_*
 ```
 
 Writes `paper_results.csv` with best-val and last rows per run (PSNR/SSIM/MSE,
-bleed ratios, cross-view similarity, per-frame PSNR profile). The rate–quality
-plot and all tables in the draft are built from this file.
+bleed ratios, cross-view similarity, per-frame PSNR and |Δframe| profiles). The
+rate–quality plot and all tables in the draft are built from this file.
+
+Each run also saves the evaluated clips (GT + recon, uint8) to
+`best_val_eval_dump.pt` / `final_eval_dump_{train,val}.pt` in its output dir.
+Qualitative figures, difference maps, the supplement video, and LPIPS
+(`scripts/vae/lpips_from_dump.py`) are offline scripts over these dumps — no
+GPU or checkpoint re-decoding needed for figure-making.
 
 ## What is NOT rerun by the sweep script
 

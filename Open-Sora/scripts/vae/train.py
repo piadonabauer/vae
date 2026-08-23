@@ -1245,6 +1245,8 @@ def evaluate_model(
     train_target_hw=None,
     train_target_frames=None,
     vis_max_samples=4,
+    dump_path=None,
+    dump_max_clips=32,
 ):
     """
     Run a full evaluation pass over the dataset (or a subset).
@@ -1259,6 +1261,10 @@ def evaluate_model(
         view_flatten_in_loss: Whether to flatten views for loss computation
         use_ema: Whether to use EMA model if available
         value_range: "[0,1]" or "[-1,1]" - if "[-1,1]", scale batch to [-1,1] before model and use for vis
+        dump_path: If set, save GT + reconstruction of the evaluated clips (uint8,
+            up to dump_max_clips) to this .pt file. This is the raw material for the
+            paper's qualitative figures, difference maps, LPIPS, and the supplement
+            video -- everything downstream becomes an offline CPU script.
     Returns:
         Dictionary with aggregated metrics and visualization images
     """
@@ -1282,8 +1288,21 @@ def evaluate_model(
         "xview_sim_rec": [],
         "xview_sim_gt": [],
         "psnr_per_frame": [],
+        # Mean |frame_{t+1} - frame_t| per frame pair, GT and rec separately.
+        # The raw curves behind the bleed *ratio*: flat rec segments inside
+        # 4-frame chunks are the bleeding, plotted directly (figure F4).
+        "l1_delta_per_frame_gt": [],
+        "l1_delta_per_frame_rec": [],
     }
 
+    def _delta_profile(v01):
+        # [B,C,T,H,W] or [B,V,C,T,H,W] -> list of T-1 floats
+        tdim = 3 if v01.dim() == 6 else 2
+        d = (v01.narrow(tdim, 1, v01.shape[tdim] - 1) - v01.narrow(tdim, 0, v01.shape[tdim] - 1)).abs()
+        dims = [i for i in range(d.dim()) if i != tdim]
+        return [float(x) for x in d.mean(dim=dims)]
+
+    dumped_clips = []
     visualization_samples = []
     num_collected = 0
     eval_all = num_eval_samples is None or (
@@ -1342,6 +1361,21 @@ def evaluate_model(
                     diag["xview_sim_gt"].append(sim_gt)
             pf = compute_metrics_per_frame(x01, xr01)
             diag["psnr_per_frame"].append([float(p) for p in pf["psnr_per_frame"]])
+            if x01.shape[3 if is_multiview else 2] > 1:
+                diag["l1_delta_per_frame_gt"].append(_delta_profile(x01))
+                diag["l1_delta_per_frame_rec"].append(_delta_profile(xr01))
+
+            # Clip dump for offline figure-making (uint8 to keep files small).
+            if dump_path is not None and len(dumped_clips) < int(dump_max_clips):
+                paths = batch.get("path", [""] * x01.shape[0])
+                gt_u8 = (x01 * 255.0).round().clamp(0, 255).to(torch.uint8).cpu()
+                rec_u8 = (xr01 * 255.0).round().clamp(0, 255).to(torch.uint8).cpu()
+                for bi in range(x01.shape[0]):
+                    if len(dumped_clips) >= int(dump_max_clips):
+                        break
+                    dumped_clips.append(
+                        {"gt": gt_u8[bi], "rec": rec_u8[bi], "path": str(paths[bi])}
+                    )
 
             # Visualization: first batch only; clip count is separate from metric coverage.
             if len(visualization_samples) == 0:
@@ -1365,14 +1399,21 @@ def evaluate_model(
     for key in ("bleed_ratio_within", "bleed_ratio_across", "xview_sim_rec", "xview_sim_gt"):
         if diag[key]:
             aggregated[key] = float(np.mean(diag[key]))
-    if diag["psnr_per_frame"]:
-        # Mean profile over batches; batches can have different T (buckets), so
-        # average only over batches with the most common length.
-        lengths = [len(p) for p in diag["psnr_per_frame"]]
-        t_common = max(set(lengths), key=lengths.count)
-        profile = np.mean([p for p in diag["psnr_per_frame"] if len(p) == t_common], axis=0)
-        aggregated["psnr_per_frame"] = [float(v) for v in profile]
-    
+    for prof_key in ("psnr_per_frame", "l1_delta_per_frame_gt", "l1_delta_per_frame_rec"):
+        if diag[prof_key]:
+            # Mean profile over batches; batches can have different T (buckets), so
+            # average only over batches with the most common length.
+            lengths = [len(p) for p in diag[prof_key]]
+            t_common = max(set(lengths), key=lengths.count)
+            profile = np.mean([p for p in diag[prof_key] if len(p) == t_common], axis=0)
+            aggregated[prof_key] = [float(v) for v in profile]
+
+    if dump_path is not None and dumped_clips:
+        torch.save(
+            {"clips": dumped_clips, "format": "uint8 [0,255], gt/rec same shape"},
+            dump_path,
+        )
+
     # Return to training mode
     if hasattr(model, "module"):
         model.module.train()
@@ -2441,6 +2482,8 @@ def main():
     stop_at_train_psnr = float(cfg.get("stop_at_train_psnr", 0.0))
     stop_at_train_psnr_consecutive = max(1, int(cfg.get("stop_at_train_psnr_consecutive", 3)))
     train_psnr_target_streak = 0
+    # Highest full-eval PSNR seen so far; its clip dump is kept as best_val_eval_dump.pt.
+    best_val_psnr_for_dump = float("-inf")
     train_psnr_bad_for_ckpt = False
     last_epoch_psnr_mean = float("nan")
     last_saved_ckpt_epoch = -1
@@ -3484,6 +3527,7 @@ def main():
                             eval_val_range = cfg.get("vae_target_range") or (
                                 "[-1,1]" if cfg.model.get("type") == "multiview_wan_video_vae" else "[0,1]"
                             )
+                            _latest_dump = os.path.join(exp_dir, "latest_full_eval_dump.pt")
                             eval_results = evaluate_model(
                                 eval_model,
                                 eval_dataloader,
@@ -3496,8 +3540,21 @@ def main():
                                 train_target_hw=cfg.get("train_target_hw"),
                                 train_target_frames=cfg.get("train_target_frames"),
                                 vis_max_samples=cfg.get("num_reconstruction_vis_samples", 3),
+                                dump_path=_latest_dump if cfg.get("dump_eval_clips", True) else None,
                             )
                             eval_metrics = eval_results["metrics"]
+                            # Keep the clips of the best-val eval around: this is exactly the
+                            # model state the paper's "best val" row reports, so qualitative
+                            # figures can be made from it without re-decoding checkpoints.
+                            if (
+                                cfg.get("dump_eval_clips", True)
+                                and os.path.exists(_latest_dump)
+                                and float(eval_metrics["psnr_mean"]) > best_val_psnr_for_dump
+                            ):
+                                best_val_psnr_for_dump = float(eval_metrics["psnr_mean"])
+                                shutil.copyfile(
+                                    _latest_dump, os.path.join(exp_dir, "best_val_eval_dump.pt")
+                                )
                             logger.info(
                                 "Evaluation (%s) - PSNR: %.2f ± %.2f, SSIM: %.4f ± %.4f, MSE: %.6f ± %.6f",
                                 eval_ds_label,
@@ -3553,6 +3610,10 @@ def main():
                                 if "psnr_per_frame" in eval_metrics:
                                     for fi, pv in enumerate(eval_metrics["psnr_per_frame"]):
                                         log_dict[f"{prefix}/psnr_frame{fi}"] = pv
+                                for dk in ("l1_delta_per_frame_gt", "l1_delta_per_frame_rec"):
+                                    if dk in eval_metrics:
+                                        for fi, dv in enumerate(eval_metrics[dk]):
+                                            log_dict[f"{prefix}/{dk}{fi}"] = dv
                                 wandb.log(log_dict, step=actual_update_step)
 
             if cfg.get("profile", False):
@@ -3828,6 +3889,11 @@ def main():
                     train_target_hw=cfg.get("train_target_hw"),
                     train_target_frames=cfg.get("train_target_frames"),
                     vis_max_samples=cfg.get("num_reconstruction_vis_samples", 3),
+                    dump_path=(
+                        os.path.join(exp_dir, f"final_eval_dump_{label}.pt")
+                        if cfg.get("dump_eval_clips", True)
+                        else None
+                    ),
                 )
                 final_metrics = final_eval_results["metrics"]
                 logger.info("=" * 80)

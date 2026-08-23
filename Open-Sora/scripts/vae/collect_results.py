@@ -61,7 +61,8 @@ def row_for(run_name, tag, record):
     }
     for k in SCALAR_KEYS:
         row[k] = m.get(k, "")
-    row["psnr_per_frame"] = json.dumps(m["psnr_per_frame"]) if "psnr_per_frame" in m else ""
+    for k in ("psnr_per_frame", "l1_delta_per_frame_gt", "l1_delta_per_frame_rec"):
+        row[k] = json.dumps(m[k]) if k in m else ""
     return row
 
 
