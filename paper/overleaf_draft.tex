@@ -1,0 +1,485 @@
+% Rough draft -- bullet points on purpose, prose comes after supervisor feedback.
+% Blocks marked  % [added]  are additions on top of the original Overleaf draft.
+
+\section{Introduction}
+
+Photo-realistic head avatars are commonly built from synchronized multi-view facial video
+captured using dense camera rigs \cite{lombardi2018deep, lombardi2021mixture, cao2022authentic,
+kirschstein2023nersemble, qian2024gaussianavatars}. Such setups produce large volumes of facial
+video that exhibit strong redundancy along two dimensions: \emph{time}, where adjacent frames
+differ by smooth facial motion, and \emph{view}, where nearby cameras observe overlapping facial
+regions with shared appearance and geometry \cite{taubner2025mvp4d, shah2024mv2mae}.
+
+Modern generative pipelines do not operate on pixels, instead latent diffusion models generate in
+the compressed latent space of a Variational Auto Encoder (VAE) \cite{rombach2022high}, and video
+models such as Wan \cite{wan2025wan}, CogVideoX \cite{yang2024cogvideox}, HunyuanVideo
+\cite{kong2024hunyuanvideo} and Cosmos \cite{agarwal2025cosmos} rely on a causal 3D video VAE that
+compresses space by 8x and time by 4x. Therefore, the tokenizer defines what the generator can
+express \cite{yu2024language}. If we want to generate, edit, or interpolate multi-view facial data
+with diffusion models, we first need a latent representation of multi-view video. However, no such
+tokenizer exists: in recent work multi-view streams are encoded independently, which (i) ignores
+the massive view redundancy and (ii) provides no architectural prior for cross-view consistency,
+where each view's latent can drift independently under generation or editing.
+
+This motivates a single jointly learned 4D latent across space, time and view. Rather than
+designing a 4D architecture from scratch, we ask: can a pretrained 3D video VAE be minimally
+extended to absorb the view axis? We extend the Wan 2.1 VAE \cite{wan2025wan} with
+zero-initialized cross-view fusion in the encoder and view-conditioned decoding via low-rank
+adapters \cite{hu2022lora, zhang2023adding}, keeping the pretrained backbone frozen so the latent
+remains compatible with unconditional sampling. Through an extensive experimental study on
+NeRSemble \cite{kirschstein2023nersemble} we find the following: the model reconstructs well when
+either the temporal axis is compressed (4x, the native Wan setting) or the view axis is fused into
+a shared latent, but combining both degrades reconstructions with artifacts, where views collapse
+toward their mean and frames bleed into each other. The 16-channel latent has no spare rate for a
+second compressed axis. This is consistent with the broader tokenizer literature, where
+reconstruction quality under higher compression is recovered by widening the latent channel
+dimension \cite{dai2023emu, chen2024deep, hacohen2024ltx}, although wider latents themselves are
+known to complicate downstream generative modeling \cite{yao2025vavae}. Our extension inherits
+this rate bottleneck without inheriting the fix: fusing a third axis into a channel budget
+designed for one collapses views toward their mean rather than separating them.
+
+% [added] contributions block -- CVPR readers look for this at the end of the intro
+Contributions (draft):
+\begin{itemize}
+  \item A minimal, weight-compatible extension of a pretrained 3D video VAE to synchronized
+        multi-view video: zero-init cross-view fusion in the encoder, per-view low-rank
+        adapters in the decoder; identical to the pretrained model at step 0.
+  \item A controlled empirical study of joint view+temporal compression at fixed latent width:
+        same data, same budget, only the compressed axes vary.
+  \item Two diagnostics that localize the failure (cross-view similarity for ghosting, bleed
+        ratio for temporal averaging), separating it from generic reconstruction error.
+  \item Evidence that the failure is a rate/capacity limit, not a fusion-design problem:
+        fusion and conditioning variants barely matter, overfitting is clean, failure appears
+        only under generalization.
+\end{itemize}
+
+
+\section{Related Work}
+
+Although our target application is head avatar modeling from multi-view facial video, temporal
+and view redundancy are studied more broadly in the video representation learning literature,
+which we shortly review.
+
+\subsection{Single-view video tokenizers}
+
+\begin{itemize}
+  \item latent diffusion \cite{rombach2022high} extended from images to videos by a) inflating
+        image autoencoders with temporal layers \cite{blattmann2023align} or b) training causal
+        3D tokenizers \cite{yu2024language}
+  \item video foundation models converged to: causal 3D conv, 8x spatial, 4x temporal
+        compression, 16-channel latent, trained with L1+LPIPS+KL+GAN objective
+        \cite{esser2021taming} -- carried over from images with little change \cite{wan2025wan,
+        yang2024cogvideox, kong2024hunyuanvideo, agarwal2025cosmos}, many variants
+  \item tuned to compress exactly one/two axes of redundancy (temporal motion, fixed spatial
+        rate) -- no view notion
+  \item multi-view data passed through a standard video model is encoded stream-wise --
+        redundant, not efficient
+  \item our question: what happens if you add a second compressed axis to this fixed budget?
+\end{itemize}
+
+\subsection{Latent capacity}
+
+\begin{itemize}
+  \item not about what redundancy a tokenizer exploits, but: how much compression a latent can
+        support before quality degrades
+  \item Rombach et al. \cite{rombach2022high} show this already in the original LDM ablation,
+        trading downsampling factor against channel count
+  \item Emu \cite{dai2023emu}: fixed 8x spatial compression, widening the latent from 4 to 16
+        channels -- AE recovers small objects instead of losing them
+  \item DC-AE \cite{chen2024deep}: pushes compression up to 128x, but only with the channel
+        count scaled with it -- width is a necessary ingredient of the recipe
+  \item LTX-Video \cite{hacohen2024ltx}: 1:192 spatiotemporal compression bought directly with a
+        128-channel latent, eight times the standard video-VAE width
+  \item VA-VAE (counterpoint) \cite{yao2025vavae}: wider latents reconstruct better but are
+        harder for a diffusion transformer to sample from; their fix is aligning the latent with
+        a frozen vision foundation model rather than widening further
+  \item in short: a new axis of compression can be recovered by adding channels, at a cost on
+        the generation side
+  \item none of it asks what happens when the added axis is \emph{view} rather than space or
+        time, on a latent that is frozen rather than trained from scratch
+\end{itemize}
+
+\subsection{Multi-view and 4D generation}
+
+\begin{itemize}
+  \item view consistency is typically solved architecturally (cross-view attention) or
+        geometrically (explicit 3D)
+  \item cross-view attention as default mechanism in multi-view diffusion \cite{shi2023mvdream,
+        gao2024cat3d, voleti2024sv3d, zuo2024videomv}: every view attends to every other at
+        generation time -- enforces consistency without compressing views into a shared
+        representation
+  \item MV2MAE \cite{shah2024mv2mae}: reconstructs views from synchronized inputs via masked
+        autoencoding, but the objective is reconstruction, not compression; the features are not
+        a latent a generative model can sample from
+  \item 4D generation methods extend consistency to space/time/view but rely on iterative
+        sampling or explicit geometry \cite{zhang20244diffusion, xie2024sv4d, shao2024human4dit,
+        jiang2026mesh4d}, again without a compact representation
+  \item explicit geometry (meshes, radiance fields, Gaussians) \cite{qian2024gaussianavatars,
+        kirschstein2023nersemble}: every view is a rendering of the same structure, so
+        consistency is free -- but there is no compact latent to sample; the geometry itself is
+        the object being modeled, exactly what a generative model is supposed to abstract away
+  \item pipelines for multi-view facial data \cite{lombardi2018deep, lombardi2021mixture} share
+        these limitations: per-frame / pixel-level, no latent space
+  \item 4D generative models are exactly the downstream consumers of such a latent (editing,
+        interpolation, unconditional synthesis of multi-view facial video) -- a shared
+        space/time/view latent is the natural intermediate representation, and it is currently
+        missing
+\end{itemize}
+
+\subsection{The gap}
+
+\begin{itemize}
+  \item no prior work jointly compresses time and view into a single learned latent a downstream
+        generator can sample from: video VAEs compress time, not view; multi-view methods handle
+        view but without compression
+  \item the latent-capacity literature suggests the fix (widen the tokenizer so the view axis
+        gets its own share of the budget) -- but nobody has measured the cost of \emph{not}
+        widening
+  \item we run this experiment on a real pretrained backbone rather than from scratch
+\end{itemize}
+
+
+\section{Methodology}
+
+\subsection{Preliminaries: Wan 2.1 Video VAE}
+
+\begin{itemize}
+  \item causal 3D convolutions, 16-channel latent, 8x spatial / 4x temporal compression
+  \item chunked feature cache mechanism: frame 0 is encoded/decoded alone, then the following
+        frames in chunks of 4; each temporal convolution consumes a rolling cache from the
+        previous chunk; decoding mirrors this (1 latent frame in, 4 frames out, persistent
+        cache) -- important later: the 4 frames of a chunk are exactly where bleeding happens
+\end{itemize}
+
+\subsection{Architecture: multi-view extension}
+
+Input is $[B, V, C, T, H, W]$.
+
+\subsubsection{Design decisions}
+
+\begin{itemize}
+  \item adapt a pretrained 3D VAE instead of training a 4D VAE from scratch: transfer of
+        pretrained knowledge \cite{carreira2017quo, blattmann2023align}, data efficiency, and
+        the latent distribution stays close to the pretrained one
+  \item all new paths are zero-initialized, so the model is exactly the pretrained per-view VAE
+        at step 0
+  \item encoder-side cross-view fusion at the bottleneck: per-view frozen Wan encoder stems,
+        then fusion at 384 channels on the 8x-downsampled grid -- tokens are cheap for
+        attention, but early enough that fused information shapes the latent
+  \item fusion mechanism (default): cross-view attention -- multi-head attention over all
+        $V \cdot N$ tokens per time frame, RMSNorm, zero-init output projection; followed by a
+        binary tree merge (pairwise concat through 2 ResBlocks) down to one stream
+  \item view-conditioned decoding: the single fused latent $[16, T', H/8, W/8]$ is decoded $V$
+        times by the shared frozen decoder; view identity is injected via per-view latent LoRA
+        adapters (Conv3d $z \to \text{rank} \to z$, zero-init up-projection)
+  \item trainability: pre-fusion per-view encoder stem frozen; bottleneck + full decoder get
+        LoRA rank 32 with zero-init up-projections; new fusion modules fully trained; strided
+        temporal convolutions frozen (no LoRA path exists for strided convs -- a stated
+        limitation, revisited in the unfreezing ablation)
+\end{itemize}
+
+% [added] training discipline is part of the method, not just the eval protocol
+\subsubsection{Training discipline}
+\begin{itemize}
+  \item overfit first, then generalize: every architectural change must first reconstruct a
+        single sequence near-perfectly before it gets a full training run -- separates
+        implementation/architecture failures from generalization behavior
+  \item staged initialization (default): the joint view+temporal model warm-starts from the
+        converged temporal-compression checkpoint with re-randomized view attention, i.e.\ the
+        model learns the temporal axis first and the view axis second; joint training from Wan
+        weights only is an ablation
+\end{itemize}
+
+\subsection{Objective}
+
+\begin{itemize}
+  \item loss: $\text{nll} = (\text{L1} + 1.5 \cdot \text{LPIPS}) / \exp(\sigma) + \sigma$ with a
+        learned scalar $\sigma$, plus $10^{-6} \cdot$ KL -- the standard recipe
+        \cite{rombach2022high, zheng2024opensora}
+  \item optional adversarial term with three multi-view discriminator layouts (PatchGAN-style 3D
+        \cite{isola2017image}): (a) views flattened into the batch, (b) views stacked on
+        channels, (c) an explicit 4D discriminator with a view axis and per-view embeddings
+\end{itemize}
+
+\subsection{Data and Preprocessing}
+
+\begin{itemize}
+  \item NeRSemble \cite{kirschstein2023nersemble}: 16 synchronized cameras, 73 fps, 3208x2200;
+        redundant along time (smooth facial motion) and view (neighboring cameras, same face)
+  \item this pipeline: select 8 frontal/upper-row cameras; temporal subsampling to 24 fps, then
+        uniform selection of $T = 9$ frames
+  \item per-camera color correction (as provided with the dataset tooling)
+  \item center square crop; background removal with RobustVideoMatting \cite{lin2022robust},
+        composited on white; bilinear resize to $\{128, 256, 512\}^2$
+  \item stored as $[V, T, C, H, W]$ in $[0,1]$; trained as $[B, V, C, T, H, W]$ rescaled to
+        $[-1,1]$
+  \item data scales: single sequence (overfitting) $\to$ one person, all expressions $\to$ all
+        participants, one expression $\to$ all participants, all expressions
+  \item 10 held-out validation identities (p018, p030, p038, p085, p097, p124, p175, p226,
+        p227, p240)
+\end{itemize}
+
+
+\section{Experiments}
+
+Training pipeline adapted from the Open-Sora VAE trainer (multi-view data loading, per-view
+gradient checkpointing); one L40S GPU per run.
+
+% [added] overview first, so the reader (and the supervisor) sees the plan in one place
+\subsection{Overview of planned experiments}
+\begin{itemize}
+  \item \textbf{Core rate--quality matrix:} \{per-view, fused latent\} $\times$ \{temporal
+        compression off, on\}, plus pretrained Wan zero-shot as floor. Single-axis compression
+        should degrade gracefully -- does joint compression fall off the curve? (headline)
+  \item \textbf{Fusion mechanism:} cross-attention vs.\ joint self-attention vs.\ channel-concat
+        Conv3d vs.\ factorized 4D conv -- is the bottleneck the fusion design?
+  \item \textbf{View-conditioned decoding:} per-view latent LoRA vs.\ learned view embedding
+        vs.\ neither (negative control; expect ghosting)
+  \item \textbf{View count:} $V = 2, 4, 8$ at fixed budget -- rate pressure grows with $V$
+  \item \textbf{Unfreezing:} LoRA-only vs.\ unfrozen encoder vs.\ everything unfrozen -- is it
+        trainability or capacity?
+  \item \textbf{Initialization:} staged warm-start (default) vs.\ joint from Wan weights
+  \item \textbf{Loss:} no discriminator vs.\ the three multi-view discriminator layouts;
+        perceptual/KL weight sensitivity; LoRA rank
+  \item \textbf{Data scale:} single sequence $\to$ one person $\to$ all people -- artifacts
+        should appear only when the model must generalize
+\end{itemize}
+All numbers below come from reruns under one fixed protocol; per-experiment configs are pinned
+in the repository.
+
+\subsection{Experimental Setup}
+
+\begin{itemize}
+  \item two stages for every configuration: \emph{overfit} -- train on a single sequence,
+        reconstruction must be near-perfect (gate: train PSNR $\geq 35$ held for 3 consecutive
+        epochs), verifies the architecture; \emph{generalize} -- train on all participants (one
+        expression), evaluate on held-out identities: encode rather than memorize
+  % [added] comparability spelled out -- this is what makes the tables defensible
+  \item comparability: budget is defined in optimizer updates, not epochs or wall clock;
+        effective batch is fixed at 64 (micro-batch $\times$ accumulation, re-balanced
+        automatically on memory limits and reported if used), so every variant sees the same
+        number of updates AND the same samples; all evaluations fire at the same update steps;
+        no variant is early-stopped or extended individually -- a plateau within the budget is
+        the result, not a reason to train longer
+  \item qualitative figures always show the same fixed participants (selected by dataset order,
+        identical across all variants) -- grids are directly comparable between models
+\end{itemize}
+
+\subsubsection{Dataset}
+
+\begin{itemize}
+  \item train and evaluate on NeRSemble (see Sec.~3.5): $V=2$ synchronized frontal views,
+        $T=9$ frames at 128x128, one expression sequence per participant
+  \item why $T=9$: latent $T'=3$ = frame 0 + two 4-frame chunks, so both bleeding within chunks
+        and artifacts across a chunk boundary are measurable ($T=5$ has no boundary at all)
+  \item why $V=2$: the minimal view count means any capacity failure is attributable to the
+        joint representation itself, not to an aggressive compression ratio; also a clean 2x
+        rate factor against the per-view references; larger $V$ is an explicit ablation
+  \item why 128x128: affordable controlled comparison of the full matrix on single GPUs;
+        resolution is scaled separately as its own check
+  \item 10 participants held out entirely for validation; all reported metrics are computed on
+        these unseen identities
+  \item unless stated otherwise: AdamW (lr 5e-4, constant), bf16, effective batch 64, 170
+        epochs, LoRA rank 32, EMA 0.9999, no discriminator
+\end{itemize}
+
+\subsubsection{Metrics}
+
+\begin{itemize}
+  \item PSNR, SSIM, LPIPS \cite{zhang2018unreasonable} over the full validation set
+  \item plus 3 diagnostics that localize \emph{where} information is lost:
+        (i) \emph{cross-view similarity} -- mean pairwise cosine similarity between
+        reconstructed views, with the GT views' similarity as reference (above the reference =
+        view ghosting);
+        (ii) \emph{bleed ratio} -- ratio of mean absolute inter-frame differences of the
+        reconstruction to those of GT, within 4-frame chunks and across chunk boundaries
+        (1 = faithful motion, $\ll 1$ = temporal bleeding); we also plot the raw per-frame
+        $|\Delta|$ curves, where flat segments inside chunks make the bleeding directly visible;
+        (iii) the per-frame-index error profile, exposing cold-start and chunk-boundary
+        artifacts
+\end{itemize}
+
+% [added] the comparison framing -- without this the tables look like unfair baselines
+\subsubsection{Reference points}
+\begin{itemize}
+  \item no like-for-like baseline exists (nothing else produces a joint multi-view latent), so
+        per-view models are reported as \emph{reference points}, not baselines: pretrained Wan
+        zero-shot, and per-view LoRA-finetuned Wan
+  \item both use $V\times$ our latent rate and enforce no cross-view consistency -- all models
+        are therefore placed on a rate--quality plane instead of a single-rate ranking
+  \item compression ratio: $r = (V \cdot 3 \cdot T \cdot H \cdot W) /
+        (V' \cdot 16 \cdot T' \cdot (H/8)(W/8))$; our configs span per-view without TC up to
+        fused + TC (todo: exact numbers per config)
+\end{itemize}
+
+\subsection{Main Results}
+
+Tables and figures land here after the reruns. Expected shape of the results, based on prior
+(to-be-repeated) experiments -- may change:
+\begin{itemize}
+  \item joint compression collapses; single-axis compression is fine (the rate--quality curve
+        is the headline figure)
+  \item fusion mechanism barely matters (cross-attention, joint self-attention, conv variants)
+        -- fusion design is not the bottleneck
+  \item view conditioning barely matters (learnable view embeddings vs.\ per-view LoRAs)
+  \item loss config matters: best with no discriminator or the 4D multi-view discriminator;
+        standard 3D PatchGAN gives worse colors and less sharpness -- if a discriminator is
+        used it should see the view axis jointly
+  \item lower perceptual and KL weights improved pixel fidelity
+  \item LoRA rank ablation (expect a plateau)
+\end{itemize}
+
+\subsection{Analysis: where does joint compression fail?}
+
+\begin{itemize}
+  \item generalization failure: overfitting is clean, artifacts appear only when many
+        identities are trained -- the compressed representation can memorize temporal detail
+        but cannot encode it for new content
+  \item chunk mechanism: decoding all latent frames in a single non-causal pass removes frame-0
+        and boundary artifacts -- the artifact is the cost of causality, not of temporal
+        compression per se
+  % [added] tie the diagnostics into the analysis
+  \item diagnostics localize the failure: cross-view similarity of reconstructions rises above
+        the GT level (ghosting) while bleed ratio falls below 1 within chunks (temporal
+        averaging) -- both are decoder-regresses-to-the-mean signatures
+  \item table of artifact-preserving interventions (non-causal decode, unfreezing, temporal
+        losses, sub-frame embeddings, ...) with their effect on the diagnostics
+\end{itemize}
+
+\subsection{Ablations}
+
+\subsubsection{Fusion mechanism}
+\begin{itemize}
+  \item joint self-attention: one attention over the concatenated token sequence of all views,
+        then concat + 2 ResBlocks
+  \item channel-concat Conv3d: views stacked on channels, 1x1x1 Conv3d + GN/SiLU + two
+        symmetric (non-causal) 3D residual blocks
+  \item factorized 4D convolution: spatial 3x3 Conv2d, temporal 3x3x3 Conv3d, then a view-axis
+        Conv3d with kernel $(V,3,3)$ compressing $V \to 1$ -- a (2+1+1)D factorization
+\end{itemize}
+
+\subsubsection{View-conditioned decoding}
+\begin{itemize}
+  \item alternative to per-view latent LoRA adapters: view identity injected as a learned
+        per-view latent embedding (nn.Embedding($V$, 16) added to $z$)
+  % [added] the negative control makes "conditioning works" a measured claim
+  \item negative control: no conditioning at all -- expect full ghosting; anchors the
+        cross-view-similarity diagnostic
+\end{itemize}
+
+\subsubsection{Pre-fusion encoder LoRA}
+\begin{itemize}
+  \item optionally add LoRAs to the frozen per-view encoder stem -- does adapting the encoder
+        before fusion help?
+\end{itemize}
+
+\subsubsection{Unfreezing temporal convolutions}
+\begin{itemize}
+  \item strided temporal convolutions have no LoRA path and are frozen in all LoRA configs --
+        unfreeze them (and optionally the full encoder / full decoder); if even full unfreezing
+        does not fix joint compression, the bottleneck is capacity, not trainability
+\end{itemize}
+
+% [added] was announced in the dataset bullets but had no subsection
+\subsubsection{Number of views}
+\begin{itemize}
+  \item $V = 2, 4, 8$ at fixed budget and fixed fusion mechanism -- rate pressure on the shared
+        latent grows with $V$; expect monotone degradation and earlier onset of ghosting
+\end{itemize}
+
+\subsubsection{Initialization strategy}
+\begin{itemize}
+  \item warm-start from a temporal-compression checkpoint with re-randomized view attention
+        (our default) vs.\ joint training from Wan-pretrained weights only
+\end{itemize}
+
+% [added] the data-scale sweep backs the "generalization failure" claim in the analysis
+\subsubsection{Training-set size}
+\begin{itemize}
+  \item single sequence $\to$ one person $\to$ all participants (one expression): bleed ratio
+        and ghosting vs.\ dataset size -- compression only breaks when it must generalize
+\end{itemize}
+
+
+\section{Discussion}
+
+\subsection{Capacity}
+
+\begin{itemize}
+  \item in our setup: the Wan latent has 16 channels per $8 \times 8 \times 4$ pixel block,
+        i.e.\ $3 \cdot 8 \cdot 8 \cdot 4 / 16 = 48\times$ compression; fusing $V=2$ views
+        doubles this to $96\times$; $V=4$ gives $192\times$
+  \item for comparison: Emu \cite{dai2023emu} needed a widening from 4 to 16 channels just to
+        hold fine detail at comparable rates; LTX-Video \cite{hacohen2024ltx} buys $192\times$
+        with 128 channels
+  \item our setting demands roughly 2--4$\times$ the information density of the pretrained
+        latent at fixed width -- the observed failure is what rate exhaustion predicts: the
+        decoder regresses to the conditional mean along whichever axis was compressed
+        (ghosting = view mean, bleeding = temporal mean)
+  \item two supporting observations (todo: confirm they survive the reruns!): (i) fusion and
+        view-conditioning choices barely affect quality; (ii) what fails first is
+        high-frequency identity detail (nuanced facial appearance, small accessories such as
+        earrings) -- precisely the detail class that widening image latents from 4 to 16
+        channels preserved in Emu \cite{dai2023emu}
+\end{itemize}
+
+\subsection{Bottleneck: the encoder-side latent}
+
+\begin{itemize}
+  \item the decoder side works: per-view LoRA + embeddings reliably disambiguate views from a
+        shared latent; conditioning mechanisms are interchangeable
+  \item the information is missing, not mis-decoded: everything operating after the bottleneck
+        (embeddings, residual decoders, auxiliary losses) failed to recover it -- post-hoc
+        fixes cannot restore information the latent never carried
+  \item so: the decoder can emit distinct views, but the fixed-width latent cannot carry them
+        under joint compression
+\end{itemize}
+
+\subsection{Implications and Applications}
+
+\begin{itemize}
+  \item designing a 4D tokenizer likely requires scaling latent width with the number of
+        compressed axes (\cite{chen2024deep, hacohen2024ltx} suggest roughly proportional
+        scaling) -- i.e.\ a 4D VAE wants 32--64 channels, which means pretraining or heavy
+        finetuning, not adapters
+  \item alternative: keep view identity out of the latent -- compress only shared content and
+        carry view as decoder conditioning (our per-view LoRA is the adapter-scale version of
+        this; a real system would train it)
+  \item or asymmetric: compress time natively, keep views uncompressed but consistent via
+        cross-view attention -- matching what 4D diffusion systems converged to
+        \cite{xie2024sv4d, shao2024human4dit}
+\end{itemize}
+
+
+\section{Conclusion}
+
+\begin{itemize}
+  \item (opening sentence to write last)
+  \item we extended a pretrained 3D video VAE to multi-view video with zero-initialized
+        cross-view fusion and per-view low-rank decoding, preserving the pretrained latent
+        distribution and unconditional sampling
+  \item the study on multi-view facial video shows the fixed 16-channel latent absorbs either
+        4x temporal compression or the fused view axis, but not both -- joint compression
+        exhausts the latent's capacity and the decoder regresses to means, producing
+        cross-view ghosting and intra-chunk temporal bleeding
+  \item future 4D tokenizers: scale latent capacity with the number of compressed axes, or
+        keep view identity out of the latent
+\end{itemize}
+
+
+\section{Limitations}
+
+\begin{itemize}
+  \item compressed data: 9-frame clips (rate pressure grows with $T$ -- longer clips could
+        shift conclusions), 2--8 frontal views, not the full rig
+  \item one backbone family (Wan 2.1); the chunked-cache specifics of the temporal path are
+        Wan's, other causal video VAEs may fail differently
+  % [added]
+  \item adapter-scale training budget: conclusions hold for LoRA-based adaptation of a frozen
+        backbone; full pretraining at 4D scale could move the capacity wall (that experiment is
+        exactly what this study argues one should budget for)
+  \item downstream generation untested: we evaluate the latent by reconstruction; whether a
+        diffusion model samples well from the fused latent is future work
+  \item single domain (faces, studio capture, white background); redundancy structure of
+        in-the-wild multi-view data may differ
+\end{itemize}
