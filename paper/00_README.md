@@ -55,10 +55,16 @@ How long the runs go, and why the numbers are comparable:
   consecutive epochs (cap 2000 epochs; hitting the cap below 30 = FAIL).
 - Generalization: every arm runs the identical fixed budget — 170 epochs at
   effective batch 64 = the same optimizer updates and samples seen for all
-  arms (the OOM ladder only reshuffles bs x accum). Full evals fire every 250
+  arms (the OOM ladder only reshuffles bs x accum). That is ~850 updates
+  (358 train samples / 64 = 5 updates per epoch). Full evals fire every 50
   optimizer updates, so all arms are measured at the same update steps. Do
   not early-stop or extend individual arms; a plateau below PSNR 30 is a
   result, not a reason to train longer. Details in `02_experiments.md`.
+- Logging: wandb is mandatory (the script aborts if not logged in). Scalars
+  log densely early then every 20 updates; reconstruction grids back off
+  geometrically. Qualitative samples are the SAME people in every run —
+  picked by sorted dataset order, not the shuffled batch (val grids:
+  p018, p030, p038). So grids from any two arms are directly comparable.
 - Wall clock: jobs request 18h (schedules much faster than >20h on the
   cluster). Each job queues a dependent successor before training and writes
   `outputs/<run>.DONE` on completion, so an arm that needs 40h just spans

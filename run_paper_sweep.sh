@@ -97,6 +97,15 @@ fi
 
 cd "$OPEN_SORA_ROOT"
 
+# wandb is part of the protocol: every run must log. Fail fast instead of
+# silently training without a record.
+if [[ "${WANDB_MODE:-}" != "offline" && -z "${WANDB_API_KEY:-}" ]] \
+   && ! grep -q "api.wandb.ai" "$HOME/.netrc" 2>/dev/null; then
+  echo "ERROR: wandb is not configured (no WANDB_API_KEY, no ~/.netrc entry)."
+  echo "Run 'wandb login' or export WANDB_API_KEY before submitting."
+  exit 1
+fi
+
 # Shared protocol flags. T=9 on purpose: latent T'=3 = frame 0 + two 4-frame
 # chunks, so bleeding within chunks AND across a boundary are both measurable.
 if [[ "$OVERFIT" == "1" ]]; then
@@ -126,10 +135,24 @@ COMMON=(
   --optimization False
   --FAST_MODE False
   --save_ckpt True
-  --log_every 200
-  --log_schedule_steps "[5,10,20,50,100,200]"
-  --full_eval_every 250
-  --fixed_seq_eval_every_epochs 0
+  # Logging cadence, tuned for the actual run length: 358 train samples at
+  # effective batch 64 = 5 updates/epoch = ~850 updates over 170 epochs.
+  # Scalars: dense early schedule, then every 20 updates (~4 epochs) -> ~50 points.
+  # Images: same early schedule, then geometric backoff (x1.5, capped) -> ~20 grids.
+  # Full eval: every 50 updates (~10 epochs) -> ~17 val evals per run; the val set
+  # is only 10 clips so this is cheap, and best-val selection needs the density.
+  # All cadences count OPTIMIZER UPDATES, so eval/log points align across arms.
+  --log_every 20
+  --log_schedule_steps "[1,2,3,5,8,12,20,30,50,75,100,150,200]"
+  --image_log_growth_factor 1.5
+  --image_log_max_interval 2000
+  --full_eval_every 50
+  --eval_num_samples 0
+  --fixed_seq_eval_every_epochs 10
+  # Qualitative comparability: vis samples are picked by sorted dataset order
+  # (first 3 distinct train participants / first 3 val clips = p018, p030, p038),
+  # NOT from the shuffled batch -- identical people in every run and every arm.
+  --num_reconstruction_vis_samples 3
 )
 
 MODEL_ARGS=()

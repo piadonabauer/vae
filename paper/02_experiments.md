@@ -26,7 +26,9 @@ answer at all — then E4, then the confirmation reruns E2/E3/E7/E10.
 | Precision / EMA / seed | bf16, ema_decay 0.9999 (eval with EMA), seed 42 |
 | Loss | perceptual 1.5, kl 1e-6, view_consistency 0, discriminator none (except E7). NOTE: the presentation found lower perceptual/KL better — if your best-config numbers used e.g. kl 1e-7, adopt THAT here and state it once; whatever you pick, freeze it for every run |
 | LoRA | use_lora=True, use_lora_after=True, use_lora_before=False, rank 32, viewwise decoder LoRA on |
-| Eval | `full_eval_every=250` (matches `run_paper_sweep.sh`); report **best val** and **final-EMA val** |
+| Eval | `full_eval_every=50` updates (~10 epochs; matches `run_paper_sweep.sh`); report **best val** and **final-EMA val** |
+| Logging | wandb REQUIRED for every run (the sweep script refuses to start without a wandb login). Scalars: early schedule [1,2,3,5,8,12,20,30,50,75,100,150,200], then every 20 updates. Reconstruction grids: same early schedule, then geometric backoff (x1.5, cap 2000). Fixed-sequence per-frame eval every 10 epochs |
+| Qualitative vis | Always the same people, in every run and arm: samples come from sorted dataset order, not the shuffled batch. Train grids = first 3 distinct train participants (p017 + next two non-val); val grids = first 3 val clips = **p018, p030, p038**; fixed-seq eval = first train/val file with the shared sequence name |
 
 **Two-stage discipline (applies to EVERY arm):**
 - Stage 1 — overfit gate: run the arm on `single_sequence` first (cheap: 1 sample). PASS =
@@ -41,9 +43,11 @@ answer at all — then E4, then the confirmation reruns E2/E3/E7/E10.
   and never wall clock. With effective batch pinned at 64 (bs x accum, the OOM ladder only
   reshuffles the product) and the same dataset, *170 epochs = the same number of updates and
   the same samples seen for every arm* — that is the only reason epochs are usable as a label.
-- Eval points align automatically: `full_eval_every=250` is counted in optimizer updates
+- Eval points align automatically: `full_eval_every=50` is counted in optimizer updates
   (train.py checks `actual_update_step % full_eval_every`), so every arm is evaluated at
-  update 250, 500, 750, ... Comparisons are only valid at equal `actual_update_step`; the
+  update 50, 100, 150, ... (~17 val evals over the 850-update budget: 358 samples /
+  effective batch 64 = 5 updates per epoch, x 170 epochs). Comparisons are only valid at
+  equal `actual_update_step`; the
   jsonl records carry it, `collect_results.py` exports it — check the column before citing
   two numbers side by side.
 - Stage-1 gate stopping rule: the gate run stops itself once epoch-mean train PSNR >= 30

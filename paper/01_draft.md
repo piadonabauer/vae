@@ -298,8 +298,11 @@ are computed on these unseen identities. Unless stated otherwise, every experime
 identical recipe: AdamW (lr 5e-4, constant), bf16, effective batch 64, 170 epochs, LoRA rank
 32, EMA 0.9999, no discriminator; a single L40S GPU per run. Because the effective batch is
 fixed, the epoch budget corresponds to an identical number of optimizer updates and samples
-seen for every model variant, and all evaluations fire at the same update steps (every 250
-updates) — variants are therefore compared at strictly equal training budget throughout. No
+seen for every model variant, and all evaluations fire at the same update steps (every 50
+updates) — variants are therefore compared at strictly equal training budget throughout.
+Qualitative results always show the same fixed participants (chosen by dataset order, held
+identical across all variants), so reconstruction grids are directly comparable between
+models. No
 run is early-stopped or extended individually: when a variant plateaus below the target
 quality within the budget, we report the plateau — under a fixed rate and budget, that *is*
 the measurement.
