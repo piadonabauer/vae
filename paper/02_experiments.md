@@ -32,8 +32,10 @@ answer at all — then E4, then the confirmation reruns E2/E3/E7/E10.
 
 **Two-stage discipline (applies to EVERY arm):**
 - Stage 1 — overfit gate: run the arm on `single_sequence` first (cheap: 1 sample). PASS =
-  near-perfect reconstruction (train PSNR > ~30). FAIL = implementation/architecture problem;
+  near-perfect reconstruction (train PSNR >= 35). FAIL = implementation/architecture problem;
   do not launch Stage 2. (`OVERFIT=1` in `run_paper_sweep.sh` switches any arm to this mode.)
+  If an arm plateaus just below 35 but reconstructions look pixel-perfect, judge by eye —
+  the gate catches breakage, it is not a benchmark.
 - Stage 2 — generalization: the actual protocol run on `all_people_one_expression` with the
   held-out identities. All reported numbers come from Stage 2; Stage 1 results appear in the
   paper only as the overfit-vs-generalize contrast (bleeding/ghosting exist only in Stage 2).
@@ -50,15 +52,19 @@ answer at all — then E4, then the confirmation reruns E2/E3/E7/E10.
   equal `actual_update_step`; the
   jsonl records carry it, `collect_results.py` exports it — check the column before citing
   two numbers side by side.
-- Stage-1 gate stopping rule: the gate run stops itself once epoch-mean train PSNR >= 30
+- Stage-1 gate stopping rule: the gate run stops itself once epoch-mean train PSNR >= 35
   holds for 3 consecutive epochs (`stop_at_train_psnr`), hard cap 2000 epochs. If the cap is
-  hit below 30, the arm FAILED the gate. Gates are pass/fail — never compare gate PSNRs
+  hit below 35, the arm FAILED the gate. Gates are pass/fail — never compare gate PSNRs
   between arms (they stop at different step counts by construction).
-- Stage-2 stopping rule: there is none — every arm runs the full fixed budget, even if it
-  plateaus early or never reaches PSNR 30 (a TC arm plateauing at e.g. 27 dB IS the result;
-  the fixed budget is what makes that a statement about the model and not about training
-  time). The only exception is the pre-existing divergence guard (train PSNR < 15 for 3
-  epochs), and a run stopped by it is reported as failed, not with its numbers.
+- Stage-2 stopping rule: there is NONE, not even a divergence guard — every arm runs the
+  full fixed budget, even if it plateaus early or never reaches PSNR 30 (a TC arm plateauing
+  at e.g. 27 dB IS the result; the fixed budget is what makes that a statement about the
+  model and not about training time). The old train-PSNR divergence guard is neutralized in
+  the sweep (`train_psnr_guard_threshold 0`) for two reasons: a slow-learning generalization
+  arm must never be killed by a heuristic, and the guard's activation epoch depended on the
+  micro-batch size (steps-per-epoch), so arms on different OOM-ladder rungs would have had
+  different guard behavior — a protocol violation. If a run truly diverges you will see it
+  on wandb; let it finish or relaunch it, but never let a heuristic stop it.
 - If compute forces trimming the budget, change `TRAIN_EPOCHS` for ALL arms and rerun the
   affected comparisons — never shorten a single arm.
 

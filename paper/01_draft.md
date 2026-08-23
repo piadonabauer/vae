@@ -309,7 +309,7 @@ the measurement.
 
 **Two-stage protocol: overfit, then generalize.** Every configuration passes two gates.
 *Stage 1 (overfit):* train on a single sequence; reconstruction must be near-perfect
-[PSNR > 30; runs stop once this holds for three consecutive epochs, with a fixed cap]. This
+[PSNR >= 35; runs stop once this holds for three consecutive epochs, with a fixed cap]. This
 verifies that the architecture *can represent* the signal — a failure here
 is an implementation or model-capacity problem and disqualifies the configuration before any
 expensive run. *Stage 2 (generalize):* train on all participants (one expression) and
@@ -334,6 +334,44 @@ differences of the reconstruction to those of the ground truth, computed separat
 4-frame temporal chunks and across chunk boundaries (a value of 1 is faithful motion; values
 well below 1 indicate temporal bleeding); (iii) the *per-frame-index error profile*, which
 exposes cold-start and chunk-boundary artifacts.
+
+**Protocol design rationale** *(bullets to weave into 4.1 prose or a supplementary
+"experimental design" paragraph — each pre-empts a likely reviewer question)*:
+
+- **Why V=2.** The minimal view count is the *strongest* setting for a capacity claim: two
+  nearby frontal views are barely more information than one, so if the joint latent already
+  saturates at V=2, it fails a fortiori for more views — whereas a failure at V=8 could be
+  dismissed as an unreasonably aggressive 8-to-1 ratio rather than a property of the
+  representation. V=2 also makes the rate accounting a clean factor of two against the
+  per-view references. Larger view counts are studied as an explicit ablation axis (E4),
+  turning the view count into a measured result instead of a defended choice.
+- **Why T=9.** The latent then has T'=3: frame 0 (encoded alone by the causal chunking) plus
+  two 4-frame chunks — the shortest clip in which both *within-chunk* bleeding and
+  *cross-chunk-boundary* artifacts are measurable. Shorter windows (e.g. T=5) contain no
+  chunk boundary at all and silently hide the boundary failure mode.
+- **Why 128x128 for the matrix.** The contribution is a *controlled comparison*, not a
+  scaling record: the low resolution is what makes the full arm matrix affordable at a fixed
+  budget on single GPUs; resolution is scaled separately as its own check.
+- **Comparability.** The training budget is defined in optimizer updates, not epochs or wall
+  clock: the effective batch is pinned (micro-batch x accumulation = 64, re-balanced
+  automatically on memory limits), so every variant sees the identical number of updates
+  *and* samples. All evaluations fire at the same update steps; no variant is early-stopped
+  or extended individually — a variant that plateaus below the target within the budget is
+  reported at its plateau, which under fixed rate and budget is the measurement itself.
+- **No adversarial loss in the main protocol.** GAN terms introduce run-to-run variance and
+  a second optimization that can mask or mimic capacity effects; the main matrix is purely
+  L1 + LPIPS + KL, and discriminators are studied in a dedicated ablation (E7).
+- **Held-out identities, not held-out frames.** The val split holds out 10 *participants*
+  entirely, so generalization means encoding unseen faces — the regime where a rate-limited
+  latent must compress rather than memorize.
+- **Deterministic qualitative panels.** Visualized samples are selected by sorted dataset
+  order (never from the shuffled batch), so every figure shows the same people for every
+  variant — qualitative panels are directly comparable across models and training stages.
+- **Overfit gate before every expensive run.** Each configuration must first reconstruct a
+  single sequence near-perfectly (train PSNR >= 35 held for 3 epochs); this separates
+  implementation/architecture failures from generalization behavior before GPU-weeks are
+  spent, and the overfit-vs-generalize contrast itself localizes bleeding/ghosting as
+  generalization failures.
 
 **Reference points.** No existing method produces a joint latent for synchronized multi-view
 video, so there is no like-for-like baseline. We instead report two per-view *reference

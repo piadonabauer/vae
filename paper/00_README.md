@@ -51,8 +51,8 @@ auto-resumes from the newest checkpoint of a previous job for the same arm.
 
 How long the runs go, and why the numbers are comparable:
 
-- Overfit gate: stops itself once epoch-mean train PSNR >= 30 for 3
-  consecutive epochs (cap 2000 epochs; hitting the cap below 30 = FAIL).
+- Overfit gate: stops itself once epoch-mean train PSNR >= 35 for 3
+  consecutive epochs (cap 2000 epochs; hitting the cap below 35 = FAIL).
 - Generalization: every arm runs the identical fixed budget — 170 epochs at
   effective batch 64 = the same optimizer updates and samples seen for all
   arms (the OOM ladder only reshuffles bs x accum). That is ~850 updates

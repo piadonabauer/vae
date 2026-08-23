@@ -30,9 +30,11 @@
 # The overfit gate catches implementation problems for the cost of a few GPU-hours.
 #
 # Run length & comparability -- READ THIS:
-# - Overfit gate: stops itself once epoch-mean train PSNR >= 30 for 3 consecutive
+# - Overfit gate: stops itself once epoch-mean train PSNR >= 35 for 3 consecutive
 #   epochs (stop_at_train_psnr), capped at 2000 epochs. PASS/FAIL only, the gate
-#   is never compared numerically between arms.
+#   is never compared numerically between arms. (If an arm looks visually perfect
+#   but plateaus just under 35, judge by eye before declaring it failed -- the
+#   gate exists to catch breakage, not to be a benchmark.)
 # - Generalization: FIXED budget for every arm -- 170 epochs at effective batch 64
 #   = identical optimizer updates AND identical samples seen, no matter which
 #   micro-batch the OOM ladder lands on (bs*accum is held at 64). full_eval_every
@@ -111,7 +113,7 @@ fi
 if [[ "$OVERFIT" == "1" ]]; then
   # 1 clip, no val set. The run stops itself once the gate target is held.
   DATA_ARGS=( --data_preset single_sequence
-              --stop_at_train_psnr 30 --stop_at_train_psnr_consecutive 3 )
+              --stop_at_train_psnr 35 --stop_at_train_psnr_consecutive 3 )
 else
   DATA_ARGS=(
     --data_preset all_people_one_expression
@@ -130,6 +132,13 @@ COMMON=(
   --model.use_lora_after True
   --model.lora_rank 32
   --discriminator_choice none
+  # Neutralize the divergence guard's early stop (threshold 0 can never trip):
+  # (a) a slow-learning arm must never be killed -- the fixed budget is the
+  #     protocol, and (b) the guard's start epoch derives from steps-per-epoch,
+  #     i.e. from the MICRO-batch, so arms on different rungs of the OOM ladder
+  #     would get different guard behavior. Keep train_psnr_guard True: the
+  #     epoch-PSNR aggregation it drives also feeds the overfit-gate stop.
+  --train_psnr_guard_threshold 0
   --epochs "$TRAIN_EPOCHS"
   --wandb True
   --optimization False
