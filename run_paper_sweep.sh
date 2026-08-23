@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=0-24:00:00
+#SBATCH --time=0-18:00:00
 #SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.out
 #SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.err
 #SBATCH --array=1-7%4
@@ -28,6 +28,22 @@
 # Two-stage discipline: run every arm with OVERFIT=1 first (single_sequence, must
 # reach near-perfect reconstruction) before launching the real generalization run.
 # The overfit gate catches implementation problems for the cost of a few GPU-hours.
+#
+# Run length & comparability -- READ THIS:
+# - Overfit gate: stops itself once epoch-mean train PSNR >= 30 for 3 consecutive
+#   epochs (stop_at_train_psnr), capped at 2000 epochs. PASS/FAIL only, the gate
+#   is never compared numerically between arms.
+# - Generalization: FIXED budget for every arm -- 170 epochs at effective batch 64
+#   = identical optimizer updates AND identical samples seen, no matter which
+#   micro-batch the OOM ladder lands on (bs*accum is held at 64). full_eval_every
+#   is counted in optimizer updates, so all arms are evaluated at the SAME update
+#   steps. Never early-stop a generalization arm and never change TRAIN_EPOCHS for
+#   one arm only -- both would make the numbers incomparable.
+#
+# Wall clock: jobs request 18h (easier to schedule than >20h). Each job submits a
+# dependent successor (afterany) before training; on completion it writes a .DONE
+# marker so leftover successors exit immediately. CHAIN_LEFT (default 3) caps the
+# chain, i.e. up to 4 x 18h per arm. Checkpoints are per-epoch, resume is automatic.
 #
 # Staged init (default for the joint arms 4-6): warm-start from the converged E1b
 # per-view TC checkpoint -- temporal axis first, view axis second. The script finds
@@ -84,7 +100,9 @@ cd "$OPEN_SORA_ROOT"
 # Shared protocol flags. T=9 on purpose: latent T'=3 = frame 0 + two 4-frame
 # chunks, so bleeding within chunks AND across a boundary are both measurable.
 if [[ "$OVERFIT" == "1" ]]; then
-  DATA_ARGS=( --data_preset single_sequence )   # 1 clip, no val set
+  # 1 clip, no val set. The run stops itself once the gate target is held.
+  DATA_ARGS=( --data_preset single_sequence
+              --stop_at_train_psnr 30 --stop_at_train_psnr_consecutive 3 )
 else
   DATA_ARGS=(
     --data_preset all_people_one_expression
@@ -158,6 +176,25 @@ esac
 
 [[ "$OVERFIT" == "1" ]] && run_name="${run_name}_overfit"
 
+# Finished arms leave a marker; leftover chained successors exit immediately.
+DONE_MARKER="${OPEN_SORA_ROOT}/outputs/${run_name}.DONE"
+if [[ -f "$DONE_MARKER" ]]; then
+  echo "[chain] ${run_name} already done (${DONE_MARKER}); nothing to do."
+  exit 0
+fi
+
+# Submit the successor BEFORE training starts, so a wall-clock kill cannot break
+# the chain. The successor resumes from the newest checkpoint (logic below) or
+# exits via the marker if this job finishes the arm.
+CHAIN_LEFT="${CHAIN_LEFT:-3}"
+if [[ -n "${SLURM_JOB_ID:-}" && "$CHAIN_LEFT" -gt 0 && "$DRY_RUN" != "1" ]]; then
+  sbatch --dependency="afterany:${SLURM_JOB_ID}" \
+         --export="ALL,TASK=${TASK},OVERFIT=${OVERFIT},CHAIN_LEFT=$((CHAIN_LEFT - 1)),INIT_CKPT=${INIT_CKPT}" \
+         "$0" \
+    && echo "[chain] successor queued (CHAIN_LEFT=$((CHAIN_LEFT - 1)))" \
+    || echo "[chain] WARNING: could not queue successor; resubmit by hand if the job times out"
+fi
+
 # Staged init for the joint arms (4-6): default to the best E1b checkpoint unless
 # the caller pins INIT_CKPT or disables it with INIT_CKPT=none. Skipped in overfit
 # mode (the gate tests the architecture, not the curriculum).
@@ -228,7 +265,12 @@ for spec in "${BATCH_LADDER[@]}"; do
     "${COMMON[@]}" "${MODEL_ARGS[@]}" 2>&1 | tee "$log_tail"
   rc=${PIPESTATUS[0]}
   set -e
-  if (( rc == 0 )); then rm -f "$log_tail"; echo "done (b=${bs} a=${acc})"; exit 0; fi
+  if (( rc == 0 )); then
+    rm -f "$log_tail"
+    touch "$DONE_MARKER"
+    echo "done (b=${bs} a=${acc}); marker: $DONE_MARKER"
+    exit 0
+  fi
   if ! grep -qiE 'CUDA out of memory|OutOfMemoryError' "$log_tail"; then
     rm -f "$log_tail"; exit "$rc"
   fi

@@ -49,6 +49,21 @@ compression) warm-start from the arm-2 checkpoint by default.
 The script handles OOM (retries smaller batch at same effective batch) and
 auto-resumes from the newest checkpoint of a previous job for the same arm.
 
+How long the runs go, and why the numbers are comparable:
+
+- Overfit gate: stops itself once epoch-mean train PSNR >= 30 for 3
+  consecutive epochs (cap 2000 epochs; hitting the cap below 30 = FAIL).
+- Generalization: every arm runs the identical fixed budget — 170 epochs at
+  effective batch 64 = the same optimizer updates and samples seen for all
+  arms (the OOM ladder only reshuffles bs x accum). Full evals fire every 250
+  optimizer updates, so all arms are measured at the same update steps. Do
+  not early-stop or extend individual arms; a plateau below PSNR 30 is a
+  result, not a reason to train longer. Details in `02_experiments.md`.
+- Wall clock: jobs request 18h (schedules much faster than >20h on the
+  cluster). Each job queues a dependent successor before training and writes
+  `outputs/<run>.DONE` on completion, so an arm that needs 40h just spans
+  2-3 chained jobs with automatic resume — no babysitting needed.
+
 ## Collecting results
 
 ```bash

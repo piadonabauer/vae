@@ -2434,6 +2434,13 @@ def main():
     train_psnr_guard_min_epochs = max(0, int(cfg.get("train_psnr_guard_min_epochs", 0)))
     train_psnr_guard_min_updates = max(0, int(cfg.get("train_psnr_guard_min_updates", 0)))
     train_psnr_low_streak = 0
+    # Mirror image of the guard, for the Stage-1 overfit gate: stop as soon as the
+    # epoch-mean train PSNR holds ABOVE a target for K consecutive epochs. 0.0 = off.
+    # Do NOT set this on generalization runs -- those keep the fixed budget so that
+    # all arms are compared at identical optimizer-update counts.
+    stop_at_train_psnr = float(cfg.get("stop_at_train_psnr", 0.0))
+    stop_at_train_psnr_consecutive = max(1, int(cfg.get("stop_at_train_psnr_consecutive", 3)))
+    train_psnr_target_streak = 0
     train_psnr_bad_for_ckpt = False
     last_epoch_psnr_mean = float("nan")
     last_saved_ckpt_epoch = -1
@@ -3579,6 +3586,23 @@ def main():
                             train_psnr_guard_min_epochs,
                             epoch_psnr_mean,
                         )
+        # Overfit-gate target stop (see init above): success counterpart of the guard.
+        if stop_at_train_psnr > 0 and epoch_psnr_count > 0 and not early_stop_requested:
+            if epoch_psnr_mean >= stop_at_train_psnr:
+                train_psnr_target_streak += 1
+            else:
+                train_psnr_target_streak = 0
+            if train_psnr_target_streak >= stop_at_train_psnr_consecutive:
+                early_stop_requested = True
+                if coordinator.is_master():
+                    logger.info(
+                        "Overfit gate PASSED: %s consecutive epochs with mean train PSNR >= %.2f "
+                        "(epoch %s, epoch_mean=%.3f). Stopping early.",
+                        train_psnr_target_streak,
+                        stop_at_train_psnr,
+                        epoch,
+                        epoch_psnr_mean,
+                    )
         # == checkpoint saving at epoch end (optional; default off via save_ckpt) ==
         save_ckpt = cfg.get("save_ckpt", False)
         save_every_n_epochs = max(1, int(cfg.get("save_every_n_epochs", 1)))
@@ -3648,7 +3672,9 @@ def main():
                 rm_checkpoints(exp_dir, keep_n_latest=keep_n_latest)
                 logger.info("Removed old checkpoints and kept %s latest one(s).", keep_n_latest)
         if early_stop_requested:
-            logger.info("Exited training loop early: epoch-based train_batch PSNR guard (see train_psnr_guard_*).")
+            logger.info(
+                "Exited training loop early (PSNR guard tripped or overfit-gate target reached)."
+            )
             break
 
         # Reset sampler for next epoch (if it has the reset method)

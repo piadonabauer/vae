@@ -296,11 +296,18 @@ numbers/tables. LaTeX headers as you'd paste them.)*
 per participant. We hold out 10 participants entirely for validation; all reported metrics
 are computed on these unseen identities. Unless stated otherwise, every experiment uses the
 identical recipe: AdamW (lr 5e-4, constant), bf16, effective batch 64, 170 epochs, LoRA rank
-32, EMA 0.9999, no discriminator; a single L40S GPU per run.
+32, EMA 0.9999, no discriminator; a single L40S GPU per run. Because the effective batch is
+fixed, the epoch budget corresponds to an identical number of optimizer updates and samples
+seen for every model variant, and all evaluations fire at the same update steps (every 250
+updates) — variants are therefore compared at strictly equal training budget throughout. No
+run is early-stopped or extended individually: when a variant plateaus below the target
+quality within the budget, we report the plateau — under a fixed rate and budget, that *is*
+the measurement.
 
 **Two-stage protocol: overfit, then generalize.** Every configuration passes two gates.
 *Stage 1 (overfit):* train on a single sequence; reconstruction must be near-perfect
-[PSNR > 30]. This verifies that the architecture *can represent* the signal — a failure here
+[PSNR > 30; runs stop once this holds for three consecutive epochs, with a fixed cap]. This
+verifies that the architecture *can represent* the signal — a failure here
 is an implementation or model-capacity problem and disqualifies the configuration before any
 expensive run. *Stage 2 (generalize):* train on all participants (one expression) and
 evaluate on held-out identities — here the latent must *encode* rather than memorize, and
