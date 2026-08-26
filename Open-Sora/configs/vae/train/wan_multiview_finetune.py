@@ -29,9 +29,9 @@ fixed_seq_eval_every_epochs = 0 # CHANGE to 200
 model = dict(
     type="multiview_wan_video_vae",  # Registered in opensora/models/vae/__init__.py
     z_dim=16,  # Latent dimension for Wan 2.1 VAE
-    # Latent-width ablation (E11): build the VAE with a wider latent (e.g. 32).
-    # Pretrained 16-ch weights are expanded via zero/identity surgery on the four
-    # latent-boundary convs, which are then unfrozen. None = pretrained width.
+    # Latent-width ablation (E11): e.g. 32 builds the VAE with a 32-channel latent.
+    # The pretrained 16-ch weights are grown into the wider convs (new channels
+    # start as a no-op) and those convs are unfrozen. None = keep 16.
     latent_widen_to=None,
     view_in=0,  # 0 = auto-detect from first dataset sample (train.py reads V from data shape)
     view_compression=2,  # Compression ratio (only used when use_view_group_fusion=True)

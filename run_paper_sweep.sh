@@ -24,13 +24,13 @@
 #   7  E1z  zero-shot eval only (epochs=0 + final_eval) -- pretrained Wan floor.
 #           NOTE: not tested end-to-end; if epochs=0 skips final_eval, run arm 1
 #           with --epochs 1 --save_ckpt False instead and ignore the train step.
-#   8  E11a  E1d + latent widened 16->32 channels  <- positive capacity test
-#   9  E11b  E1d + latent widened 16->64 channels
-#           The widen arms test the capacity claim DIRECTLY: if joint view+temporal
-#           compression recovers with a wider latent, the bottleneck is the rate,
-#           not the architecture. VAE-side only (no diffusion retraining). New
-#           channels are zero/identity-init, so step 0 is exactly the 16-ch model.
-#           No warm start (E1b is 16-ch; boundary shapes differ).
+#   8  E11a E1d + latent widened 16->32 channels
+#   9  E11b E1d + latent widened 16->64 channels
+#           The widen arms are the positive capacity test: if joint view+temporal
+#           compression recovers with a wider latent, the bottleneck really is the
+#           rate. VAE only, no diffusion retraining. New channels start as a no-op
+#           (step 0 = the 16-ch model). No warm start from E1b -- the boundary
+#           conv shapes differ.
 #
 # Two-stage discipline: run every arm with OVERFIT=1 first (single_sequence, must
 # reach near-perfect reconstruction) before launching the real generalization run.

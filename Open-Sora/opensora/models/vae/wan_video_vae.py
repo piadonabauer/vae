@@ -48,15 +48,15 @@ def _unfreeze_lora_wrapped_bases(module: nn.Module) -> None:
 
 def _remap_wan_keys_for_lora(ckpt: dict, model_sd: dict) -> dict:
     """
-    Map raw Wan 2.1 checkpoint keys onto a LoRA-wrapped model.
+    Rename raw Wan checkpoint keys so they hit the LoRA-wrapped convs.
 
-    _enable_lora() replaces convs with LoRAConv3d/LoRAConv2d wrappers, which move
-    the original conv to a `base_conv` child. A raw checkpoint key like
-    `decoder.conv1.weight` must then load into `decoder.conv1.base_conv.weight`.
-    Without this remap, strict=False silently drops the pretrained weights for
-    encoder.middle/head and the ENTIRE decoder, leaving those convs at random
-    init (frozen!) whenever use_lora=True. (LoRAAttentionBlock reuses the child
-    names `norm`/`to_qkv`/`proj`, so attention keys already match.)
+    _enable_lora() moves each wrapped conv into a `base_conv` child, so the
+    checkpoint's "decoder.conv1.weight" has to become
+    "decoder.conv1.base_conv.weight". Before this remap existed, strict=False
+    just dropped those keys and encoder.middle/head + the whole decoder stayed
+    at random init in every LoRA run (the "90 unexpected" in old logs).
+    Attention blocks keep their child names (norm/to_qkv/proj), so only convs
+    need the rename.
     """
     remapped = {}
     for k, v in ckpt.items():
@@ -72,63 +72,67 @@ def _remap_wan_keys_for_lora(ckpt: dict, model_sd: dict) -> dict:
 
 def _widen_wan_latent_ckpt(ckpt: dict, model_sd: dict, z_old: int, z_new: int) -> dict:
     """
-    Expand a 16-channel Wan checkpoint to a wider latent (latent_widen_to).
+    Grow the 16-channel Wan checkpoint to a wider latent (latent_widen_to).
 
-    Only four boundary convs touch the latent width; everything else is
-    width-independent. New channels are set up so the model is EXACTLY the
-    pretrained z_old-channel VAE at step 0:
-    - encoder head (out = [mu | logvar]): old rows copied into place, new rows
-      zero -> new mu = 0, new logvar = 0 (unit variance, KL keeps them at prior).
-    - conv1 (2z->2z 1x1) / conv2 (z->z 1x1): old blocks copied, identity on the
-      diagonal for new channels (pass-through).
-    - decoder conv_in: old input channels copied, new input channels zero ->
-      the decoder ignores the extra channels until training uses them
-      (ControlNet-style zero init).
+    Only four convs actually see the latent width: the encoder head (outputs
+    [mu | logvar]), the two 1x1 latent convs, and decoder.conv1. Everything
+    else loads unchanged. The new channels are filled so that at step 0 the
+    model computes the same function as the pretrained z_old model: new head
+    rows are zero (mu=0, logvar=0 -> unit variance, KL keeps them at the
+    prior), the 1x1 convs get an identity diagonal for the new channels, and
+    the decoder input columns for the new channels are zero, so the decoder
+    ignores them until training picks them up.
     """
     ckpt = dict(ckpt)
 
-    def _grow(keys, fill):
+    def grow(keys, fill):
+        # keys = (plain name, base_conv name); exactly one exists in the model
         for key in keys:
             if key in ckpt and key in model_sd and tuple(ckpt[key].shape) != tuple(model_sd[key].shape):
                 new = torch.zeros_like(model_sd[key])
                 fill(ckpt[key], new)
                 ckpt[key] = new
-                return  # only one of the (plain, base_conv) aliases exists
+                return
 
-    def head_w(old, new):
-        new[:z_old] = old[:z_old]                       # mu rows
-        new[z_new:z_new + z_old] = old[z_old:]          # logvar rows
-    _grow(["encoder.head.2.weight", "encoder.head.2.base_conv.weight"], head_w)
-    _grow(["encoder.head.2.bias", "encoder.head.2.base_conv.bias"], head_w)
+    # encoder head: rows are [mu | logvar], same layout for weight and bias
+    def head(old, new):
+        new[:z_old] = old[:z_old]
+        new[z_new:z_new + z_old] = old[z_old:]
+    grow(["encoder.head.2.weight", "encoder.head.2.base_conv.weight"], head)
+    grow(["encoder.head.2.bias", "encoder.head.2.base_conv.bias"], head)
 
+    # conv1 is a 2z->2z 1x1 mixing (mu, logvar); copy the four old blocks into
+    # their new positions and put 1 on the diagonal for the fresh channels
     def conv1_w(old, new):
-        for a in (0, 1):        # output block: mu / logvar
-            for b in (0, 1):    # input block
+        for a in (0, 1):
+            for b in (0, 1):
                 new[a * z_new:a * z_new + z_old, b * z_new:b * z_new + z_old] = \
                     old[a * z_old:(a + 1) * z_old, b * z_old:(b + 1) * z_old]
             for i in range(z_old, z_new):
                 new[a * z_new + i, a * z_new + i] = 1.0
-    _grow(["conv1.weight", "conv1.base_conv.weight"], conv1_w)
+    grow(["conv1.weight", "conv1.base_conv.weight"], conv1_w)
 
     def conv1_b(old, new):
         for a in (0, 1):
             new[a * z_new:a * z_new + z_old] = old[a * z_old:(a + 1) * z_old]
-    _grow(["conv1.bias", "conv1.base_conv.bias"], conv1_b)
+    grow(["conv1.bias", "conv1.base_conv.bias"], conv1_b)
 
+    # conv2 (z->z 1x1): same idea without the mu/logvar split
     def conv2_w(old, new):
         new[:z_old, :z_old] = old
         for i in range(z_old, z_new):
             new[i, i] = 1.0
-    _grow(["conv2.weight", "conv2.base_conv.weight"], conv2_w)
+    grow(["conv2.weight", "conv2.base_conv.weight"], conv2_w)
 
     def conv2_b(old, new):
         new[:z_old] = old
-    _grow(["conv2.bias", "conv2.base_conv.bias"], conv2_b)
+    grow(["conv2.bias", "conv2.base_conv.bias"], conv2_b)
 
+    # decoder input conv: zero columns for the new latent channels
+    # (its bias is [dims[0]], no widening needed)
     def dec_w(old, new):
         new[:, :z_old] = old
-    _grow(["decoder.conv1.weight", "decoder.conv1.base_conv.weight"], dec_w)
-    # decoder.conv1.bias has shape [dims[0]] -> width-independent, loads as-is.
+    grow(["decoder.conv1.weight", "decoder.conv1.base_conv.weight"], dec_w)
 
     return ckpt
 
@@ -356,11 +360,10 @@ class MultiviewWanVideoVAE(nn.Module):
         # one goes through plain Wan (+LoRA) with no fusion and no view conditioning.
         # Same trainer/losses/eval as the fused model, so the comparison is clean.
         independent_views: bool = False,
-        # Latent-width ablation (E11): build the VAE with a wider latent than the
-        # pretrained 16 channels. Pretrained weights are expanded with zero-init /
-        # identity surgery on the four latent-boundary convs, and those convs are
-        # unfrozen so the new capacity is trainable. VAE-side only; retraining the
-        # diffusion model on the wider latent is out of scope.
+        # Latent-width ablation (E11): build the VAE with e.g. a 32-channel latent
+        # instead of the pretrained 16. The pretrained weights are grown into the
+        # wider shapes (see _widen_wan_latent_ckpt) and the four convs that touch
+        # the latent are unfrozen. VAE only -- we don't retrain the diffusion model.
         latent_widen_to: int = None,
         temporal_compression: bool = True,
         crossview_grad_checkpoint: bool = False,
@@ -443,17 +446,16 @@ class MultiviewWanVideoVAE(nn.Module):
                 checkpoint = torch.load(from_pretrained, map_location="cpu")
                 inner = checkpoint.get("model", checkpoint)
                 model_sd = self.crossview_vae.state_dict()
-                # Raw Wan keys must be remapped into the LoRA wrappers (base_conv),
-                # otherwise the pretrained middle/head/decoder convs are silently
-                # dropped and stay at random init.
+                # Rename the conv keys into the LoRA wrappers first -- without this
+                # the middle/head/decoder weights never load (see the helper).
                 inner = _remap_wan_keys_for_lora(inner, model_sd)
                 if self.latent_widen_to is not None:
                     inner = _widen_wan_latent_ckpt(
                         inner, model_sd, z_old=self.pretrained_z_dim, z_new=self.z_dim
                     )
                     print(
-                        f"[MultiviewWanVideoVAE] latent_widen_to={self.z_dim}: expanded "
-                        f"boundary convs from {self.pretrained_z_dim} channels (zero/identity init)"
+                        f"[MultiviewWanVideoVAE] latent_widen_to={self.z_dim}: grew boundary "
+                        f"convs from {self.pretrained_z_dim} channels"
                     )
                 try:
                     result = self.crossview_vae.load_state_dict(inner, strict=False)
@@ -461,26 +463,26 @@ class MultiviewWanVideoVAE(nn.Module):
                     n_ckpt = len(inner)
                     print(f"[MultiviewWanVideoVAE] Loaded Wan 2.1 into crossview_vae: {from_pretrained}")
                     print(f"  -> {n_ckpt} ckpt keys; {n_missing} missing, {n_unexp} unexpected")
-                    # Any leftover encoder/decoder key means pretrained weights did
-                    # NOT land in the model -- that must never happen silently again.
+                    # Missing keys are fine (fusion modules, LoRA params etc. are not
+                    # in the checkpoint). Unexpected encoder/decoder keys are not:
+                    # they mean pretrained weights got dropped again, so fail hard.
                     dropped = [
                         k for k in result.unexpected_keys
                         if k.split(".")[0] in ("encoder", "decoder", "conv1", "conv2")
                     ]
                     if dropped:
                         raise RuntimeError(
-                            f"{len(dropped)} pretrained keys failed to load into "
-                            f"crossview_vae (e.g. {dropped[:5]}). The base model would "
-                            f"be partially random-init; refusing to continue."
+                            f"{len(dropped)} pretrained keys did not load into "
+                            f"crossview_vae (e.g. {dropped[:5]}) -- the backbone would be "
+                            f"partially random-init."
                         )
                 except RuntimeError:
                     raise
                 except Exception as e:
                     print(f"Warning: failed to load pretrained weights into crossview_vae: {e}")
 
-                # The widened boundary convs carry the new latent capacity; training
-                # them is the whole point of the ablation, so unfreeze their bases
-                # (LoRA alone would bottleneck the new channels through rank r).
+                # Unfreeze the four widened convs -- they hold the new capacity, and
+                # a rank-r LoRA path alone would bottleneck the extra channels.
                 if self.latent_widen_to is not None:
                     boundary = [
                         self.crossview_vae.encoder.head[2],
@@ -495,8 +497,8 @@ class MultiviewWanVideoVAE(nn.Module):
                             p.requires_grad = True
                             n_unfrozen += p.numel()
                     print(
-                        f"[MultiviewWanVideoVAE] latent_widen_to: unfroze 4 boundary convs "
-                        f"({n_unfrozen/1e6:.2f}M params)"
+                        f"[MultiviewWanVideoVAE] latent_widen_to: unfroze the 4 boundary "
+                        f"convs ({n_unfrozen/1e6:.2f}M params)"
                     )
 
             # Train full decoder conv/attn weights inside LoRA wrappers (still uses view_idx + view embeddings).
