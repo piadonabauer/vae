@@ -1,7 +1,7 @@
 """
 Mock versions of the paper figures, for layout discussions only.
 
-Everything with data in it uses made-up numbers (watermarked DRAFT / MOCK).
+Everything with data in it uses made-up numbers (watermarked MOCK).
 The real figures are generated from the rerun results (collect_results.py CSV
 + the eval clip dumps) once the sweep is done.
 
@@ -23,12 +23,10 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon
 OUT = os.path.dirname(os.path.abspath(__file__))
 
 # CVPR template uses Times; STIXGeneral is the closest Times-like font that
-# ships with matplotlib. The sketch param gives everything a hand-drawn wobble
-# so nobody mistakes these for final figures.
+# ships with matplotlib.
 matplotlib.rcParams.update({
     "font.family": "STIXGeneral",
     "mathtext.fontset": "stix",
-    "path.sketch": (1, 100, 2),
 })
 
 # color code used in all schematics
@@ -44,11 +42,6 @@ def load_view(name):
     if os.path.exists(path):
         return plt.imread(path)
     return np.full((64, 64, 3), 0.82)  # gray placeholder if assets are missing
-
-
-def watermark(fig, text="DRAFT"):
-    fig.text(0.5, 0.5, text, fontsize=48, color="gray", alpha=0.12,
-             ha="center", va="center", rotation=18, zorder=100)
 
 
 def thumb(ax, img, x, y, s, label=None, fontsize=7.5, alpha=1.0):
@@ -114,7 +107,6 @@ def fig_broad_overview():
             ha="center", va="top", fontsize=8)
     arrow(ax, 7.55, 1.5, 8.1, 1.5)
 
-    watermark(fig)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_broad_overview.png"), dpi=180)
     plt.close(fig)
@@ -181,42 +173,69 @@ def fig_overview():
         box(ax, 1.7 + i * 2.1, 3.45, 0.25, 0.22, c, "")
         ax.text(2.02 + i * 2.1, 3.56, t, va="center", fontsize=7.5)
 
-    watermark(fig)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_overview.png"), dpi=180)
     plt.close(fig)
 
 
 # ---------------------------------------------------------------- fusion mechanisms
-def fig_fusion():
-    """The four fusion variants of the ablation, one mini-panel each."""
-    fig, axes = plt.subplots(1, 4, figsize=(11, 2.6))
-    titles = [
-        "(a) cross-view attention\n+ tree merge",
-        "(b) joint self-attention\n+ concat/ResBlocks",
-        "(c) channel-concat\nConv3d",
-        "(d) factorized (2+1+1)D\nconvolution",
-    ]
-    inner = [
-        "MHA over\n$V \\times N$ tokens",
-        "self-attn over\nall view tokens",
-        "1x1x1 Conv3d\n+ 2 ResBlocks",
-        "2D + temporal\n+ view conv",
-    ]
-    for ax, title, mech in zip(axes, titles, inner):
-        ax.set_xlim(0, 3)
-        ax.set_ylim(0, 3)
-        ax.axis("off")
-        box(ax, 0.15, 1.9, 0.8, 0.6, "white", "$f_1$", fontsize=8)
-        box(ax, 0.15, 0.5, 0.8, 0.6, "white", "$f_2$", fontsize=8)
-        box(ax, 1.15, 1.1, 1.1, 0.8, C_NEW, mech, fontsize=7)
-        arrow(ax, 0.97, 2.2, 1.25, 1.85)
-        arrow(ax, 0.97, 0.8, 1.25, 1.15)
-        box(ax, 2.45, 1.2, 0.5, 0.6, C_LATENT, "$f$", fontsize=8)
-        arrow(ax, 2.27, 1.5, 2.45, 1.5)
-        ax.set_title(title, fontsize=8.5)
+def fusion_chain(ax, stages, title):
+    """One fusion variant as a vertical pipeline: f1, f2 at the top, then the
+    mechanism-specific stages, fused f at the bottom."""
+    ax.set_xlim(0, 3)
+    ax.set_ylim(0, 6.2)
+    ax.axis("off")
+    ax.set_title(title, fontsize=8.5)
 
-    watermark(fig)
+    # the two per-view feature maps
+    box(ax, 0.45, 5.4, 0.85, 0.55, "white", "$f_1$", fontsize=9)
+    box(ax, 1.70, 5.4, 0.85, 0.55, "white", "$f_2$", fontsize=9)
+
+    # stage boxes, evenly spaced between inputs and output
+    n = len(stages)
+    ys = np.linspace(4.4, 1.3, n)
+    h = 0.62
+    arrow(ax, 0.88, 5.38, 1.35, ys[0] + h + 0.02)
+    arrow(ax, 2.12, 5.38, 1.65, ys[0] + h + 0.02)
+    for i, ((label, color), y) in enumerate(zip(stages, ys)):
+        box(ax, 0.45, y, 2.1, h, color, label, fontsize=7)
+        if i > 0:
+            arrow(ax, 1.5, ys[i - 1] - 0.02, 1.5, y + h + 0.02)
+
+    box(ax, 1.15, 0.15, 0.7, 0.55, C_LATENT, "$f$", fontsize=9)
+    arrow(ax, 1.5, ys[-1] - 0.02, 1.5, 0.74)
+
+
+def fig_fusion():
+    """The four fusion variants of the ablation. Each panel shows the actual
+    stage sequence, so the differences are visible at a glance."""
+    fig, axes = plt.subplots(1, 4, figsize=(11, 3.4))
+
+    fusion_chain(axes[0], [
+        ("cross-view MHA over\nall $V{\\cdot}N$ tokens per frame", C_NEW),
+        ("zero-init output proj\n(+ residual)", C_NEW),
+        ("tree merge: pairwise\nconcat $\\to$ 2 ResBlocks", C_NEW),
+    ], "(a) cross-view attention\n+ tree merge (default)")
+
+    fusion_chain(axes[1], [
+        ("concat token sequences\n$[f_1; f_2] \\in V{\\cdot}N$ tokens", "white"),
+        ("joint self-attention\nover all view tokens", C_NEW),
+        ("concat on channels\n$\\to$ 2 ResBlocks", C_NEW),
+    ], "(b) joint\nself-attention")
+
+    fusion_chain(axes[2], [
+        ("stack on channel axis\n$[2C, T, H', W']$", "white"),
+        ("1x1x1 Conv3d $2C{\\to}C$\n+ GN + SiLU", C_NEW),
+        ("2 symmetric (non-causal)\n3D ResBlocks", C_NEW),
+    ], "(c) channel-concat\nConv3d")
+
+    fusion_chain(axes[3], [
+        ("stack on view axis\n$[C, V, T, H', W']$", "white"),
+        ("spatial 3x3 Conv2d", C_NEW),
+        ("temporal 3x3x3 Conv3d", C_NEW),
+        ("view conv, kernel $(V,3,3)$\ncompresses $V \\to 1$", C_NEW),
+    ], "(d) factorized (2+1+1)D\nconvolution")
+
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_fusion.png"), dpi=180)
     plt.close(fig)
@@ -266,7 +285,6 @@ def fig_chunking():
             ha="center", fontsize=7.5, color="red")
     ax.text(0.4, -0.15, "frame 0:\ncold start", ha="center", fontsize=7.5, color="gray")
 
-    watermark(fig)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_chunking.png"), dpi=180)
     plt.close(fig)
@@ -308,7 +326,9 @@ def fig_rate_quality():
     ax.legend(fontsize=7.5, loc="lower left")
     ax.grid(alpha=0.25)
 
-    watermark(fig, "DRAFT / MOCK DATA")
+    ax.text(0.5, 0.5, "MOCK DATA", transform=ax.transAxes, fontsize=34, color="gray",
+            alpha=0.18, ha="center", va="center", rotation=20)
+
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_rate_quality.png"), dpi=180)
     plt.close(fig)
@@ -350,7 +370,10 @@ def fig_perframe():
     ax2.legend(fontsize=7.5)
     ax2.grid(alpha=0.25)
 
-    watermark(fig, "DRAFT / MOCK DATA")
+    for ax in (ax1, ax2):
+        ax.text(0.5, 0.5, "MOCK", transform=ax.transAxes, fontsize=30, color="gray",
+                alpha=0.15, ha="center", va="center", rotation=20)
+
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_perframe.png"), dpi=180)
     plt.close(fig)
@@ -384,7 +407,9 @@ def fig_datascale():
     lines = ax.get_lines()[:1] + ax2.get_lines()[:1]
     ax.legend(lines, [l.get_label() for l in lines], fontsize=7.5, loc="center left")
 
-    watermark(fig, "DRAFT / MOCK DATA")
+    ax.text(0.5, 0.5, "MOCK", transform=ax.transAxes, fontsize=30, color="gray",
+            alpha=0.15, ha="center", va="center", rotation=20)
+
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_datascale.png"), dpi=180)
     plt.close(fig)
