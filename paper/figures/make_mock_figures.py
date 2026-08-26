@@ -5,10 +5,15 @@ Everything with data in it uses made-up numbers (watermarked MOCK).
 The real figures are generated from the rerun results (collect_results.py CSV
 + the eval clip dumps) once the sweep is done.
 
-The two thumbnails in assets/ are center-cropped frames from NeRSemble
-(participant 451, cams 222200037 / 222200049). They are gitignored on purpose:
-the dataset license does not allow republishing images, so don't commit them.
-If assets/ is missing the script falls back to gray placeholders.
+The thumbnails in assets/ are center-cropped frames from NeRSemble (EMO-1
+sequence, frame 100). view1/view2.png are participant 451 through the V=2
+camera pair (222200037 / 220700191). p{id}_view{1..4}.png cover several
+participants through the four frontal upper-row cameras, left to right
+(222200047, 222200037, 220700191, 222200036) -- the same selection
+select_upper_middle_cameras() makes at n_views=4. Everything in assets/ is
+gitignored on purpose: the dataset license does not allow republishing images,
+so don't commit them. If assets/ is missing the script falls back to gray
+placeholders.
 
 Run:  python3 make_mock_figures.py   (writes PNGs next to this file)
 """
