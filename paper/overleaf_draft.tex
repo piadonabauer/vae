@@ -16,20 +16,30 @@ of multi-view video. However, no such tokenizer exists: in recent work multi-vie
 % [feedback] "jointly learned" -> "jointly encoded": the point is that the ENCODER fuses the views.
 % One could also encode views independently and let a diffusion model learn their correlations on a
 % stacked 4D latent -- that is exactly the alternative we distinguish ourselves from.
-This motivates a latent in which the views are jointly encoded: the encoder itself fuses the view axis into a single shared code, rather than encoding views independently and leaving their correlation to be modeled downstream (e.g. by a diffusion model trained on stacked per-view latents). Only joint encoding compresses the view redundancy and gives cross-view consistency by construction.
+This motivates a latent in which the views are jointly encoded: the encoder itself fuses the view axis into a single shared code, rather than encoding views independently and leaving their correlation to be modeled downstream (e.g. by a diffusion model trained on stacked per-view latents, as in current multi-view and 4D generation systems \cite{zuo2024videomv, xie2024sv4d}). Only joint encoding compresses the view redundancy and gives cross-view consistency by construction.
 % [feedback] unambiguous: the extension concerns the VAE only, the diffusion model is untouched
 Rather than designing a 4D VAE from scratch, we ask: can a pretrained 3D video VAE be minimally extended to absorb the view axis? Our changes concern the VAE only; the downstream diffusion model is untouched. We extend the Wan 2.1 VAE \cite{wan2025wan} with
-zero-initialized cross-view fusion in the encoder and view-conditioned decoding via low-rank adapters \cite{hu2022lora, zhang2023adding}, keeping the pretrained backbone frozen so the latent remains compatible with unconditional sampling. Through an extensive experimental study on NeRSemble \cite{kirschstein2023nersemble} we find the following: the model reconstructs well when either the temporal axis is compressed (4x, the native Wan setting) or the view axis is fused into a shared latent, but combining both degrades reconstructions with artifacts, where views collapse toward their mean and bleed into each others views. The 16-channel latent has no spare rate for a second compressed axis. This is consistent with the broader tokenizer literature, where reconstruction quality under higher compression is recovered by widening the latent channel dimension \cite{dai2023emu, chen2024deep, hacohen2024ltx}, although wider latents themselves are known to complicate downstream generative modeling \cite{yao2025vavae}.
+zero-initialized cross-view fusion in the encoder and view-conditioned decoding via low-rank adapters \cite{hu2022lora, zhang2023adding}, keeping the pretrained backbone frozen so the latent remains compatible with unconditional sampling.
+% TODO: this whole findings passage is the EXPECTED story from the old runs. All numbers are
+% being re-established under the fixed protocol (a loader bug in the old runs left parts of the
+% pretrained backbone unloaded, so even the qualitative picture could shift). Rewrite this
+% paragraph once the reruns are in.
+Through an extensive experimental study on NeRSemble \cite{kirschstein2023nersemble} we find the following: the model reconstructs well when either the temporal axis is compressed (4x, the native Wan setting) or the view axis is fused into a shared latent, but combining both degrades reconstructions with artifacts, where views collapse toward their mean and bleed into each others views. The 16-channel latent has no spare rate for a second compressed axis. This is consistent with the broader tokenizer literature, where reconstruction quality under higher compression is recovered by widening the latent channel dimension \cite{dai2023emu, chen2024deep, hacohen2024ltx}, although wider latents themselves are known to complicate downstream generative modeling \cite{yao2025vavae}.
 % [feedback] we CONFIRM the bottleneck, we do not remove it -- and we test the positive direction
 % (widening) as an ablation on the VAE side, so the claim is not purely negative.
-Our extension confirms this rate bottleneck rather than removing it: fusing a third axis into a latent sized for one collapses views toward their mean. To verify that the limit is really the rate and not our architecture, we additionally widen the latent (16 to 32/64 channels, VAE-side only, no diffusion retraining) and test whether joint compression recovers.
+% TODO: the widening outcome is unknown until E11 runs. Three framings, pick after the results:
+%   (a) widening recovers joint compression -> "confirms the bottleneck AND verifies the fix"
+%   (b) widening partially recovers -> capacity is necessary but not sufficient
+%   (c) joint compression already works after the rerun (or widening does not help) -> drop or
+%       invert this sentence; the capacity story must be softened throughout.
+Our extension confirms this rate bottleneck rather than removing it: fusing a third axis into a latent sized for one collapses views toward their mean. To verify that the limit is really the rate and not our architecture, we additionally widen the latent (16 to 32/64 channels, VAE-side only, no diffusion retraining) and test whether joint compression recovers [todo: state the outcome].
 
 % [added] contributions block, CVPR readers look for this at the end of the intro
 Contributions:
 - a minimal, weight-compatible extension of a pretrained 3D video VAE to synchronized multi-view video: zero-init cross-view fusion in the encoder, per-view low-rank adapters in the decoder; identical to the pretrained model at step 0
 - a controlled empirical study of joint view+temporal compression at fixed latent width: same data, same budget, only the compressed axes vary
 - two diagnostics that localize the failure (cross-view similarity for ghosting, bleed ratio for temporal averaging), separating it from generic reconstruction error
-- evidence that the failure is a rate/capacity limit, not a fusion-design problem: fusion and conditioning variants barely matter, and a latent-width ablation tests directly whether more channels recover joint compression
+- evidence that the failure is a rate/capacity limit, not a fusion-design problem: fusion and conditioning variants barely matter, and a latent-width ablation tests directly whether more channels recover joint compression [todo: this bullet assumes the reruns confirm the failure; reword to the actual outcome]
 
 
 \section{Related Work}
@@ -59,7 +69,7 @@ yang2024cogvideox, kong2024hunyuanvideo, agarwal2025cosmos}, many variants
     - VA-VAE (counterpoint) \cite{yao2025vavae}: wider latents do reconstruct better, but they are harder for a diffusion transformer to learn to sample from, and their fix is to align the latent with a frozen vision foundation model rather than keep widening
 - basically they showed: one new axis of compression can be recovered by adding channels, at a cost on the generation side
 % [feedback] the widening idea is now an actual ablation, so the gap statement can carry both directions
-- gap: none of this asks what happens when the added axis is view rather than space or time, and none starts from a frozen pretrained latent rather than training from scratch. We measure both directions on a real pretrained backbone: what breaks at fixed width (the cost of NOT widening), and whether widening the VAE latent (16 -> 32/64, without retraining the diffusion model) recovers joint compression
+- gap: none of this asks what happens when the added axis is view rather than space or time, and none starts from a frozen pretrained latent rather than training from scratch. We measure both directions on a real pretrained backbone: what happens at fixed width, and whether widening the VAE latent (16 -> 32/64, without retraining the diffusion model) changes it [todo: neutral phrasing on purpose -- sharpen once the E11 results exist]
 
 
 \subsection{Multi-view and 4D generation}
@@ -95,6 +105,9 @@ z \in \mathbb{R}^{16 \times T' \times H/8 \times W/8}
     - decoding the same: 1 latent frame in, 4 frames out, persistent cache
     (important for later when saying that within those 4 frames they bleed into each other)
 
+% NOTE on all figure placeholders: they show the intended layout only. The actual result
+% figures are produced after the reruns, from the best config -- mock versions for layout
+% discussions live in paper/figures/ (make_mock_figures.py).
 % [feedback] figure support for the chunk mechanism
 \begin{figure}[t]
 \centering
@@ -151,7 +164,7 @@ m(a, b) = R_2\!\left(R_1\!\left([\,a ; b\,]\right)\right),
 g = m\big(\cdots m(\tilde{f}_1, \tilde{f}_2) \cdots\big) \in \mathbb{R}^{C_b \times T' \times h \times w},
 \label{eq:tree_merge}
 \end{equation}
-and $g$ continues through the (LoRA-adapted) bottleneck middle/head of the pretrained encoder to produce the posterior:
+and $g$ continues through the (LoRA-adapted) bottleneck middle/head of the pretrained encoder to produce the posterior, sampled with the usual reparameterization \cite{kingma2013auto}:
 \begin{equation}
 (\mu, \log \sigma^2) = \mathrm{split}\!\left(\mathrm{Conv}_{1\times1\times1}\!\left(E_{\mathrm{post}}(g)\right)\right),
 \qquad
@@ -183,7 +196,7 @@ An alternative (ablated) is a learned additive per-view embedding $e_v \in \math
 
 \subsubsection{Trainable-parameter budget}
 
-All remaining adaptation uses LoRA on the frozen backbone, i.e. every adapted weight is
+All remaining adaptation uses LoRA \cite{hu2022lora} on the frozen backbone with zero-initialized up-projections \cite{zhang2023adding}, i.e. every adapted weight is
 \begin{equation}
 W' = W + B A, \qquad B = 0 \text{ at init, } \operatorname{rank}(BA) \le r = 32.
 \label{eq:lora}
@@ -317,6 +330,10 @@ Expected: ghosting and lost identity detail only in the fused TC-on row.}}
 \end{figure}
 
 probably something like (current bullet points are based on prior experiments but since all will be repeated, it will probably change):
+% TODO: extra reason the old picture may not survive the rerun -- the old runs had a loader bug
+% (parts of the pretrained backbone never loaded under LoRA, now fixed), so the failure modes
+% below may weaken, move, or in the best case partly disappear. Treat every bullet as a
+% hypothesis, not a result.
 - joint compression collapses; single-axis compression is fine (the rate-quality curve is the headline figure). In particular view fusion alone (with spatial compression, TC off) works -> the view axis CAN be absorbed, just not on top of the temporal axis
 - fusion mechanism barely matters (cross-attention, joint self-attention, 4D, ...) -> fusion mechanism is not the bottleneck
 - view conditioning barely matters (learnable view embeddings vs per-view LoRAs)
@@ -364,11 +381,14 @@ temporal-difference loss      & -- & -- & -- & -- \\
 
 \subsubsection{Latent width}
 % [feedback] the positive capacity test, supervisor-requested. VAE-side only.
+% TODO: outcome unknown; also note this ablation only matters IF the rerun confirms that joint
+% compression fails at 16 channels. If the fixed-loader reruns already reconstruct well, this
+% section becomes a plain capacity/rate ablation instead of a rescue experiment.
 
-- widen the latent from the pretrained 16 channels to 32 and 64 under joint compression (fused + TC)
-- implementation: only four boundary convolutions touch the latent width (encoder head, two 1x1 latent convs, decoder input conv); pretrained weights are expanded with zero/identity surgery so step 0 is exactly the 16-channel model; the four boundary convs are unfrozen (~2M params, still adapter-scale)
+- widen the latent from the pretrained 16 channels to 32 and 64 under joint compression (fused + TC), following the width recipes of \cite{dai2023emu, chen2024deep, hacohen2024ltx}
+- implementation: only four boundary convolutions touch the latent width (encoder head, two 1x1 latent convs, decoder input conv); pretrained weights are expanded with zero-init surgery in the spirit of \cite{zhang2023adding} so step 0 is exactly the 16-channel model; the four boundary convs are unfrozen (~2M params, still adapter-scale)
 - VAE-side only: retraining the diffusion model on a wider latent is out of scope (and known to be its own problem \cite{yao2025vavae}); the question here is purely whether reconstruction under joint compression is rate-limited
-- if 32/64 channels recover the joint-compression loss, the capacity claim has positive evidence; if not, the failure is architectural
+- possible outcomes, all informative: 32/64 channels recover the loss -> positive evidence for the capacity claim; partial recovery -> capacity necessary but not sufficient; no recovery -> the failure is architectural, capacity framing must be softened
 
 \begin{table}[t]
 \centering
@@ -504,7 +524,12 @@ This section discusses the main findings and considers implications and potentia
     - LTX-Video \cite{hacohen2024ltx}: 192x compression uses 128 channels
 - our setting demands ~2-4x the information density of the pretrained latent at fixed width -> the observed failure is exactly what rate exhaustion predicts: the decoder regresses to the conditional mean along whichever axis was compressed, showing up as ghosting (view mean) and bleeding (temporal mean)
 % [feedback] the "why didn't you just try widening" question is now answered by the ablation
-- the latent-width ablation (Tab.~\ref{tab:width}) tests this directly: if 32/64 channels recover joint compression, the rate explanation carries positive evidence, not just a pattern of failures. [Fill in after the run: recovered / partially recovered / did not recover, and what that means for the claim.]
+% TODO: this subsection cannot be framed until E11 (and the fixed-loader reruns of E1) exist.
+% Keep the three-way branch below and delete two of them later:
+- the latent-width ablation (Tab.~\ref{tab:width}) tests this directly:
+    - [if recovered] widening restores joint compression -> the rate explanation carries positive evidence, matching the width recipes of \cite{dai2023emu, chen2024deep, hacohen2024ltx} extended to a view axis
+    - [if partial] capacity is necessary but not sufficient -> discuss what else is missing (chunked causal decode? frozen strided convs?)
+    - [if not recovered, or if joint compression already works after the loader fix] the capacity framing of this whole section must be rewritten -- do not keep the rate-exhaustion story without the supporting result
 - two further observations supporting this (todo: check first if this still holds in the repeated experiments!): (i) the choice of fusion mechanism and view-conditioning mechanism barely affected quality, and (ii) what fails first under joint compression is high-frequency identity detail (nuanced facial appearance, small accessories such as earrings) -> precisely the detail class that widening image latents from 4 to 16 channels was needed to preserve in Emu \cite{dai2023emu}
 
 \subsection{Bottleneck: Encoder-side latent}
@@ -528,7 +553,7 @@ designing a 4D tokenizer:
 - beginning sentence first
 - extended a pretrained 3D video VAE to multi-view video data, zero-initialized cross-view fusion and per-view low-rank decoding -> preserving the pretrained latent distribution and unconditional sampling
 - study on multi-view facial video: shows the fixed 16-channel latent absorbs either 4x temporal compression or the fused view axis, but not both -> joint compression exhausts the latent's capacity and the decoder regresses to means -> resulting in cross-view ghosting and intra-chunk temporal bleeding
-- the latent-width ablation turns the capacity claim into a tested one [state the outcome]
+- the latent-width ablation turns the capacity claim into a tested one [todo: state the outcome; if the reruns changed the picture, rewrite this conclusion around whatever actually held up]
 - future 4D tokenizers: scale latent capacity with the number of compressed axes or keep view identity out of the latent
 
 
