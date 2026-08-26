@@ -1,20 +1,35 @@
 """
 Mock versions of the paper figures, for layout discussions only.
 
-Everything with data in it uses made-up numbers (watermarked MOCK). The real
-figures are generated from the rerun results (collect_results.py CSV + the
-eval clip dumps) once the sweep is done.
+Everything with data in it uses made-up numbers (watermarked DRAFT / MOCK).
+The real figures are generated from the rerun results (collect_results.py CSV
++ the eval clip dumps) once the sweep is done.
+
+The two thumbnails in assets/ are center-cropped frames from NeRSemble
+(participant 451, cams 222200037 / 222200049). They are gitignored on purpose:
+the dataset license does not allow republishing images, so don't commit them.
+If assets/ is missing the script falls back to gray placeholders.
 
 Run:  python3 make_mock_figures.py   (writes PNGs next to this file)
 """
 
 import os
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon
 
 OUT = os.path.dirname(os.path.abspath(__file__))
+
+# CVPR template uses Times; STIXGeneral is the closest Times-like font that
+# ships with matplotlib. The sketch param gives everything a hand-drawn wobble
+# so nobody mistakes these for final figures.
+matplotlib.rcParams.update({
+    "font.family": "STIXGeneral",
+    "mathtext.fontset": "stix",
+    "path.sketch": (1, 100, 2),
+})
 
 # color code used in all schematics
 C_FROZEN = "#aecbe8"   # blue: frozen pretrained
@@ -22,6 +37,26 @@ C_NEW = "#f5b942"      # orange: new modules, zero-init
 C_LORA = "#8fd19e"     # green: LoRA adapters
 C_LATENT = "#d9b3e6"   # purple: the latent
 C_GT = "#444444"
+
+
+def load_view(name):
+    path = os.path.join(OUT, "assets", f"{name}.png")
+    if os.path.exists(path):
+        return plt.imread(path)
+    return np.full((64, 64, 3), 0.82)  # gray placeholder if assets are missing
+
+
+def watermark(fig, text="DRAFT"):
+    fig.text(0.5, 0.5, text, fontsize=48, color="gray", alpha=0.12,
+             ha="center", va="center", rotation=18, zorder=100)
+
+
+def thumb(ax, img, x, y, s, label=None, fontsize=7.5, alpha=1.0):
+    """Draw a square image thumbnail with an optional label below it."""
+    ax.imshow(img, extent=(x, x + s, y, y + s), zorder=3, alpha=alpha)
+    ax.add_patch(plt.Rectangle((x, y), s, s, fill=False, ec="black", lw=0.8, zorder=4))
+    if label:
+        ax.text(x + s / 2, y - 0.09, label, ha="center", va="top", fontsize=fontsize)
 
 
 def box(ax, x, y, w, h, color, text, fontsize=8.5, ec="black"):
@@ -35,61 +70,155 @@ def arrow(ax, x0, y0, x1, y1, **kw):
                                  mutation_scale=10, lw=1.0, color="black", **kw))
 
 
-# ---------------------------------------------------------------- overview
-def fig_overview():
-    fig, ax = plt.subplots(figsize=(10, 3.4))
+# ------------------------------------------------------- broad overview
+def fig_broad_overview():
+    """The one-glance version: input -> encoder -> latent -> decoder -> output."""
+    fig, ax = plt.subplots(figsize=(10, 3))
     ax.set_xlim(0, 10)
-    ax.set_ylim(0, 3.4)
+    ax.set_ylim(0, 3)
+    ax.set_aspect("equal")
     ax.axis("off")
 
-    # inputs
-    box(ax, 0.2, 2.1, 0.9, 0.8, "white", "view 1\n[3,T,H,W]")
-    box(ax, 0.2, 0.5, 0.9, 0.8, "white", "view 2\n[3,T,H,W]")
+    v1, v2 = load_view("view1"), load_view("view2")
+
+    # input stack: V views (only two drawn), offset like a card stack
+    thumb(ax, v2, 0.75, 1.05, 0.95)
+    thumb(ax, v1, 0.55, 0.85, 0.95)
+    ax.text(1.15, 0.55, "input $x$\n$[V, 3, T, H, W]$\n$V{=}2,\\ T{=}9,\\ 128^2$",
+            ha="center", va="top", fontsize=8)
+
+    # encoder trapezoid (wide -> narrow)
+    ax.add_patch(Polygon([(2.4, 0.6), (2.4, 2.4), (4.0, 1.9), (4.0, 1.1)],
+                         fc=C_FROZEN, ec="black", lw=0.8))
+    ax.text(3.2, 1.5, "encoder\n(Wan, frozen\n+ fusion)", ha="center", va="center", fontsize=8.5)
+    arrow(ax, 1.85, 1.5, 2.35, 1.5)
+
+    # latent
+    box(ax, 4.5, 1.15, 0.85, 0.7, C_LATENT, "$z$")
+    ax.text(4.92, 0.95, "$[16, T', \\frac{H}{8}, \\frac{W}{8}]$\n$T' = 1 + \\frac{T-1}{4} = 3$",
+            ha="center", va="top", fontsize=8)
+    arrow(ax, 4.05, 1.5, 4.45, 1.5)
+    ax.text(4.92, 2.15, "one shared latent\nfor all $V$ views", ha="center", va="bottom",
+            fontsize=7.5, style="italic")
+
+    # decoder trapezoid (narrow -> wide)
+    ax.add_patch(Polygon([(5.9, 1.1), (5.9, 1.9), (7.5, 2.4), (7.5, 0.6)],
+                         fc=C_FROZEN, ec="black", lw=0.8))
+    ax.text(6.7, 1.5, "decoder\n(Wan, frozen\n+ per-view LoRA)", ha="center", va="center", fontsize=8.5)
+    arrow(ax, 5.4, 1.5, 5.85, 1.5)
+
+    # output stack
+    thumb(ax, v2, 8.35, 1.05, 0.95)
+    thumb(ax, v1, 8.15, 0.85, 0.95)
+    ax.text(8.75, 0.55, "output $\\hat{x}$\n$[V, 3, T, H, W]$",
+            ha="center", va="top", fontsize=8)
+    arrow(ax, 7.55, 1.5, 8.1, 1.5)
+
+    watermark(fig)
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, "mock_broad_overview.png"), dpi=180)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------- overview
+def fig_overview():
+    fig, ax = plt.subplots(figsize=(11, 3.8))
+    ax.set_xlim(0, 11)
+    ax.set_ylim(0, 3.8)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    v1, v2 = load_view("view1"), load_view("view2")
+
+    # inputs: real frames
+    thumb(ax, v1, 0.25, 2.35, 0.85, "view 1  $[3,T,H,W]$", fontsize=7)
+    thumb(ax, v2, 0.25, 0.75, 0.85, "view 2  $[3,T,H,W]$", fontsize=7)
 
     # shared frozen encoder stem (drawn once per view for the data flow)
-    box(ax, 1.5, 2.1, 1.5, 0.8, C_FROZEN, "Wan encoder stem\n(frozen, shared)")
-    box(ax, 1.5, 0.5, 1.5, 0.8, C_FROZEN, "Wan encoder stem\n(frozen, shared)")
-    arrow(ax, 1.1, 2.5, 1.5, 2.5)
-    arrow(ax, 1.1, 0.9, 1.5, 0.9)
+    box(ax, 1.6, 2.35, 1.5, 0.8, C_FROZEN, "Wan encoder stem\n(frozen, shared)")
+    box(ax, 1.6, 0.75, 1.5, 0.8, C_FROZEN, "Wan encoder stem\n(frozen, shared)")
+    arrow(ax, 1.15, 2.77, 1.6, 2.77)
+    arrow(ax, 1.15, 1.17, 1.6, 1.17)
 
     # fusion
-    box(ax, 3.4, 1.25, 1.3, 0.9, C_NEW, "cross-view\nattention\n(zero-init)")
-    arrow(ax, 3.0, 2.5, 3.5, 2.0)
-    arrow(ax, 3.0, 0.9, 3.5, 1.4)
-    box(ax, 5.0, 1.25, 1.0, 0.9, C_NEW, "tree\nmerge")
-    arrow(ax, 4.7, 1.7, 5.0, 1.7)
+    box(ax, 3.5, 1.5, 1.3, 0.9, C_NEW, "cross-view\nattention\n(zero-init)")
+    arrow(ax, 3.1, 2.77, 3.6, 2.3)
+    arrow(ax, 3.1, 1.17, 3.6, 1.6)
+    box(ax, 5.1, 1.5, 1.0, 0.9, C_NEW, "tree\nmerge")
+    arrow(ax, 4.8, 1.95, 5.1, 1.95)
 
     # bottleneck middle/head (frozen + LoRA) -> latent
-    box(ax, 6.3, 1.25, 1.0, 0.9, C_FROZEN, "middle/\nhead")
-    ax.add_patch(FancyBboxPatch((6.35, 2.18), 0.9, 0.28, boxstyle="round,pad=0.01",
+    box(ax, 6.4, 1.5, 1.0, 0.9, C_FROZEN, "middle/\nhead")
+    ax.add_patch(FancyBboxPatch((6.45, 2.43), 0.9, 0.28, boxstyle="round,pad=0.01",
                                 fc=C_LORA, ec="black", lw=0.6))
-    ax.text(6.8, 2.32, "LoRA", ha="center", va="center", fontsize=7)
-    arrow(ax, 6.0, 1.7, 6.3, 1.7)
-    box(ax, 7.6, 1.35, 0.7, 0.7, C_LATENT, "z\n16ch")
-    arrow(ax, 7.3, 1.7, 7.6, 1.7)
+    ax.text(6.9, 2.57, "LoRA", ha="center", va="center", fontsize=7)
+    arrow(ax, 6.1, 1.95, 6.4, 1.95)
+    box(ax, 7.7, 1.6, 0.7, 0.7, C_LATENT, "$z$\n16 ch")
+    ax.text(8.05, 1.4, "$[16,T',\\frac{H}{8},\\frac{W}{8}]$", ha="center", va="top", fontsize=7)
+    arrow(ax, 7.4, 1.95, 7.7, 1.95)
 
     # per-view decode
-    box(ax, 8.6, 2.1, 1.2, 0.8, C_FROZEN, "Wan decoder\n(frozen)")
-    box(ax, 8.6, 0.5, 1.2, 0.8, C_FROZEN, "Wan decoder\n(frozen)")
-    ax.add_patch(FancyBboxPatch((8.65, 2.95), 0.65, 0.26, boxstyle="round,pad=0.01",
+    box(ax, 8.7, 2.35, 1.2, 0.8, C_FROZEN, "Wan decoder\n(frozen)")
+    box(ax, 8.7, 0.75, 1.2, 0.8, C_FROZEN, "Wan decoder\n(frozen)")
+    ax.add_patch(FancyBboxPatch((8.75, 3.2), 0.65, 0.26, boxstyle="round,pad=0.01",
                                 fc=C_LORA, ec="black", lw=0.6))
-    ax.text(8.97, 3.08, "LoRA v=1", ha="center", va="center", fontsize=6.5)
-    ax.add_patch(FancyBboxPatch((8.65, 0.13), 0.65, 0.26, boxstyle="round,pad=0.01",
+    ax.text(9.07, 3.33, "LoRA v=1", ha="center", va="center", fontsize=6.5)
+    ax.add_patch(FancyBboxPatch((8.75, 0.38), 0.65, 0.26, boxstyle="round,pad=0.01",
                                 fc=C_LORA, ec="black", lw=0.6))
-    ax.text(8.97, 0.26, "LoRA v=2", ha="center", va="center", fontsize=6.5)
-    arrow(ax, 8.3, 1.85, 8.6, 2.4)
-    arrow(ax, 8.3, 1.55, 8.6, 1.0)
-    ax.text(9.2, 1.7, "shared latent,\ndecoded V times", ha="center", va="center",
-            fontsize=7, style="italic")
+    ax.text(9.07, 0.51, "LoRA v=2", ha="center", va="center", fontsize=6.5)
+    arrow(ax, 8.4, 2.1, 8.7, 2.65)
+    arrow(ax, 8.4, 1.8, 8.7, 1.25)
+
+    # reconstructed outputs (same frames, slightly faded = "reconstruction")
+    thumb(ax, v1, 10.05, 2.32, 0.85, "$\\hat{x}$ view 1", fontsize=7, alpha=0.85)
+    thumb(ax, v2, 10.05, 0.72, 0.85, "$\\hat{x}$ view 2", fontsize=7, alpha=0.85)
+    arrow(ax, 9.92, 2.75, 10.03, 2.75)
+    arrow(ax, 9.92, 1.15, 10.03, 1.15)
 
     # legend
     for i, (c, t) in enumerate([(C_FROZEN, "frozen pretrained"), (C_NEW, "new, zero-init"),
                                 (C_LORA, "LoRA (rank 32)"), (C_LATENT, "fused latent")]):
-        box(ax, 0.3 + i * 2.0, 3.05, 0.25, 0.22, c, "")
-        ax.text(0.62 + i * 2.0, 3.16, t, va="center", fontsize=7.5)
+        box(ax, 1.7 + i * 2.1, 3.45, 0.25, 0.22, c, "")
+        ax.text(2.02 + i * 2.1, 3.56, t, va="center", fontsize=7.5)
 
+    watermark(fig)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_overview.png"), dpi=180)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------- fusion mechanisms
+def fig_fusion():
+    """The four fusion variants of the ablation, one mini-panel each."""
+    fig, axes = plt.subplots(1, 4, figsize=(11, 2.6))
+    titles = [
+        "(a) cross-view attention\n+ tree merge",
+        "(b) joint self-attention\n+ concat/ResBlocks",
+        "(c) channel-concat\nConv3d",
+        "(d) factorized (2+1+1)D\nconvolution",
+    ]
+    inner = [
+        "MHA over\n$V \\times N$ tokens",
+        "self-attn over\nall view tokens",
+        "1x1x1 Conv3d\n+ 2 ResBlocks",
+        "2D + temporal\n+ view conv",
+    ]
+    for ax, title, mech in zip(axes, titles, inner):
+        ax.set_xlim(0, 3)
+        ax.set_ylim(0, 3)
+        ax.axis("off")
+        box(ax, 0.15, 1.9, 0.8, 0.6, "white", "$f_1$", fontsize=8)
+        box(ax, 0.15, 0.5, 0.8, 0.6, "white", "$f_2$", fontsize=8)
+        box(ax, 1.15, 1.1, 1.1, 0.8, C_NEW, mech, fontsize=7)
+        arrow(ax, 0.97, 2.2, 1.25, 1.85)
+        arrow(ax, 0.97, 0.8, 1.25, 1.15)
+        box(ax, 2.45, 1.2, 0.5, 0.6, C_LATENT, "$f$", fontsize=8)
+        arrow(ax, 2.27, 1.5, 2.45, 1.5)
+        ax.set_title(title, fontsize=8.5)
+
+    watermark(fig)
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, "mock_fusion.png"), dpi=180)
     plt.close(fig)
 
 
@@ -137,6 +266,7 @@ def fig_chunking():
             ha="center", fontsize=7.5, color="red")
     ax.text(0.4, -0.15, "frame 0:\ncold start", ha="center", fontsize=7.5, color="gray")
 
+    watermark(fig)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_chunking.png"), dpi=180)
     plt.close(fig)
@@ -177,9 +307,8 @@ def fig_rate_quality():
     ax.set_title("Rate-quality plane (headline figure)")
     ax.legend(fontsize=7.5, loc="lower left")
     ax.grid(alpha=0.25)
-    ax.text(0.5, 0.5, "MOCK DATA", transform=ax.transAxes, fontsize=34, color="gray",
-            alpha=0.18, ha="center", va="center", rotation=20)
 
+    watermark(fig, "DRAFT / MOCK DATA")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_rate_quality.png"), dpi=180)
     plt.close(fig)
@@ -221,10 +350,7 @@ def fig_perframe():
     ax2.legend(fontsize=7.5)
     ax2.grid(alpha=0.25)
 
-    for ax in (ax1, ax2):
-        ax.text(0.5, 0.5, "MOCK", transform=ax.transAxes, fontsize=30, color="gray",
-                alpha=0.15, ha="center", va="center", rotation=20)
-
+    watermark(fig, "DRAFT / MOCK DATA")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_perframe.png"), dpi=180)
     plt.close(fig)
@@ -254,19 +380,20 @@ def fig_datascale():
     ax.set_ylabel("bleed ratio", color="#b06000")
     ax.tick_params(axis="y", colors="#b06000")
     ax.set_title("failure vs generalization pressure")
-    ax.text(0.5, 0.5, "MOCK", transform=ax.transAxes, fontsize=30, color="gray",
-            alpha=0.15, ha="center", va="center", rotation=20)
 
     lines = ax.get_lines()[:1] + ax2.get_lines()[:1]
     ax.legend(lines, [l.get_label() for l in lines], fontsize=7.5, loc="center left")
 
+    watermark(fig, "DRAFT / MOCK DATA")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "mock_datascale.png"), dpi=180)
     plt.close(fig)
 
 
 if __name__ == "__main__":
+    fig_broad_overview()
     fig_overview()
+    fig_fusion()
     fig_chunking()
     fig_rate_quality()
     fig_perframe()
