@@ -12,10 +12,20 @@ and the scripts to launch the experiments and collect the numbers.
 | `paper/02_experiments.md` | The internal run plan: fixed protocol, every experiment arm (E1–E10), priorities, and which old results are superseded. Read this before launching anything. |
 | `paper/03_figures.md` | Figure plan (teaser, architecture, rate–quality curve, bleed/ghosting visualizations). |
 | `paper/references.bib` | BibTeX for every `\cite` key in the draft. |
-| `run_paper_sweep.sh` | Slurm sweep for the core arms (E1a–d, E5b/c, E1z). One fixed protocol, only the model config differs per arm. |
+| `paper/overleaf_draft.tex` | The Overleaf bullet draft (post supervisor feedback: equations, figure placeholders, empty tables, supplement). |
+| `run_paper_sweep.sh` | Slurm sweep for the core arms (E1a–d, E5b/c, E1z, E11a/b latent width). One fixed protocol, only the model config differs per arm. |
 | `Open-Sora/scripts/vae/collect_results.py` | Collects `eval_metrics.jsonl` from all `outputs/paper_*` runs into one CSV for the tables/plots. |
 
-Code changes vs. the old branches (all in commit `52f6333`):
+Code changes vs. the old branches:
+- **Pretrained-loader fix (IMPORTANT):** with `use_lora=True`, the raw Wan
+  checkpoint keys never matched the LoRA-wrapped conv names (`*.base_conv.*`),
+  so `encoder.middle`, `encoder.head`, and the ENTIRE decoder silently stayed at
+  random init in every historical LoRA run ("90 unexpected keys" in old logs).
+  The loader now remaps the keys and hard-fails if any pretrained key is dropped.
+  One more reason no old number can be cited.
+- `latent_widen_to` (E11): build the VAE with a 32/64-channel latent; pretrained
+  16-ch weights are expanded by zero/identity surgery on the four boundary convs,
+  which are then unfrozen. Sweep arms 8 (widen32) and 9 (widen64).
 - `fusion_mode="none"` + `--model.independent_views True`: per-view reference
   mode (views folded into batch, plain Wan + LoRA, no fusion, no view conditioning).
 - Eval diagnostics in `train.py`: bleed_ratio_within / bleed_ratio_across,
@@ -41,7 +51,8 @@ sbatch --export=ALL,TASK=4 ./run_paper_sweep.sh
 Order matters because of the staged init: arms 4–6 (fused + temporal
 compression) warm-start from the arm-2 checkpoint by default.
 
-1. arms 1, 2, 3, 7 — no dependencies, start immediately
+1. arms 1, 2, 3, 7, 8, 9 — no dependencies, start immediately (the widen arms
+   8/9 never warm-start: their boundary conv shapes differ from the E1b ckpt)
 2. arms 4, 5, 6 — after arm 2 finished (script auto-finds the E1b checkpoint,
    or pass `INIT_CKPT=/path/to/epochN-...`; `INIT_CKPT=none` = the E7b
    init ablation, i.e. Wan-only weights)

@@ -6,7 +6,7 @@
 #SBATCH --time=0-18:00:00
 #SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.out
 #SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.err
-#SBATCH --array=1-7%4
+#SBATCH --array=1-9%4
 
 # Paper rerun sweep: E1 (rate-quality 2x2 + per-view references) and E5 (unfreeze).
 # All runs share ONE fixed protocol (see paper/02_experiments.md):
@@ -24,6 +24,13 @@
 #   7  E1z  zero-shot eval only (epochs=0 + final_eval) -- pretrained Wan floor.
 #           NOTE: not tested end-to-end; if epochs=0 skips final_eval, run arm 1
 #           with --epochs 1 --save_ckpt False instead and ignore the train step.
+#   8  E11a  E1d + latent widened 16->32 channels  <- positive capacity test
+#   9  E11b  E1d + latent widened 16->64 channels
+#           The widen arms test the capacity claim DIRECTLY: if joint view+temporal
+#           compression recovers with a wider latent, the bottleneck is the rate,
+#           not the architecture. VAE-side only (no diffusion retraining). New
+#           channels are zero/identity-init, so step 0 is exactly the 16-ch model.
+#           No warm start (E1b is 16-ch; boundary shapes differ).
 #
 # Two-stage discipline: run every arm with OVERFIT=1 first (single_sequence, must
 # reach near-perfect reconstruction) before launching the real generalization run.
@@ -201,6 +208,18 @@ case "$TASK" in
     run_name="paper_E1z_perview_zeroshot"
     MODEL_ARGS=( --model.independent_views True --model.temporal_compression False
                  --epochs 0 --save_ckpt False --final_eval True )
+    ;;
+  8)
+    run_name="paper_E11a_fused_tcT_widen32"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.latent_widen_to 32 )
+    ;;
+  9)
+    run_name="paper_E11b_fused_tcT_widen64"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.latent_widen_to 64 )
     ;;
   *)
     echo "Unknown TASK=$TASK"; exit 1 ;;

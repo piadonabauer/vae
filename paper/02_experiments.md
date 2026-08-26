@@ -10,7 +10,18 @@ set of *predictions*: fusion modes ≈ equivalent (E2), embeddings ≈ per-view 
 or 4D disc best / 3D disc hurts colors (E7), ranks 32-128 similar (E10). Where a rerun
 confirms a prediction you can report it with confidence; where it contradicts, the rerun wins.
 Priority stays: E1 (the 2x2) and E5 (full unfreeze) first — they are the runs with no prior
-answer at all — then E4, then the confirmation reruns E2/E3/E7/E10.
+answer at all — then E11 (latent width, the positive capacity test), then E4, then the
+confirmation reruns E2/E3/E7/E10.
+
+**Why the old numbers are DEFINITELY unreliable (found Aug 2026, fixed on this branch):**
+every historical run with `use_lora=True` silently trained with a partially random-init
+backbone. `_enable_lora()` renames the wrapped convs to `*.base_conv.weight`, but the raw
+Wan checkpoint has plain conv names, so `load_state_dict(strict=False)` dropped ~90 keys —
+the pretrained conv weights of `encoder.middle`, `encoder.head`, and the ENTIRE decoder
+never loaded (visible in old logs: "194 ckpt keys; 263 missing, 90 unexpected"). Those convs
+then sat frozen at random init, and the rank-32 LoRA paths had to compensate. The loader now
+remaps the keys and hard-fails if any pretrained encoder/decoder key goes unloaded. Expect
+the rerun numbers (and possibly some qualitative conclusions) to differ from the old sweeps.
 
 ## Fixed protocol (applies to every run unless the experiment varies it)
 
@@ -211,6 +222,33 @@ only breaks when it must generalize" plot. 2-3 runs.
 Best config from E1-E4 at 256² and 512² (batch ladder per your 512 scripts, keep effective
 batch). 2 runs. Frames the capacity argument in bits-per-pixel terms across resolutions.
 
+## E11 — Latent width (the POSITIVE capacity test)  [MUST HAVE — supervisor-requested]
+
+The capacity claim is currently supported only by what FAILS. This experiment tests it
+directly: widen the latent and see whether joint view+temporal compression recovers.
+Fixed: E1-d config (fused, TC on), no warm start (boundary shapes differ from E1-b). Vary
+`latent_widen_to`:
+
+| ID | latent channels | rate (V=2, T=9, 128px) | sweep arm |
+|---|---|---|---|
+| E11-0 | 16 (= E1-d, reuse) | 96x | TASK=4 |
+| E11-a | 32 | 48x | TASK=8 |
+| E11-b | 64 | 24x | TASK=9 |
+
+Implementation (`latent_widen_to` in the model config): only four boundary convs touch the
+latent width (encoder head, the two 1x1 latent convs, decoder conv_in). Pretrained weights
+are expanded with zero/identity surgery — new mu rows zero, new logvar rows zero (unit
+variance), identity diagonal on the 1x1s, zero decoder input columns — so at step 0 the model
+is EXACTLY the pretrained 16-ch VAE. The four boundary convs are unfrozen (the new capacity
+must be trainable; ~2M params, still adapter-scale). VAE-side only: retraining the diffusion
+model on a wider latent is explicitly out of scope (state this in the paper; VA-VAE says
+wider latents are harder to sample from — that trade-off is future work, not our claim).
+
+Predictions: if E11-a/b recover most of the E1-c→E1-d drop, the bottleneck is the rate and
+the paper's central claim gets positive evidence (DC-AE/LTX-style "width buys compression"
+extended to the view axis). If they do NOT recover, the failure is architectural/optimization
+— equally important to know before writing the discussion. 2 runs.
+
 ## E10 — LoRA rank / placement  [NICE TO HAVE — appendix]
 
 Rank {8, 32, 128} at E1-c; `use_lora_before` on/off. 3-4 runs. You already have single-sequence
@@ -221,8 +259,8 @@ otherwise report as appendix with the overfit caveat.
 
 ## Budget summary
 
-- MUST HAVE: E1 (5) + E2 (4) + E3 (4) + E4 (8) + E5 (2) ≈ **23 runs** at 128px/T=9/V=2 —
-  each ≈ bleed-sweep cost; batch them with your existing OOM-ladder scripts.
+- MUST HAVE: E1 (5) + E2 (4) + E3 (4) + E4 (8) + E5 (2) + E11 (2) ≈ **25 runs** at
+  128px/T=9/V=2 — each ≈ bleed-sweep cost; batch them with your existing OOM-ladder scripts.
 - SHOULD HAVE: E6 (2-3) + E6b (1-2) + E8 (3) ≈ 6-8 runs.
 - NICE TO HAVE / SKIP-UNLESS: E7 (3) + E9 (2) + E10 (4) ≈ 9 runs.
 
@@ -230,8 +268,10 @@ Practical order (both this plan and the parallel session's tiering converge on i
 1. E1-a (finetuned per-view reference) + E1-c (fused, TC off) + E1-0 (zero-shot eval) — the
    RQ1 rate–quality comparison: how small is the quality gap at half the latent rate?
 2. E1-b + E1-d — completes the rate–quality curve and isolates the TC effect.
-3. E5 (full unfreeze) — kills the frozen-bottleneck objection.
-4. E4 (temporal interventions, with E4-b as oracle upper bound), then E2/E3 confirmations,
+3. E11 (latent width) — the positive capacity test; can start as soon as E1-d exists to
+   compare against (no warm-start dependency).
+4. E5 (full unfreeze) — kills the frozen-bottleneck objection.
+5. E4 (temporal interventions, with E4-b as oracle upper bound), then E2/E3 confirmations,
    then E6/E6b/E8.
 Run Tier 1-2 at the fixed small setting (V=2, 128px, T=9, all_people_one_expression); scale
 resolution only for the final main-result run if compute allows.
