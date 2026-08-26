@@ -217,16 +217,16 @@ def fig_fusion():
     fig, axes = plt.subplots(1, 4, figsize=(11, 3.4))
 
     fusion_chain(axes[0], [
-        ("cross-view MHA over\nall $V{\\cdot}N$ tokens per frame", C_NEW),
+        ("self-attention over all\n$V{\\cdot}N$ tokens (RMSNorm)", C_NEW),
         ("zero-init output proj\n(+ residual)", C_NEW),
         ("tree merge: pairwise\nconcat $\\to$ 2 ResBlocks", C_NEW),
     ], "(a) cross-view attention\n+ tree merge (default)")
 
     fusion_chain(axes[1], [
-        ("concat token sequences\n$[f_1; f_2] \\in V{\\cdot}N$ tokens", "white"),
-        ("joint self-attention\nover all view tokens", C_NEW),
-        ("concat on channels\n$\\to$ 2 ResBlocks", C_NEW),
-    ], "(b) joint\nself-attention")
+        ("self-attention over all\n$V{\\cdot}N$ tokens (LayerNorm)", C_NEW),
+        ("standard-init MHA\n(+ residual)", C_NEW),
+        ("flat concat of all views\n$\\to$ 2 ResBlocks", C_NEW),
+    ], "(b) flat attention fusion\n(no zero-init, no tree)")
 
     fusion_chain(axes[2], [
         ("stack on channel axis\n$[2C, T, H', W']$", "white"),

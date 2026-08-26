@@ -151,7 +151,7 @@ f_v = E_{\mathrm{pre}}(x_v) \in \mathbb{R}^{C_b \times T' \times h \times w},
 \end{equation}
 - fusion operates at 384 channels on the 8x downsampled grid -> tokens are cheap for attention, but early enough so that fused information shapes the latent
 
-Cross-view attention treats all views' spatial positions at each latent time step as one token sequence (length $V \cdot hw$) and applies multi-head self-attention with a zero-initialized output projection $W_O$:
+Cross-view attention treats all views' spatial positions at each latent time step as one token sequence (length $V \cdot hw$) and applies multi-head self-attention with a zero-initialized output projection $W_O$. (Terminology: the mechanism is plain self-attention over the joint sequence; ``cross-view'' refers to the axis being mixed, following the convention in multi-view diffusion \cite{shi2023mvdream, gao2024cat3d} -- there is no query/key asymmetry between views.)
 \begin{equation}
 \tilde{f}_v = f_v + W_O \,\mathrm{MHA}\!\left(\mathrm{RMSNorm}([f_1, \dots, f_V])\right)_v ,
 \qquad W_O = 0 \text{ at init,}
@@ -176,7 +176,7 @@ z = \mu + \sigma \odot \epsilon \;\in \mathbb{R}^{16 \times T' \times h \times w
 \fbox{\parbox[c][5cm][c]{0.9\linewidth}{\centering
 PLACEHOLDER Fig.~\ref{fig:fusion}: the four fusion mechanisms side by side (small schematics).\\
 (a) cross-view attention + tree merge (ours, Eq.~\ref{eq:fusion_attn}--\ref{eq:tree_merge})\\
-(b) joint self-attention over concatenated tokens\\
+(b) flat attention fusion: same joint self-attention, but standard init + flat concat merge\\
 (c) channel-concat + 1x1x1 Conv3d + ResBlocks\\
 (d) factorized (2+1+1)D convolution with a view-axis kernel}}
 \caption{Fusion mechanisms compared in the ablation. All reduce V per-view feature maps to one shared map at the encoder bottleneck.}
@@ -235,7 +235,7 @@ The reconstruction term follows the standard latent-diffusion tokenizer recipe \
 
 - core rate-quality matrix: \{per-view, fused latent\} x \{temporal compression off, on\}, plus pretrained Wan zero-shot as floor -> single-axis compression should degrade gracefully, does joint compression fall off the curve? (headline, Tab.~\ref{tab:main}, Fig.~\ref{fig:rate_quality})
 - latent width: 16 (pretrained) vs 32 vs 64 channels under joint compression -> the positive capacity test: does widening recover what joint compression loses? (Tab.~\ref{tab:width})
-- fusion mechanism: cross-attention vs joint self-attention vs channel-concat Conv3d vs factorized 4D conv -> is the bottleneck the fusion design? (Tab.~\ref{tab:fusion})
+- fusion mechanism: cross-view attention (zero-init, tree merge) vs flat attention fusion (standard init, flat concat) vs channel-concat Conv3d vs factorized 4D conv -> is the bottleneck the fusion design? (Tab.~\ref{tab:fusion})
 - view-conditioned decoding: per-view latent LoRA vs learned view embedding vs neither (negative control, expect ghosting) (Tab.~\ref{tab:viewcond})
 - view count: V = 2, 4, 8 at fixed budget -> rate pressure grows with V (Tab.~\ref{tab:views})
 - unfreezing: LoRA-only vs unfrozen encoder vs everything unfrozen -> is it trainability or capacity? (Tab.~\ref{tab:unfreeze})
@@ -335,7 +335,7 @@ probably something like (current bullet points are based on prior experiments bu
 % below may weaken, move, or in the best case partly disappear. Treat every bullet as a
 % hypothesis, not a result.
 - joint compression collapses; single-axis compression is fine (the rate-quality curve is the headline figure). In particular view fusion alone (with spatial compression, TC off) works -> the view axis CAN be absorbed, just not on top of the temporal axis
-- fusion mechanism barely matters (cross-attention, joint self-attention, 4D, ...) -> fusion mechanism is not the bottleneck
+- fusion mechanism barely matters (attention variants, Conv3d, factorized 4D, ...) -> fusion mechanism is not the bottleneck
 - view conditioning barely matters (learnable view embeddings vs per-view LoRAs)
 - loss config very important: best with no discriminator or 4D multi-view discriminator, standard 3D PatchGAN worse colors and less sharp -> if a discriminator is used, it should see the view axis jointly
 - lower perceptual and KL weights improved pixel fidelity
@@ -407,7 +407,8 @@ Latent channels & Rate & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim & Blee
 
 \subsubsection{Fusion mechanism}
 
-- joint self-attention: one attention over the concatenated token sequence of all views, then concat + 2 ResBlocks
+- note: both attention variants are self-attention over the concatenated token sequence of all views; the ablation isolates the two design choices of the default, zero-init output projection (identity at step 0) and the pairwise tree merge
+- flat attention fusion: same joint self-attention but standard init (LayerNorm + MHA), followed by a single flat concat of all views + 2 ResBlocks instead of the tree
 - channel concat Conv3d: views stacked on channels, 1x1x1 Conv3d + GN/SiLU + two symmetric (non-causal) 3D residual blocks
 - factorized 4D convolution: spatial 3x3 Conv2d, temporal 3x3x3 Conv3d, then a view-axis Conv3d with kernel (V,3,3) compressing V->1, a (2+1+1)D factorization
 
@@ -420,7 +421,7 @@ Latent channels & Rate & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim & Blee
 Fusion & PSNR $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ & XView sim \\
 \midrule
 cross-view attention + tree merge (ours) & -- & -- & -- & -- \\
-joint self-attention                     & -- & -- & -- & -- \\
+flat attention (std.\ init, flat merge)  & -- & -- & -- & -- \\
 channel-concat Conv3d                    & -- & -- & -- & -- \\
 factorized (2+1+1)D conv                 & -- & -- & -- & -- \\
 \bottomrule
