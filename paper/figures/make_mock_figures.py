@@ -138,7 +138,7 @@ def fig_overview():
     arrow(ax, 1.15, 1.17, 1.6, 1.17)
 
     # fusion
-    box(ax, 3.5, 1.5, 1.3, 0.9, C_NEW, "cross-view\nattention\n(zero-init)")
+    box(ax, 3.5, 1.5, 1.3, 0.9, C_NEW, "multi-view\nself-attention\n(zero-init)")
     arrow(ax, 3.1, 2.77, 3.6, 2.3)
     arrow(ax, 3.1, 1.17, 3.6, 1.6)
     box(ax, 5.1, 1.5, 1.0, 0.9, C_NEW, "tree\nmerge")
@@ -220,7 +220,7 @@ def fig_fusion():
         ("self-attention over all\n$V{\\cdot}N$ tokens (RMSNorm)", C_NEW),
         ("zero-init output proj\n(+ residual)", C_NEW),
         ("tree merge: pairwise\nconcat $\\to$ 2 ResBlocks", C_NEW),
-    ], "(a) cross-view attention\n+ tree merge (default)")
+    ], "(a) multi-view self-attention\n+ tree merge (default)")
 
     fusion_chain(axes[1], [
         ("self-attention over all\n$V{\\cdot}N$ tokens (LayerNorm)", C_NEW),
