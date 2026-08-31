@@ -1233,6 +1233,23 @@ def create_visualization_grid(x_orig, x_rec, num_samples=4, num_frames=None, val
     return images
 
 
+# Shared LPIPS net for evaluation, built once per process (same VGG backbone as
+# the training perceptual loss). fp32 on purpose: metric values should not
+# depend on the training dtype.
+_EVAL_LPIPS = {"net": None, "device": None}
+
+
+def _get_eval_lpips(device):
+    if _EVAL_LPIPS["net"] is None or _EVAL_LPIPS["device"] != str(device):
+        from opensora.models.vae.lpips import LPIPS as _LPIPS
+
+        net = _LPIPS().eval().to(device, torch.float32)
+        net.requires_grad_(False)
+        _EVAL_LPIPS["net"] = net
+        _EVAL_LPIPS["device"] = str(device)
+    return _EVAL_LPIPS["net"]
+
+
 def evaluate_model(
     model,
     dataloader,
@@ -1279,6 +1296,7 @@ def evaluate_model(
         "psnr": [],
         "ssim": [],
         "mse": [],
+        "lpips": [],
     }
     # Paper diagnostics, accumulated per batch (see Sec. "diagnostics" in the paper):
     # bleed ratios (temporal), cross-view similarity (ghosting), per-frame PSNR profile.
@@ -1348,6 +1366,24 @@ def evaluate_model(
             else:
                 x01 = x.float().clamp(0, 1)
                 xr01 = x_rec.float().clamp(0, 1)
+            # LPIPS per clip: mean over all views and frames, [-1,1] fp32 frames.
+            # try/except so a metric failure can never kill a training run.
+            try:
+                lpips_fn = _get_eval_lpips(device)
+                if is_multiview:
+                    _b, _v, _c, _t, _h, _w = x01.shape
+                    a = (x01 * 2 - 1).permute(0, 1, 3, 2, 4, 5).reshape(_b * _v * _t, _c, _h, _w)
+                    b = (xr01 * 2 - 1).permute(0, 1, 3, 2, 4, 5).reshape(_b * _v * _t, _c, _h, _w)
+                else:
+                    _b, _c, _t, _h, _w = x01.shape
+                    a = (x01 * 2 - 1).permute(0, 2, 1, 3, 4).reshape(_b * _t, _c, _h, _w)
+                    b = (xr01 * 2 - 1).permute(0, 2, 1, 3, 4).reshape(_b * _t, _c, _h, _w)
+                lp = lpips_fn(a.float(), b.float()).reshape(_b, -1).mean(dim=1)
+                all_metrics["lpips"].extend([float(v) for v in lp])
+            except Exception as e:
+                if not all_metrics["lpips"]:  # warn only once per eval
+                    print(f"[eval] LPIPS skipped: {e}")
+
             bleed = compute_intra_chunk_bleed_metrics(x01, xr01)
             if "bleed_ratio_within" in bleed:
                 diag["bleed_ratio_within"].append(bleed["bleed_ratio_within"])
@@ -1396,6 +1432,9 @@ def evaluate_model(
         "mse_mean": np.mean(all_metrics["mse"]),
         "mse_std": np.std(all_metrics["mse"]),
     }
+    if all_metrics["lpips"]:
+        aggregated["lpips_mean"] = np.mean(all_metrics["lpips"])
+        aggregated["lpips_std"] = np.std(all_metrics["lpips"])
     for key in ("bleed_ratio_within", "bleed_ratio_across", "xview_sim_rec", "xview_sim_gt"):
         if diag[key]:
             aggregated[key] = float(np.mean(diag[key]))
@@ -2526,6 +2565,9 @@ def main():
                 "train_psnr_guard_min_updates": train_psnr_guard_min_updates,
             },
         )
+    # Predefine for the eval-only case (epochs=0, e.g. the zero-shot reference
+    # arm): the loop body never runs, but final-eval logging references `epoch`.
+    epoch = start_epoch - 1
     for epoch in range(start_epoch, cfg_epochs):
         epoch_psnr_sum = 0.0
         epoch_psnr_count = 0
@@ -2721,13 +2763,19 @@ def main():
                         loss_dict["psnr"] = _bm["psnr"]
                         loss_dict["ssim"] = _bm["ssim"]
                         loss_dict["mse"] = _bm["mse"]
-                        if is_multiview and cfg.get("temporal_compression", False):
+                        # temporal_compression lives in the MODEL config (a top-level
+                        # cfg.get() always returned False and killed this diagnostic).
+                        if is_multiview and cfg.model.get("temporal_compression", False):
                             _bleed = compute_intra_chunk_bleed_metrics(
                                 x, x_rec, chunk_size=int(cfg.get("temporal_bleed_chunk_size", 4))
                             )
                             loss_dict.update(_bleed)
                         on_update_boundary = ((global_step + 1) % accumulation_steps == 0)
-                        if cfg.get("train_psnr_guard", True) and on_update_boundary:
+                        if on_update_boundary:
+                            # Epoch-PSNR aggregation runs UNCONDITIONALLY: it feeds the
+                            # overfit-gate stop (stop_at_train_psnr) and epoch-end logging,
+                            # not just the low-PSNR guard. Gating it behind train_psnr_guard
+                            # silently disabled the overfit gate when the guard was off.
                             try:
                                 _tb = float(_bm["psnr"])
                             except (TypeError, ValueError):
@@ -2735,7 +2783,6 @@ def main():
                             if not math.isnan(_tb):
                                 # Keep per-update quality gate for checkpoint eligibility.
                                 train_psnr_bad_for_ckpt = _tb < train_psnr_guard_threshold
-                                # Epoch-level guard aggregation for early stop decision.
                                 epoch_psnr_sum += _tb
                                 epoch_psnr_count += 1
 
@@ -3184,12 +3231,15 @@ def main():
                         vis_range = "[-1,1]" if (vae_target_range == "[-1,1]" or (vae_target_range is None and is_multiview)) else "[0,1]"
                         dataset = dataloader.dataset
                         participants_cfg = getattr(dataset, "participants", None)
-                        # 1 sample if single person; else up to num_reconstruction_vis_samples distinct people
+                        # participants=None means "all participants" (e.g. the
+                        # all_people_one_expression preset), so treat it as multi-person;
+                        # only an explicit single-person list gets 1 vis sample.
+                        _multi_person = participants_cfg is None or len(participants_cfg) > 1
                         _nrv = int(cfg.get("num_reconstruction_vis_samples", 3))
-                        num_vis = _nrv if (participants_cfg is not None and len(participants_cfg) > 1) else 1
+                        num_vis = _nrv if _multi_person else 1
                         num_vis = min(num_vis, len(dataset))
                         vis_items = []
-                        if participants_cfg is not None and len(participants_cfg) > 1 and num_vis > 1:
+                        if _multi_person and num_vis > 1:
                             seen_pids = set()
                             for idx in range(len(dataset)):
                                 sample = dataset[idx]
@@ -3600,6 +3650,8 @@ def main():
                                 # Paper diagnostics (present when applicable: bleed ratios
                                 # need T>=2, cross-view similarity needs V>=2).
                                 for k in (
+                                    "lpips_mean",
+                                    "lpips_std",
                                     "bleed_ratio_within",
                                     "bleed_ratio_across",
                                     "xview_sim_rec",
@@ -3902,6 +3954,8 @@ def main():
                 logger.info("PSNR: %.2f ± %.2f dB", final_metrics["psnr_mean"], final_metrics["psnr_std"])
                 logger.info("SSIM: %.4f ± %.4f", final_metrics["ssim_mean"], final_metrics["ssim_std"])
                 logger.info("MSE:  %.6f ± %.6f", final_metrics["mse_mean"], final_metrics["mse_std"])
+                if "lpips_mean" in final_metrics:
+                    logger.info("LPIPS: %.4f ± %.4f", final_metrics["lpips_mean"], final_metrics["lpips_std"])
                 logger.info("=" * 80)
                 append_eval_metrics_jsonl(
                     exp_dir,
@@ -3931,6 +3985,9 @@ def main():
                         f"{prefix}/mse_std": final_metrics["mse_std"],
                         f"{prefix}/reconstructions": final_eval_results["visualizations"],
                     }
+                    if "lpips_mean" in final_metrics:
+                        final_log[f"{prefix}/lpips_mean"] = final_metrics["lpips_mean"]
+                        final_log[f"{prefix}/lpips_std"] = final_metrics["lpips_std"]
                     wandb.log(final_log, step=actual_update_step)
             logger.info("Final evaluation complete.")
     

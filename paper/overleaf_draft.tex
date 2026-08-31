@@ -19,7 +19,7 @@ of multi-view video. However, no such tokenizer exists: in recent work multi-vie
 This motivates a latent in which the views are jointly encoded: the encoder itself fuses the view axis into a single shared code, rather than encoding views independently and leaving their correlation to be modeled downstream (e.g. by a diffusion model trained on stacked per-view latents, as in current multi-view and 4D generation systems \cite{zuo2024videomv, xie2024sv4d}). Only joint encoding compresses the view redundancy and gives cross-view consistency by construction.
 % [feedback] unambiguous: the extension concerns the VAE only, the diffusion model is untouched
 Rather than designing a 4D VAE from scratch, we ask: can a pretrained 3D video VAE be minimally extended to absorb the view axis? Our changes concern the VAE only; the downstream diffusion model is untouched. We extend the Wan 2.1 VAE \cite{wan2025wan} with
-zero-initialized cross-view fusion in the encoder and view-conditioned decoding via low-rank adapters \cite{hu2022lora, zhang2023adding}, keeping the pretrained backbone frozen so the latent remains compatible with unconditional sampling.
+zero-initialized multi-view self-attention fusion in the encoder and view-conditioned decoding via low-rank adapters \cite{hu2022lora, zhang2023adding}, keeping the pretrained backbone frozen so the latent remains compatible with unconditional sampling.
 % TODO: this whole findings passage is the EXPECTED story from the old runs. All numbers are
 % being re-established under the fixed protocol (a loader bug in the old runs left parts of the
 % pretrained backbone unloaded, so even the qualitative picture could shift). Rewrite this
@@ -36,7 +36,7 @@ Our extension confirms this rate bottleneck rather than removing it: fusing a th
 
 % [added] contributions block, CVPR readers look for this at the end of the intro
 Contributions:
-- a minimal, weight-compatible extension of a pretrained 3D video VAE to synchronized multi-view video: zero-init cross-view fusion in the encoder, per-view low-rank adapters in the decoder; identical to the pretrained model at step 0
+- a minimal, weight-compatible extension of a pretrained 3D video VAE to synchronized multi-view video: zero-init multi-view self-attention in the encoder, per-view low-rank adapters in the decoder; near-identical to the pretrained model at step 0 (only the V->1 merge introduces fresh weights)
 - a controlled empirical study of joint view+temporal compression at fixed latent width: same data, same budget, only the compressed axes vary
 - two diagnostics that localize the failure (cross-view similarity for ghosting, bleed ratio for temporal averaging), separating it from generic reconstruction error
 - evidence that the failure is a rate/capacity limit, not a fusion-design problem: fusion and conditioning variants barely matter, and a latent-width ablation tests directly whether more channels recover joint compression [todo: this bullet assumes the reruns confirm the failure; reword to the actual outcome]
@@ -133,14 +133,14 @@ Left: V camera streams -> V frozen Wan encoder stems (drawn once, marked ``share
 Middle: multi-view self-attention block + binary tree merge -> single fused latent $z$ (16 ch).\\
 Right: shared frozen decoder invoked V times, each pass with its per-view LoRA adapter -> V reconstructions.\\
 Color code: blue = frozen pretrained, orange = new trainable (zero-init), green = LoRA.}}
-\caption{Multi-view extension of the Wan 2.1 VAE. Views are encoded by the shared frozen per-view stem, fused at the bottleneck into a single latent, and decoded once per view with view-conditioned low-rank adapters. All new paths are zero-initialized, so at step 0 the model is exactly the pretrained per-view VAE.}
+\caption{Multi-view extension of the Wan 2.1 VAE. Views are encoded by the shared frozen per-view stem, fused at the bottleneck into a single latent, and decoded once per view with view-conditioned low-rank adapters. The attention and all LoRA paths are zero-initialized (identity at step 0); only the $V{\to}1$ merge blocks introduce fresh weights, since a many-to-one reduction has no identity configuration.}
 \label{fig:overview}
 \end{figure*}
 
 \subsubsection{Design Decisions}
 
 - adapt pretrained 3D VAE instead of training 4D VAE from scratch: transfer pretrained knowledge \cite{carreira2017quo, blattmann2023align}, data efficiency, keeping latent distribution close to the pretrained one
-- new paths are zero-initialized, so model is exactly the pretrained per-view VAE at step 0
+- every path that CAN be an identity at init is zero-initialized (attention output projection, all LoRA up-projections); the only fresh weights are the V->1 merge blocks, which have no identity configuration -> at step 0 the model is the pretrained per-view VAE up to the merge
 
 \subsubsection{Encoder-side cross-view fusion}
 
@@ -552,7 +552,7 @@ designing a 4D tokenizer:
 \section{Conclusion}
 
 - beginning sentence first
-- extended a pretrained 3D video VAE to multi-view video data, zero-initialized cross-view fusion and per-view low-rank decoding -> preserving the pretrained latent distribution and unconditional sampling
+- extended a pretrained 3D video VAE to multi-view video data, zero-initialized multi-view self-attention fusion and per-view low-rank decoding -> preserving the pretrained latent distribution and unconditional sampling
 - study on multi-view facial video: shows the fixed 16-channel latent absorbs either 4x temporal compression or the fused view axis, but not both -> joint compression exhausts the latent's capacity and the decoder regresses to means -> resulting in cross-view ghosting and intra-chunk temporal bleeding
 - the latent-width ablation turns the capacity claim into a tested one [todo: state the outcome; if the reruns changed the picture, rewrite this conclusion around whatever actually held up]
 - future 4D tokenizers: scale latent capacity with the number of compressed axes or keep view identity out of the latent

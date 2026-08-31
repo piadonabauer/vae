@@ -91,13 +91,14 @@ the converged per-view TC checkpoint (E1-b) with `reinit_view_attention_after_lo
 zero-init) is the ablation E7b. This creates a dependency: **E1-b must finish before the
 joint arms start.**
 
-**Report for every run:** val PSNR / SSIM / MSE (mean ± std over clips), bleed_ratio_within,
-bleed_ratio_across, cross-view recon cosine similarity (+ GT reference level), per-frame-index
-PSNR profile (at least frame0 vs mean of frames 1-8), per-frame-pair |Δframe| profiles for GT
-and rec (the raw bleeding curves for figure F4). Log all to wandb with a fixed naming scheme,
-e.g. `paper/E1a_perview_tcF`. LPIPS is computed OFFLINE from the clip dumps (below) with
-`scripts/vae/lpips_from_dump.py` — it is promised in the draft's metrics paragraph, so run it
-before filling any table.
+**Report for every run:** val PSNR / SSIM / MSE / LPIPS (mean ± std over clips),
+bleed_ratio_within, bleed_ratio_across, cross-view recon cosine similarity (+ GT reference
+level), per-frame-index PSNR profile (at least frame0 vs mean of frames 1-8), per-frame-pair
+|Δframe| profiles for GT and rec (the raw bleeding curves for figure F4). Log all to wandb
+with a fixed naming scheme, e.g. `paper/E1a_perview_tcF`. LPIPS is now computed directly in
+`full_eval`/`final_eval` (VGG backbone, fp32, per-clip mean over views and frames; logged as
+`eval/val/lpips_mean`). `scripts/vae/lpips_from_dump.py` remains as an offline fallback for
+old dumps.
 
 **Clip dumps (raw material for all qualitative figures):** every full/final eval saves the
 evaluated clips (GT + reconstruction, uint8, ~20 MB for the 10-clip val set) into the run dir:
@@ -107,9 +108,8 @@ qualitative grid, difference maps, LPIPS, and the supplement video are all offli
 scripts over these files — no checkpoint re-decoding needed.
 
 Note: all of these are wired into `full_eval`/`final_eval` on this branch (train.py computes
-bleed ratios, cross-view similarity rec+gt, and the per-frame PSNR profile; everything lands
-in `outputs/<run>/eval_metrics.jsonl` and wandb). Remaining nice-to-have: LPIPS in
-`compute_metrics` so eval has a perceptual metric.
+bleed ratios, cross-view similarity rec+gt, per-frame PSNR profile, and LPIPS; everything
+lands in `outputs/<run>/eval_metrics.jsonl` and wandb).
 
 ---
 

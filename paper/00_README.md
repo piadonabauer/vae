@@ -29,8 +29,22 @@ Code changes vs. the old branches:
 - `fusion_mode="none"` + `--model.independent_views True`: per-view reference
   mode (views folded into batch, plain Wan + LoRA, no fusion, no view conditioning).
 - Eval diagnostics in `train.py`: bleed_ratio_within / bleed_ratio_across,
-  cross-view reconstruction similarity (rec and gt), per-frame PSNR profile.
-  All logged to wandb and appended to `outputs/<run>/eval_metrics.jsonl`.
+  cross-view reconstruction similarity (rec and gt), per-frame PSNR profile,
+  and LPIPS (VGG, fp32, per-clip mean over views+frames — same backbone as the
+  training perceptual loss). All logged to wandb and appended to
+  `outputs/<run>/eval_metrics.jsonl`.
+- Pre-flight fixes from the final code review (Aug 31):
+  - epoch-PSNR aggregation no longer gated behind `train_psnr_guard` — with the
+    guard off (our config) the overfit-gate stop (`stop_at_train_psnr`) could
+    never fire and overfit runs would have gone the full 2000 epochs.
+  - train-batch bleed metrics read `cfg.model.temporal_compression` (the old
+    top-level `cfg.get` always returned False, so `train_batch/bleed_ratio_*`
+    was never logged).
+  - train-vis grids now show 3 distinct participants also when the preset uses
+    `participants=None` ("all"); previously that case fell back to 1 sample.
+  - `--epochs 0` (zero-shot arm E1z) works end-to-end: `epoch` is defined for
+    final-eval logging and the arm passes `--wandb_min_steps_before_init -1`
+    so the final eval reaches wandb.
 
 ## How to run
 

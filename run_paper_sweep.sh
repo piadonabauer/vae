@@ -20,10 +20,9 @@
 #   3  E1c  fused latent (cross-attention), TC off
 #   4  E1d  fused latent, TC on            <- headline point
 #   5  E5b  E1d + unfreeze full encoder (incl. strided time convs)
-#   6  E5c  E5b + full_finetune_decoder    <- nothing frozen anywhere
+#   6  E5c  E5b + full_finetune_decoder (pre-fusion encoder + decoder bases all
+#           trainable; only the LoRA-wrapped bottleneck middle/head bases stay frozen)
 #   7  E1z  zero-shot eval only (epochs=0 + final_eval) -- pretrained Wan floor.
-#           NOTE: not tested end-to-end; if epochs=0 skips final_eval, run arm 1
-#           with --epochs 1 --save_ckpt False instead and ignore the train step.
 #   8  E11a E1d + latent widened 16->32 channels
 #   9  E11b E1d + latent widened 16->64 channels
 #           The widen arms are the positive capacity test: if joint view+temporal
@@ -90,7 +89,7 @@ fi
 
 TASK="${TASK:-${SLURM_ARRAY_TASK_ID:-}}"
 if [[ -z "$TASK" ]]; then
-  echo "Set TASK=1..7 or submit as array job"; exit 1
+  echo "Set TASK=1..9 or submit as array job"; exit 1
 fi
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
@@ -143,8 +142,8 @@ COMMON=(
   # (a) a slow-learning arm must never be killed -- the fixed budget is the
   #     protocol, and (b) the guard's start epoch derives from steps-per-epoch,
   #     i.e. from the MICRO-batch, so arms on different rungs of the OOM ladder
-  #     would get different guard behavior. Keep train_psnr_guard True: the
-  #     epoch-PSNR aggregation it drives also feeds the overfit-gate stop.
+  #     would get different guard behavior. The epoch-PSNR aggregation that
+  #     feeds the overfit-gate stop runs unconditionally in train.py.
   --train_psnr_guard_threshold 0
   --epochs "$TRAIN_EPOCHS"
   --wandb True
@@ -206,8 +205,11 @@ case "$TASK" in
     ;;
   7)
     run_name="paper_E1z_perview_zeroshot"
+    # wandb_min_steps_before_init -1: with epochs=0 no training step ever runs,
+    # so wandb must be allowed to init at update 0 or the final eval is lost.
     MODEL_ARGS=( --model.independent_views True --model.temporal_compression False
-                 --epochs 0 --save_ckpt False --final_eval True )
+                 --epochs 0 --save_ckpt False --final_eval True
+                 --wandb_min_steps_before_init -1 )
     ;;
   8)
     run_name="paper_E11a_fused_tcT_widen32"
