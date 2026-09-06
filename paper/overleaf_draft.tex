@@ -86,21 +86,6 @@ yang2024cogvideox, kong2024hunyuanvideo, agarwal2025cosmos}, many variants
 % latent; the reconstruction pipelines consume the generative model's output.
 - gap: all of these methods enforce view consistency at generation time or via geometry, but none provides a compact latent in which time and view are jointly compressed. Such a latent would be the natural substrate for a 4D generative model (which would be trained on it, and whose generated multi-view video would in turn feed reconstruction/avatar pipelines) -- that substrate is what we study
 
-\subsection{Measuring temporal and view consistency}
-% [feedback] supervisor: check related work for established consistency metrics; position ours
-% against them. Definitions and the why live in the experiments metrics section.
-
-- temporal consistency of generated video: optical-flow warping error \cite{lai2018learning}, benchmark suites such as VBench with flickering/motion-smoothness scores \cite{huang2024vbench}, distributional realism via FVD \cite{unterthiner2018towards}
-- multi-view consistency of generated views, several established families:
-    - epipolar-geometry scores: TSED matches keypoints between two generated views and thresholds the symmetric epipolar distance under the known relative pose \cite{yu2023long}
-    - pose-free geometric agreement: MEt3R lifts view pairs with a stereo reconstructor and measures 3D consistency without given cameras \cite{asim2025met3r}
-    - re-rendering consistency: fit a NeRF/3DGS to the generated views and score held-out re-renders -- consistent views yield a good reconstruction \cite{gao2024cat3d, voleti2024sv3d}
-    - distributional: SV4D sweeps FVD along the view axis instead of time (FVD-V) to score view coherence \cite{xie2024sv4d}
-- all of these detect one direction of failure: views (or frames) that DISAGREE too much -- flicker, geometric mismatch, broken 3D. That is the failure mode of free generation, where no ground truth exists
-- our setting is reconstruction with paired GT, and the observed failures sit at the opposite end of the same axes: too little temporal change (frames merging) and too much cross-view agreement (views collapsing toward their mean). A ghosted reconstruction is MORE epipolar-consistent and MORE 3D-coherent than the ground truth, so these scores rate the artifact as an improvement
-- we therefore keep the axes but calibrate against the ground truth: every consistency statistic is reported relative to the same statistic on the GT views/frames, which makes the measures two-sided -- deviation in either direction (flicker OR collapse) is visible (definitions in Sec.~experiments/metrics). The established scores above remain useful as a cross-check and we can report them alongside; they are just not able to raise an alarm for the collapse direction by construction
-
-
 \section{Methodology}
 
 \subsection{Preliminaries: Wan 2.1 Video VAE}
@@ -297,14 +282,8 @@ Reporting policy -- no single number averaged over everything:
 - per frame index (averaged across views only): temporal failures have a signature over the frame index -- cold-start frame 0, dips at chunk boundaries, flattening within chunks; ``first frame good, later frames degraded'' is an insight, one scalar is not
 - the full per-axis profiles are plotted (Fig.~\ref{fig:perframe}); tables carry per-axis means
 
-Relation to established consistency metrics (definitions and positioning in Sec.~related work/measuring):
-- established scores -- warping error \cite{lai2018learning}, VBench smoothness \cite{huang2024vbench}, TSED \cite{yu2023long}, MEt3R \cite{asim2025met3r}, re-rendering consistency \cite{gao2024cat3d}, FVD/FVD-V \cite{unterthiner2018towards, xie2024sv4d} -- detect views/frames that disagree too much (flicker, geometric mismatch); that is the failure direction of free generation, where no GT exists
-- our failures sit at the opposite end of the same axes: too little temporal change, too much cross-view agreement. A ghosted reconstruction is more view-consistent than the GT, so these scores improve as the artifact worsens -- they cannot raise an alarm for collapse, by construction
-- we therefore report the same two axes (cross-view agreement, temporal change), but each statistic is calibrated against the identical statistic on the paired GT -- deviation in either direction becomes visible. The established scores can be reported alongside as a cross-check (expected: they stay flat or improve while our GT-referenced diagnostics and per-view PSNR degrade -- that contrast is itself evidence of collapse)
-- the cross-view similarity is also the mode-collapse diagnostic of conditional generation (average pairwise distance between outputs \cite{zhu2017toward}) turned into a GT-calibrated fidelity check
-
-Our diagnostics -- implemented in the training/eval pipeline, reported for every arm; each targets one failure mode and is calibrated against the ground truth:
-- (i) cross-view similarity (view ghosting): mean pairwise cosine similarity between decoded views of the same clip (time-aligned by construction, so excess similarity is view mixing, not temporal structure), reported next to the same quantity on the GT views. At the GT reference: views decoded distinctly; above it: ghosting. Experimentally anchored by the no-view-conditioning negative control (Tab.~\ref{tab:viewcond}), which must ghost
+Our diagnostics -- reported for every arm; each targets one failure mode and is calibrated against the ground truth. Established consistency metrics -- warping error \cite{lai2018learning}, VBench smoothness \cite{huang2024vbench}, epipolar TSED \cite{yu2023long}, MEt3R \cite{asim2025met3r}, re-rendering consistency \cite{gao2024cat3d}, FVD-V \cite{xie2024sv4d} -- are built for free generation and detect views or frames that disagree too much; our failures are the opposite (views agreeing too much, frames changing too little) and would improve those scores. We therefore measure the same axes calibrated against the paired GT, so deviation in either direction is visible:
+- (i) cross-view similarity (view ghosting): mean pairwise cosine similarity between decoded views of the same clip (time-aligned by construction, so excess similarity is view mixing, not temporal structure), reported next to the same quantity on the GT views -- the pairwise-distance idea used to diagnose mode collapse in conditional generation \cite{zhu2017toward}, calibrated against GT. At the GT reference: views decoded distinctly; above it: ghosting. Experimentally anchored by the no-view-conditioning negative control (Tab.~\ref{tab:viewcond}), which must ghost
 - (ii) bleed ratio (temporal bleeding): mean $|f_{t+1} - f_t|$ of the reconstruction divided by the same quantity of the GT -- the fraction of true motion the reconstruction reproduces. 1 = faithful motion; well below 1 = frames merged. Computed separately within 4-frame chunks and across chunk boundaries; the split ties the artifact to the chunked causal decode (Sec.~\ref{sec:preliminaries}). Anchored by the non-causal decode oracle (Tab.~\ref{tab:interventions})
 - (iii) anchor-drift profile: mean $|f_k - f_0|$ for $k = 1..T{-}1$, GT vs.\ reconstruction. The GT curve rises with $k$ as motion accumulates; a flat reconstruction curve means all frames stay too close to the clip start. Complements (ii): consecutive-frame deltas miss a slow collapse toward a static clip, the anchored version does not
 - (iv) per-frame-index error profile: exposes cold-start and chunk-boundary artifacts (see reporting policy above)
