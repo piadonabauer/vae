@@ -79,14 +79,19 @@ class PtVideoDataset(Dataset):
         self.expected_views = expected_views
         self.skip_mismatched_views = skip_mismatched_views
         self.repeat = max(1, int(repeat))
+        # Optional temporal subsampling at load time (uniform indices), so the
+        # DataLoader never collates mixed clip lengths (e.g. T=13 files with T=9).
+        self.target_frames = int(kwargs["target_frames"]) if kwargs.get("target_frames") else None
 
         files = self._discover_files()
         files = self._filter_views(files)
         if len(files) == 0:
             raise RuntimeError(
-                f"pt_video: no frames.pt found under {data_path} with the given filters "
+                f"pt_video: no .pt files found under {data_path} with the given filters "
                 f"(participants={participants}, expression_sequence={expression_sequence})."
             )
+        # Unique file list; train.py's fixed-sequence eval reads dataset.pt_files.
+        self.pt_files = list(files)
         self.samples = files * self.repeat
 
     # -- file discovery --
@@ -173,4 +178,7 @@ class PtVideoDataset(Dataset):
         if t.shape[2] == 3 and t.shape[1] != 3:
             t = t.permute(0, 2, 1, 3, 4)  # [V,T,C,H,W] -> [V,C,T,H,W]
         t = t.contiguous().float().clamp(0.0, 1.0)
+        if self.target_frames is not None and t.shape[2] != self.target_frames:
+            idx = torch.linspace(0, t.shape[2] - 1, self.target_frames).long()
+            t = t.index_select(2, idx)
         return {"video": t, "path": path, "index": index}
