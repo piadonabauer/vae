@@ -30,7 +30,7 @@ from opensora.utils.train import setup_device
 
 from .datasets import TextDataset, VideoTextDataset
 from .pin_memory_cache import PinMemoryCache
-from .pt_video_dataset import PTVideoDataset
+from .pt_video import PtVideoDataset as PTVideoDataset
 from .sampler import DistributedSampler, VariableVideoBatchSampler
 
 
