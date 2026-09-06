@@ -1311,12 +1311,30 @@ def evaluate_model(
         # 4-frame chunks are the bleeding, plotted directly (figure F4).
         "l1_delta_per_frame_gt": [],
         "l1_delta_per_frame_rec": [],
+        # Anchor-drift profile: mean |frame_k - frame_0| for k = 1..T-1, GT and
+        # rec separately. In GT the curve rises with k (motion accumulates); a
+        # flatter rec curve means frames stay too close to the clip start --
+        # the temporal counterpart of the consecutive-delta curves above, but
+        # anchored so slow drift (not just frame-to-frame flatness) shows up.
+        "l1_from_frame0_gt": [],
+        "l1_from_frame0_rec": [],
+        # Per-view PSNR (list of V floats per clip): quality must be reported
+        # per view, not averaged over views -- ghosting can hide in the mean.
+        "psnr_per_view": [],
     }
 
     def _delta_profile(v01):
         # [B,C,T,H,W] or [B,V,C,T,H,W] -> list of T-1 floats
         tdim = 3 if v01.dim() == 6 else 2
         d = (v01.narrow(tdim, 1, v01.shape[tdim] - 1) - v01.narrow(tdim, 0, v01.shape[tdim] - 1)).abs()
+        dims = [i for i in range(d.dim()) if i != tdim]
+        return [float(x) for x in d.mean(dim=dims)]
+
+    def _anchor_profile(v01):
+        # mean |frame_k - frame_0| for k = 1..T-1 -> list of T-1 floats
+        tdim = 3 if v01.dim() == 6 else 2
+        f0 = v01.narrow(tdim, 0, 1)
+        d = (v01.narrow(tdim, 1, v01.shape[tdim] - 1) - f0).abs()
         dims = [i for i in range(d.dim()) if i != tdim]
         return [float(x) for x in d.mean(dim=dims)]
 
@@ -1400,6 +1418,15 @@ def evaluate_model(
             if x01.shape[3 if is_multiview else 2] > 1:
                 diag["l1_delta_per_frame_gt"].append(_delta_profile(x01))
                 diag["l1_delta_per_frame_rec"].append(_delta_profile(xr01))
+                diag["l1_from_frame0_gt"].append(_anchor_profile(x01))
+                diag["l1_from_frame0_rec"].append(_anchor_profile(xr01))
+            if is_multiview:
+                diag["psnr_per_view"].append(
+                    [
+                        float(compute_metrics(x01[:, v], xr01[:, v])["psnr"])
+                        for v in range(x01.shape[1])
+                    ]
+                )
 
             # Clip dump for offline figure-making (uint8 to keep files small).
             if dump_path is not None and len(dumped_clips) < int(dump_max_clips):
@@ -1438,7 +1465,14 @@ def evaluate_model(
     for key in ("bleed_ratio_within", "bleed_ratio_across", "xview_sim_rec", "xview_sim_gt"):
         if diag[key]:
             aggregated[key] = float(np.mean(diag[key]))
-    for prof_key in ("psnr_per_frame", "l1_delta_per_frame_gt", "l1_delta_per_frame_rec"):
+    for prof_key in (
+        "psnr_per_frame",
+        "l1_delta_per_frame_gt",
+        "l1_delta_per_frame_rec",
+        "l1_from_frame0_gt",
+        "l1_from_frame0_rec",
+        "psnr_per_view",
+    ):
         if diag[prof_key]:
             # Mean profile over batches; batches can have different T (buckets), so
             # average only over batches with the most common length.
@@ -3662,7 +3696,15 @@ def main():
                                 if "psnr_per_frame" in eval_metrics:
                                     for fi, pv in enumerate(eval_metrics["psnr_per_frame"]):
                                         log_dict[f"{prefix}/psnr_frame{fi}"] = pv
-                                for dk in ("l1_delta_per_frame_gt", "l1_delta_per_frame_rec"):
+                                if "psnr_per_view" in eval_metrics:
+                                    for vi, pv in enumerate(eval_metrics["psnr_per_view"]):
+                                        log_dict[f"{prefix}/psnr_view{vi}"] = pv
+                                for dk in (
+                                    "l1_delta_per_frame_gt",
+                                    "l1_delta_per_frame_rec",
+                                    "l1_from_frame0_gt",
+                                    "l1_from_frame0_rec",
+                                ):
                                     if dk in eval_metrics:
                                         for fi, dv in enumerate(eval_metrics[dk]):
                                             log_dict[f"{prefix}/{dk}{fi}"] = dv
@@ -3988,6 +4030,9 @@ def main():
                     if "lpips_mean" in final_metrics:
                         final_log[f"{prefix}/lpips_mean"] = final_metrics["lpips_mean"]
                         final_log[f"{prefix}/lpips_std"] = final_metrics["lpips_std"]
+                    if "psnr_per_view" in final_metrics:
+                        for vi, pv in enumerate(final_metrics["psnr_per_view"]):
+                            final_log[f"{prefix}/psnr_view{vi}"] = pv
                     wandb.log(final_log, step=actual_update_step)
             logger.info("Final evaluation complete.")
     

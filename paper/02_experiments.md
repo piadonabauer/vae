@@ -23,6 +23,62 @@ then sat frozen at random init, and the rank-32 LoRA paths had to compensate. Th
 remaps the keys and hard-fails if any pretrained encoder/decoder key goes unloaded. Expect
 the rerun numbers (and possibly some qualitative conclusions) to differ from the old sweeps.
 
+**Status after the supervisor meeting (Sep 2026):**
+- Sweep tasks already run on the cluster: **1, 2, 3, 7, 8, 9** (= E1a, E1b, E1c, E1z, E11a, E11b).
+  Missing: **4, 5, 6** (= E2 fusion arms; they warm-start from task 2's checkpoint, which exists).
+  All completed arms can be re-run if anything below invalidates them — nothing below does:
+  the changes add metrics and one new arm, they do not touch the trained configurations.
+- New eval diagnostics (in `train.py`, active for all future runs and for re-evals of saved
+  checkpoints): **per-view PSNR** (never report only the view-averaged number) and the
+  **anchor-drift profile** mean |f_k − f_0| for k=1..T−1, GT vs rec (supervisor-requested:
+  "how does the first frame behave relative to the 2nd, 3rd, 4th..."). Both logged to wandb
+  (`psnr_view{v}`, `l1_from_frame0_gt{k}/_rec{k}`) and to `eval_metrics.jsonl`. Completed arms
+  do NOT need retraining for these — re-run the final eval from their checkpoints.
+- New arm **task 10 = E0 per-view LoRA ceiling** (see below): supervisor wants Table 1 anchored
+  from above by per-view LoRA finetuning on ALL data (all participants, all expressions, val
+  identities excluded). Requires the all-expressions data to be preprocessed first.
+- Reporting policy: no metric is reported as a single global average. PSNR per view and per
+  frame index; diagnostics plotted as curves, scalars only summarize.
+
+## E0 — Per-view LoRA ceiling (Table 1 upper anchor)  [MUST HAVE — supervisor-requested]
+
+- **Arm:** `TASK=10` in `run_paper_sweep.sh` (`paper_E0_perview_ceiling`).
+- **Config:** per-view (independent_views=True), TC off, LoRA rank 32 — same adaptation
+  mechanism as everything else, but trained on `data_preset=all_people` = every preprocessed
+  sequence of every non-val participant (all expressions).
+- **Budget:** deliberately NOT matched (much more data). Default 20 epochs
+  (`CEILING_EPOCHS` env to override). It is a ceiling, not a competitor: it bounds what
+  "just finetune Wan per view on our domain" can achieve. Never trains on val participants.
+- **Eval:** same 10 val EMO-1 clips as every other arm (the sweep script pins the expression
+  filter on the val preset), so the row is comparable on the eval side.
+- **Prerequisite:** preprocess all expressions for all participants (see "Data preprocessing"
+  below). Until that data exists, this arm cannot start; everything else is unaffected.
+
+## Data preprocessing for E0 (run on the machine with raw NeRSemble access)
+
+The one-expression dataset only contains EMO-1-shout+laugh. E0 needs all sequences:
+
+```bash
+# from the repo root; array-job or single-GPU both work (see script header for #SBATCH lines)
+python data/processing/preprocess_nersemble.py \
+  --nersemble-root /path/to/nersemble_tars_or_folders \
+  --from-tars \                       # drop this flag if the root holds extracted folders
+  --output-root /path/to/processed/2view/128-res \
+  --upper-views 2 \
+  --frames 13 \
+  --image-size 128 \
+  --color-correction \
+  --skip-existing
+```
+
+- do NOT pass `--only-sequences`: omitting it processes every sequence (that is the point).
+- `--upper-views 2` picks the same two frontal/upper cameras used everywhere else;
+  `--skip-existing` makes it resumable and skips the already-processed EMO-1 files.
+- match `--frames` and `--image-size` to whatever the existing one-expression tree uses
+  (T=13 stored is fine — training subsamples to T=9; T=9 stored also works).
+- the training preset `all_people` scans the output tree, filters out the 10 val
+  participants, and accepts both `frames.pt` and `<seq>.pt` naming (loader handles both).
+
 ## Fixed protocol (applies to every run unless the experiment varies it)
 
 | Item | Value |

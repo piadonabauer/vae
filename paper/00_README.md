@@ -33,6 +33,22 @@ Code changes vs. the old branches:
   and LPIPS (VGG, fp32, per-clip mean over views+frames — same backbone as the
   training perceptual loss). All logged to wandb and appended to
   `outputs/<run>/eval_metrics.jsonl`.
+- Supervisor-meeting round (Sep 6):
+  - new eval diagnostics in `train.py`: per-view PSNR (`psnr_view{v}`) and the
+    anchor-drift profile mean |f_k − f_0| (`l1_from_frame0_gt{k}/_rec{k}`); both
+    wandb-logged and in `eval_metrics.jsonl`. Completed runs only need a re-eval
+    from checkpoint, not retraining.
+  - new sweep arm `TASK=10` = E0 per-view LoRA ceiling (all people, ALL expressions,
+    TC off, 20 epochs default via `CEILING_EPOCHS`); val set pinned to the same 10
+    EMO-1 clips as every other arm. Needs the all-expressions data preprocessed
+    first — command in `paper/02_experiments.md`.
+  - `pt_video.py` now accepts both on-disk conventions (`<seq>/frames.pt` and
+    `<seq>/<seq>.pt`, raw tensor or dict payload, [V,T,C,H,W] or [V,C,T,H,W]),
+    so the same branch runs on both machines' data trees.
+  - draft: metrics section rewritten (established consistency metrics + calibrated
+    diagnostics + disentangling setup), failure-mode storyline in the experiments
+    section, per-view/per-frame PSNR reporting policy, Table 1 ceiling row,
+    latent-widening clarification (interior weights ARE reused), KL note.
 - Pre-flight fixes from the final code review (Aug 31):
   - epoch-PSNR aggregation no longer gated behind `train_psnr_guard` — with the
     guard off (our config) the overfit-gate stop (`stop_at_train_psnr`) could

@@ -6,7 +6,7 @@
 #SBATCH --time=0-18:00:00
 #SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.out
 #SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.err
-#SBATCH --array=1-9%4
+#SBATCH --array=1-10%4
 
 # Paper rerun sweep: E1 (rate-quality 2x2 + per-view references) and E5 (unfreeze).
 # All runs share ONE fixed protocol (see paper/02_experiments.md):
@@ -25,6 +25,12 @@
 #   7  E1z  zero-shot eval only (epochs=0 + final_eval) -- pretrained Wan floor.
 #   8  E11a E1d + latent widened 16->32 channels
 #   9  E11b E1d + latent widened 16->64 channels
+#   10 E0   per-view LoRA ceiling: all people, ALL expressions (not just EMO-1),
+#           TC off. Supervisor-requested Table-1 ceiling row: "how good can
+#           per-view LoRA finetuning on our data get". NOT budget-matched to the
+#           other arms on purpose (way more data, fewer epochs) -- it anchors the
+#           table from above, it does not compete. Requires the all-expressions
+#           data to be preprocessed first; never trains on val participants.
 #           The widen arms are the positive capacity test: if joint view+temporal
 #           compression recovers with a wider latent, the bottleneck really is the
 #           rate. VAE only, no diffusion retraining. New channels start as a no-op
@@ -222,6 +228,21 @@ case "$TASK" in
     MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
                  --model.temporal_compression True
                  --model.latent_widen_to 64 )
+    ;;
+  10)
+    run_name="paper_E0_perview_ceiling"
+    if [[ "$OVERFIT" == "1" ]]; then
+      echo "E0 is a ceiling reference, not an architecture change -- no overfit gate."; exit 1
+    fi
+    # all_people = every preprocessed sequence of every non-val participant.
+    # ~20x the one-expression data, so a fixed 20 epochs (override: CEILING_EPOCHS)
+    # is plenty; the row is a ceiling, not a budget-matched comparison.
+    # The VAL SET stays the same 10 EMO-1 clips as every other arm (train data
+    # may differ, the evaluation must not), hence the expression filter below.
+    MODEL_ARGS=( --model.independent_views True --model.temporal_compression False
+                 --data_preset all_people
+                 --val_dataset_presets.all_people.expression_sequence "EMO-1-shout+laugh"
+                 --epochs "${CEILING_EPOCHS:-20}" )
     ;;
   *)
     echo "Unknown TASK=$TASK"; exit 1 ;;

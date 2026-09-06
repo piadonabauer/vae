@@ -86,10 +86,19 @@ yang2024cogvideox, kong2024hunyuanvideo, agarwal2025cosmos}, many variants
 % latent; the reconstruction pipelines consume the generative model's output.
 - gap: all of these methods enforce view consistency at generation time or via geometry, but none provides a compact latent in which time and view are jointly compressed. Such a latent would be the natural substrate for a 4D generative model (which would be trained on it, and whose generated multi-view video would in turn feed reconstruction/avatar pipelines) -- that substrate is what we study
 
+\subsection{Measuring temporal and view consistency}
+% [feedback] supervisor: check related work for established consistency metrics; position ours
+% against them. Definitions and the why live in the experiments metrics section.
+
+- temporal consistency of generated video: optical-flow warping error \cite{lai2018learning}, benchmark suites such as VBench with flickering/motion-smoothness scores \cite{huang2024vbench}, distributional realism via FVD \cite{unterthiner2018towards}
+- multi-view consistency of generated views: geometric agreement, e.g. reprojection-based scores or MEt3R \cite{asim2025met3r}
+- these are built for free generation, where no ground truth exists and the risk is too much change (flicker) or too little 3D agreement. Our setting is reconstruction with paired GT, and the observed failures are the opposite tail: too little temporal change (frames merging) and too much cross-view agreement (views collapsing) -- both IMPROVE the established scores. gap: consistency-with-GT diagnostics for the over-smoothing direction; our calibrated diagnostics (Sec.~experiments/metrics) fill this by referencing every score against the same statistic on the ground truth
+
 
 \section{Methodology}
 
 \subsection{Preliminaries: Wan 2.1 Video VAE}
+\label{sec:preliminaries}
 
 - causal 3D convolutions, 16-channel latent, 8x spatial / 4x temporal compression
 - a video with T frames maps to T' latent frames:
@@ -217,6 +226,7 @@ The reconstruction term follows the standard latent-diffusion tokenizer recipe \
 \;+\; 10^{-6} \cdot D_{\mathrm{KL}}\!\left(q(z \mid x) \,\Vert\, \mathcal{N}(0, I)\right).
 \label{eq:objective}
 \end{equation}
+- the KL term is always included (weight $10^{-6}$, the standard tokenizer setting \cite{rombach2022high}) and logged separately during training -- the latent must stay a proper VAE posterior for downstream diffusion, not degrade into a plain autoencoder
 - optional adversarial term with three multi-view discriminator layouts (PatchGAN-style 3D \cite{isola2017image}):
     - flatten views into batch
     - stack views on channels
@@ -231,17 +241,18 @@ The reconstruction term follows the standard latent-diffusion tokenizer recipe \
 - training pipeline adapted from the Open-Sora wan finetuning (multi-view data loading, per-view gradient checkpointing); one L40S GPU per run
 
 % [added] overview first, so the reader sees the plan in one place
-\subsection{Overview of planned experiments}
+% [feedback] question-driven, not a sweep catalogue: every experiment answers one step of the
+% argument; anything that does not carry the storyline goes to the supplement.
+\subsection{Overview}
 
-- core rate-quality matrix: \{per-view, fused latent\} x \{temporal compression off, on\}, plus pretrained Wan zero-shot as floor -> single-axis compression should degrade gracefully, does joint compression fall off the curve? (headline, Tab.~\ref{tab:main}, Fig.~\ref{fig:rate_quality})
-- latent width: 16 (pretrained) vs 32 vs 64 channels under joint compression -> the positive capacity test: does widening recover what joint compression loses? (Tab.~\ref{tab:width})
-- fusion mechanism: multi-view self-attention (zero-init, tree merge) vs flat attention fusion (standard init, flat concat) vs channel-concat Conv3d vs factorized 4D conv -> is the bottleneck the fusion design? (Tab.~\ref{tab:fusion})
-- view-conditioned decoding: per-view latent LoRA vs learned view embedding vs neither (negative control, expect ghosting) (Tab.~\ref{tab:viewcond})
-- view count: V = 2, 4, 8 at fixed budget -> rate pressure grows with V (Tab.~\ref{tab:views})
-- unfreezing: LoRA-only vs unfrozen encoder vs everything unfrozen -> is it trainability or capacity? (Tab.~\ref{tab:unfreeze})
-- initialization: staged warm-start (default) vs joint from Wan weights
-- loss: no discriminator vs the three multi-view discriminator layouts; perceptual/KL weight sensitivity; LoRA rank
-- data scale: single sequence -> one person -> all people; artifacts should appear only when the model must generalize (Fig.~\ref{fig:datascale})
+The experiments follow one line of reasoning:
+- Q1 does joint view+temporal compression fail where single-axis compression does not? -> rate-quality matrix, the main result (Tab.~\ref{tab:main}, Fig.~\ref{fig:rate_quality})
+- Q2 WHAT fails? -> two failure modes, each with its own diagnostic, visualization, and experimental anchor: view ghosting (Sec.~failure mode 1) and temporal bleeding (Sec.~failure mode 2)
+- Q3 is the failure a design problem? -> fusion mechanism and view-conditioning ablations; if all variants fail alike, the design is not the bottleneck (Tab.~\ref{tab:fusion}, Tab.~\ref{tab:viewcond})
+- Q4 is it trainability? -> unfreeze up to the whole network; if nothing-frozen still fails, trainability is ruled out (Tab.~\ref{tab:unfreeze})
+- Q5 is it capacity? -> the positive test: widen the latent 16 -> 32/64 under joint compression (Tab.~\ref{tab:width}); plus rate pressure via view count (Tab.~\ref{tab:views}) and generalization pressure via data scale (Fig.~\ref{fig:datascale})
+
+Secondary sweeps that do not carry the argument (loss configuration, discriminator layouts, LoRA rank, initialization strategy, pre-fusion encoder LoRA) are reported in the supplement.
 
 All numbers come from reruns under one fixed protocol; per-experiment configs are pinned in the repository.
 
@@ -269,17 +280,40 @@ All numbers come from reruns under one fixed protocol; per-experiment configs ar
 
 \subsubsection{Metrics}
 
-- PSNR, SSIM, and LPIPS \cite{zhang2018unreasonable} over validation set
-- in addition: report 3 diagnostics which focus on localizing where information is lost:
-    - (i) cross-view similarity = mean pairwise cosine similarity between reconstructed views, with the similarity of the ground-truth views as reference (values above the reference indicate view ghosting)
-    - (ii) bleed ratio = the ratio of mean absolute inter-frame differences of the reconstruction to those of the ground truth, computed separately within 4-frame temporal chunks and across chunk boundaries (a value of 1 is faithful motion; values well below 1 indicate temporal bleeding)
-      - also plot the raw per-frame |delta| curves for GT vs recon: flat segments inside chunks make the bleeding directly visible
-    - (iii) the per-frame-index error profile, which exposes cold-start and chunk-boundary artifacts
+% [feedback] per metric: what it measures, how, why. Established metrics first, then our
+% diagnostics. Disaggregated reporting instead of single averages.
+
+Standard reconstruction quality: PSNR, SSIM, and LPIPS \cite{zhang2018unreasonable} on the held-out identities.
+
+Reporting policy -- no single number averaged over everything:
+- a global PSNR mean hides exactly the structure we care about; PSNR is always disaggregated along one axis at a time
+- per view (views scored independently): ghosting pulls both decoded views toward their mean, degrading each view while a global average can still look plausible
+- per frame index (averaged across views only): temporal failures have a signature over the frame index -- cold-start frame 0, dips at chunk boundaries, flattening within chunks; ``first frame good, later frames degraded'' is an insight, one scalar is not
+- the full per-axis profiles are plotted (Fig.~\ref{fig:perframe}); tables carry per-axis means
+
+Established consistency metrics, and why they do not transfer directly:
+- temporal consistency in video generation is measured by optical-flow warping error \cite{lai2018learning} and benchmark suites such as VBench (temporal flickering, motion smoothness) \cite{huang2024vbench}; FVD \cite{unterthiner2018towards} scores distributional realism. These target free generation without ground truth; reconstruction gives us the GT clip, so temporal fidelity can be measured against it directly. More importantly, our failure is too little change (frames merging) -- exactly what smoothness-style metrics reward rather than penalize
+- multi-view consistency is measured geometrically, e.g. MEt3R \cite{asim2025met3r} or reprojection error: do generated views agree in 3D? Our failure is the opposite direction: decoded views agree too much (collapse toward the view mean), so a geometric consistency score improves as ghosting worsens and cannot detect it
+- mode-collapse diagnostics in conditional generation use average pairwise distance between samples \cite{zhu2017toward}; our cross-view similarity is that idea turned into a calibrated fidelity check against GT
+
+Our diagnostics -- each targets one failure mode and is calibrated against the ground truth:
+- (i) cross-view similarity (view ghosting): mean pairwise cosine similarity between decoded views of the same clip (time-aligned by construction, so excess similarity is view mixing, not temporal structure), reported next to the same quantity on the GT views. At the GT reference: views decoded distinctly; above it: ghosting. Experimentally anchored by the no-view-conditioning negative control (Tab.~\ref{tab:viewcond}), which must ghost
+- (ii) bleed ratio (temporal bleeding): mean $|f_{t+1} - f_t|$ of the reconstruction divided by the same quantity of the GT -- the fraction of true motion the reconstruction reproduces. 1 = faithful motion; well below 1 = frames merged. Computed separately within 4-frame chunks and across chunk boundaries; the split ties the artifact to the chunked causal decode (Sec.~\ref{sec:preliminaries}). Anchored by the non-causal decode oracle (Tab.~\ref{tab:interventions})
+- (iii) anchor-drift profile: mean $|f_k - f_0|$ for $k = 1..T{-}1$, GT vs.\ reconstruction. The GT curve rises with $k$ as motion accumulates; a flat reconstruction curve means all frames stay too close to the clip start. Complements (ii): consecutive-frame deltas miss a slow collapse toward a static clip, the anchored version does not
+- (iv) per-frame-index error profile: exposes cold-start and chunk-boundary artifacts (see reporting policy above)
+
+Disentangling view from temporal failure -- by construction, not post hoc:
+- the view metric (i) compares across views at the same time step, so temporal structure cancels; the temporal metrics (ii)/(iii) compare across time within the same view, so view identity cancels -- each is blind to the other failure mode
+- each failure mode therefore has a measurement AND an experimental anchor: ghosting has the negative control (must ghost), bleeding has the non-causal oracle (must not bleed)
+- all diagnostic curves are plotted, not only averaged: a claim like ``bleeding'' must be visible in the plotted curves (Fig.~\ref{fig:perframe}); the scalars only summarize them
 
 \subsubsection{Reference points}
 
 - no like-for-like baseline exists (nothing else produces a joint multi-view latent) -> per-view models are reported as reference points, not baselines: pretrained Wan zero-shot, and per-view LoRA-finetuned Wan
 - both use V times our latent rate and enforce no cross-view consistency -> all models are placed on a rate-quality plane instead of a single-rate ranking
+- floor: pretrained Wan zero-shot per view (no training; calibrates the domain gap to Wan's training distribution)
+- ceiling: per-view LoRA finetuning on ALL preprocessed data (all participants, all expressions; val identities excluded), TC off -- the best that ``just finetune Wan per view on our domain'' can do. Deliberately NOT budget-matched (much more data, own epoch count); it bounds the table from above, it does not compete. Evaluated on the same 10 val clips as every other row. The ceiling does not have to be perfect -- it anchors what is achievable
+- matched references: per-view LoRA finetuned on the same one-expression training set and budget as the fused arms -> these are the controlled comparisons
 - compression ratio: r = (V * 3 * T * H * W) / (V' * C_z * T' * (H/8) * (W/8)) with latent channels C_z; our configs span per-view without TC up to fused + TC (todo: exact numbers per config)
 
 \subsection{Main Results}
@@ -289,19 +323,20 @@ All numbers come from reruns under one fixed protocol; per-experiment configs ar
 
 \begin{table}[t]
 \centering
-\caption{Main result: the rate-quality matrix. Per-view models are reference points at V times the latent rate, not baselines. All numbers from the fixed protocol (V=2, T=9, 128px, 170 epochs), best-val EMA eval on the 10 held-out identities.}
+\caption{Main result: the rate-quality matrix. Per-view models are reference points at V times the latent rate, not baselines: the ceiling (per-view LoRA on all people and all expressions) bounds the table from above and is not budget-matched; the matched per-view rows share training data and budget with the fused arms. All rows are evaluated on the same 10 held-out identities (best-val EMA eval). PSNR is additionally reported per view and per frame index (Fig.~\ref{fig:perframe}); this table carries the per-axis means.}
 \label{tab:main}
 \begin{tabular}{llrrrrrr}
 \toprule
 Model & TC & Rate & PSNR $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ & XView sim & Bleed ratio \\
 \midrule
-Wan zero-shot (per view)     & off & 12x/view & -- & -- & -- & -- & -- \\
-Per-view finetuned           & off & 12x/view & -- & -- & -- & -- & -- \\
-Per-view finetuned           & on  & 48x/view & -- & -- & -- & -- & -- \\
-Fused latent (ours)          & off & 24x      & -- & -- & -- & -- & -- \\
-Fused latent (ours)          & on  & 96x      & -- & -- & -- & -- & -- \\
+Wan zero-shot (per view, floor)      & off & 12x/view & -- & -- & -- & -- & -- \\
+Per-view LoRA, all data (ceiling)    & off & 12x/view & -- & -- & -- & -- & -- \\
+Per-view finetuned (matched)         & off & 12x/view & -- & -- & -- & -- & -- \\
+Per-view finetuned (matched)         & on  & 48x/view & -- & -- & -- & -- & -- \\
+Fused latent (ours)                  & off & 24x      & -- & -- & -- & -- & -- \\
+Fused latent (ours)                  & on  & 96x      & -- & -- & -- & -- & -- \\
 \midrule
-GT reference level           & --  & --       & -- & -- & -- & -- & 1.0 \\
+GT reference level                   & --  & --       & -- & -- & -- & -- & 1.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -329,23 +364,37 @@ Expected: ghosting and lost identity detail only in the fused TC-on row.}}
 \label{fig:qualitative}
 \end{figure}
 
-probably something like (current bullet points are based on prior experiments but since all will be repeated, it will probably change):
-% TODO: extra reason the old picture may not survive the rerun -- the old runs had a loader bug
-% (parts of the pretrained backbone never loaded under LoRA, now fixed), so the failure modes
-% below may weaken, move, or in the best case partly disappear. Treat every bullet as a
-% hypothesis, not a result.
+Expected reading (hypotheses from prior runs; every bullet must be re-established -- the old runs had a loader bug, so the picture may weaken, move, or partly disappear):
 - joint compression collapses; single-axis compression is fine (the rate-quality curve is the headline figure). In particular view fusion alone (with spatial compression, TC off) works -> the view axis CAN be absorbed, just not on top of the temporal axis
-- fusion mechanism barely matters (attention variants, Conv3d, factorized 4D, ...) -> fusion mechanism is not the bottleneck
-- view conditioning barely matters (learnable view embeddings vs per-view LoRAs)
-- loss config very important: best with no discriminator or 4D multi-view discriminator, standard 3D PatchGAN worse colors and less sharp -> if a discriminator is used, it should see the view axis jointly
-- lower perceptual and KL weights improved pixel fidelity
-- LoRA rank ablation (expect a plateau)
+- reading the table row-wise: floor $\ll$ matched references $\le$ ceiling locates the domain gap and the achievable range; the fused rows are then judged against the matched references at their respective rates
+- secondary observations (loss configuration matters, discriminator should see the view axis jointly, lower perceptual/KL weights improve pixel fidelity, LoRA rank plateaus) are documented in the supplement -- they tune the operating point but do not change the storyline
 
-\subsection{Analysis: Where does joint compression fail?}
+\subsection{Failure mode 1: view ghosting}
 
-- generalization failure: overfitting a single sequence is clean, artifacts appear only when many identities are trained -> compressed representation can memorize temporal detail but can't encode it for new content
-- chunk mechanism: decoding all latent frames in a single NON-CAUSAL pass removes frame-0 and boundary artifacts -> cost of the causal property, not of temporal compression per se
-- diagnostics localize the failure: cross-view similarity of recons rises above the GT level (ghosting) while bleed ratio falls below 1 within chunks (temporal averaging) -> both are decoder-regresses-to-the-mean signatures
+The failure modes are analyzed separately because the diagnostics separate them by construction (Sec.~metrics): the view metric cancels temporal structure, the temporal metrics cancel view identity.
+
+- symptom: decoded views drift toward their mean -- high-frequency, view-specific detail is averaged away; visible in the qualitative grids (Fig.~\ref{fig:qualitative}) and measured as cross-view similarity above the GT reference (Tab.~\ref{tab:main})
+- per-view PSNR drops for BOTH views together (ghosting is symmetric collapse, not one view winning) -- this is why quality is reported per view, not as one mean
+- anchor: the negative control without any view conditioning must ghost fully (Tab.~\ref{tab:viewcond}); the distance between our model and this control is the calibrated size of the effect
+- is it the conditioning? per-view latent LoRA vs.\ learned view embedding vs.\ both (Tab.~\ref{tab:viewcond}): if all conditioned variants land in the same place, the conditioning mechanism is not what limits view separation
+- is it the fusion design? four fusion mechanisms with different inductive biases (Tab.~\ref{tab:fusion}): multi-view self-attention with zero-init + tree merge (default); the same attention with standard init and flat merge; channel-concat Conv3d; factorized (2+1+1)D convolution. If ghosting appears across all of them at the same rate, the fusion design is not the bottleneck
+- ghosting under TC off vs.\ TC on separates ``view fusion is hard'' from ``view fusion is hard on top of temporal compression''
+
+Variant definitions (fusion, Tab.~\ref{tab:fusion}):
+- note: both attention variants are self-attention over the concatenated token sequence of all views; the ablation isolates the two design choices of the default, zero-init output projection (identity at step 0) and the pairwise tree merge
+- flat attention fusion: same joint self-attention but standard init (LayerNorm + MHA), followed by a single flat concat of all views + 2 ResBlocks instead of the tree
+- channel concat Conv3d: views stacked on channels, 1x1x1 Conv3d + GN/SiLU + two symmetric (non-causal) 3D residual blocks
+- factorized 4D convolution: spatial 3x3 Conv2d, temporal 3x3x3 Conv3d, then a view-axis Conv3d with kernel (V,3,3) compressing V->1, a (2+1+1)D factorization
+
+Variant definitions (view conditioning, Tab.~\ref{tab:viewcond}):
+- per-view latent LoRA adapters (default); alternative: a learned per-view latent embedding (nn.Embedding(V, 16) added to z); both combined; and the no-conditioning negative control
+
+\subsection{Failure mode 2: temporal bleeding}
+
+- symptom: frames within a 4-frame decode chunk merge -- motion is under-reproduced inside chunks while chunk boundaries stay comparatively sharp; measured by the within/across bleed-ratio split and the anchor-drift profile, plotted per frame index (Fig.~\ref{fig:perframe})
+- generalization failure: overfitting a single sequence is clean, artifacts appear only when many identities are trained -> the compressed representation can memorize temporal detail but cannot encode it for new content (Fig.~\ref{fig:datascale})
+- chunk mechanism: decoding all latent frames in a single NON-CAUSAL pass removes frame-0 and boundary artifacts -> cost of the causal property, not of temporal compression per se; this oracle anchors the bleed diagnostic from above (Tab.~\ref{tab:interventions})
+- targeted interventions (temporal reflection pad, side channel, learned cache update, sub-frame position embedding, temporal-difference loss) each attack one hypothesized cause; which ones move the bleed ratio localizes the mechanism (Tab.~\ref{tab:interventions})
 
 \begin{figure}[t]
 \centering
@@ -377,16 +426,23 @@ temporal-difference loss      & -- & -- & -- & -- \\
 \end{tabular}
 \end{table}
 
-\subsection{Ablations}
+\subsection{Is it capacity? Trainability, width, and rate pressure}
 
-\subsubsection{Latent width}
+\subsubsection{Trainability check: unfreezing}
+
+- strided temporal convolutions allow no LoRA path and are frozen in all LoRA configurations -> unfreeze them (and optionally the full encoder or full decoder)
+- if even full unfreezing does not fix joint compression, the bottleneck is capacity, not trainability (Tab.~\ref{tab:unfreeze})
+
+\subsubsection{Latent width: the positive capacity test}
 % [feedback] the positive capacity test, supervisor-requested. VAE-side only.
 % TODO: outcome unknown; also note this ablation only matters IF the rerun confirms that joint
 % compression fails at 16 channels. If the fixed-loader reruns already reconstruct well, this
 % section becomes a plain capacity/rate ablation instead of a rescue experiment.
 
 - widen the latent from the pretrained 16 channels to 32 and 64 under joint compression (fused + TC), following the width recipes of \cite{dai2023emu, chen2024deep, hacohen2024ltx}
-- implementation: only four boundary convolutions touch the latent width (encoder head, two 1x1 latent convs, decoder input conv); pretrained weights are expanded with zero-init surgery in the spirit of \cite{zhang2023adding} so step 0 is exactly the 16-channel model; the four boundary convs are unfrozen (~2M params, still adapter-scale)
+- implementation: only four convolutions in the whole network touch the latent width -- the encoder's final head conv (384 -> 2$C_z$), the two 1x1 latent convs around the sampling step, and the decoder's input conv ($C_z$ -> 384). Everything else, including the encoder/decoder middle blocks and the attention in the encoder head, operates at 384 channels and is reused completely unchanged -- widening does NOT throw away any interior pretrained weights
+- weight surgery on the four boundary convs: the pretrained 16-channel kernels are transplanted into the first 16 slots; new output channels start at zero (they emit nothing) and new input channels have zero weight (they are ignored), in the spirit of \cite{zhang2023adding} -- so at step 0 the widened model computes exactly the 16-channel model, and the extra channels only enter as training populates them
+- the four boundary convs are unfrozen (~2M params, still adapter-scale)
 - VAE-side only: retraining the diffusion model on a wider latent is out of scope (and known to be its own problem \cite{yao2025vavae}); the question here is purely whether reconstruction under joint compression is rate-limited
 - possible outcomes, all informative: 32/64 channels recover the loss -> positive evidence for the capacity claim; partial recovery -> capacity necessary but not sufficient; no recovery -> the failure is architectural, capacity framing must be softened
 
@@ -405,13 +461,6 @@ Latent channels & Rate & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim & Blee
 \end{tabular}
 \end{table}
 
-\subsubsection{Fusion mechanism}
-
-- note: both attention variants are self-attention over the concatenated token sequence of all views; the ablation isolates the two design choices of the default, zero-init output projection (identity at step 0) and the pairwise tree merge
-- flat attention fusion: same joint self-attention but standard init (LayerNorm + MHA), followed by a single flat concat of all views + 2 ResBlocks instead of the tree
-- channel concat Conv3d: views stacked on channels, 1x1x1 Conv3d + GN/SiLU + two symmetric (non-causal) 3D residual blocks
-- factorized 4D convolution: spatial 3x3 Conv2d, temporal 3x3x3 Conv3d, then a view-axis Conv3d with kernel (V,3,3) compressing V->1, a (2+1+1)D factorization
-
 \begin{table}[t]
 \centering
 \caption{Fusion mechanism ablation (fused latent, TC off; best mode re-run with TC on).}
@@ -427,11 +476,6 @@ factorized (2+1+1)D conv                 & -- & -- & -- & -- \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-\subsubsection{View-conditioned decoding}
-
-- as alternative to per-view latent LoRA adapters: view identity is injected as (i) a learned per-view latent embedding (nn.Embedding(V, 16) added to z)
-- negative control: no view conditioning at all -> expect full ghosting; anchors the cross-view similarity diagnostic
 
 \begin{table}[t]
 \centering
@@ -449,15 +493,6 @@ none (negative control)     & -- & -- & -- \\
 \end{tabular}
 \end{table}
 
-\subsubsection{Pre-fusion encoder with LoRAs}
-
-- optionally add LoRAs to the frozen per-view encoder stem -> does adapting the encoder before fusion help?
-
-\subsubsection{Unfreeze temporal convolutions}
-
-- strided temporal convolutions allow no LoRA path, are frozen in all LoRA configurations -> unfreeze them (and optionally the full encoder or full decoder)
-- if even full unfreezing does not fix joint compression, the bottleneck is capacity, not trainability
-
 \begin{table}[t]
 \centering
 \caption{Freezing ablation (fused, TC on). If nothing-frozen still fails, trainability is ruled out.}
@@ -473,7 +508,7 @@ LoRA only (default)            & -- & -- & -- \\
 \end{tabular}
 \end{table}
 
-\subsubsection{Number of views}
+\subsubsection{Rate pressure: number of views}
 
 - V = 2, 4, 8 at fixed budget and fixed fusion mechanism -> rate pressure on the shared latent grows with V, expect monotone degradation and earlier onset of ghosting
 
@@ -492,11 +527,11 @@ V & Rate (TC on) & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim \\
 \end{tabular}
 \end{table}
 
-\subsubsection{Initialization strategy}
+% [feedback] moved to supplement: pre-fusion encoder LoRA, initialization strategy (warm start
+% vs. joint from Wan weights), loss configuration / discriminator layouts, LoRA rank. They tune
+% the operating point but do not carry the storyline.
 
-- warm-starting the joint model from a temporal-compression checkpoint with re-randomized view-attention OR joint training from Wan-pretrained weights only
-
-\subsubsection{Training-set size}
+\subsubsection{Generalization pressure: training-set size}
 
 - single sequence -> one person -> all participants (one expression): bleed ratio and ghosting vs dataset size -> compression only breaks when it must generalize
 
@@ -597,9 +632,16 @@ designing a 4D tokenizer:
 - effective batch 64 via micro-batch x accumulation (OOM ladder re-balances the product, never the total)
 - jobs chained in 18h slices with automatic checkpoint resume; identical optimizer-update budget for every arm
 
-\subsection*{D. Additional tables and figures}
+\subsection*{D. Secondary ablations}
+
+% [feedback] moved out of the main text: they tune the operating point, not the storyline
+- loss configuration: no discriminator vs.\ the three multi-view discriminator layouts; perceptual/KL weight sensitivity
+- LoRA rank sweep (expect a plateau)
+- initialization strategy: staged warm-start from a temporal-compression checkpoint vs.\ joint training from Wan weights only
+- pre-fusion encoder LoRA: adapting the frozen per-view encoder stem before fusion
+
+\subsection*{E. Additional tables and figures}
 
 - per-view (instead of view-averaged) metric tables for every experiment
-- full per-frame PSNR profiles for all arms
-- discriminator layout and LoRA-rank tables (exploratory)
+- full per-frame PSNR profiles and anchor-drift ($|f_k - f_0|$) curves for all arms
 - supplementary video: side-by-side GT vs reconstruction clips for all arms, fixed participants
