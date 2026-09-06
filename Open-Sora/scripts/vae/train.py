@@ -2905,7 +2905,7 @@ def main():
                         # Add view consistency loss to total loss
                         view_consistency_weight = cfg.vae_loss_config.get("view_consistency_weight", 0.01)
                         vae_loss = vae_loss + view_consistency_weight * view_loss
-                        loss_dict["view_loss"] = view_loss.item()
+                        loss_dict["view_loss"] = float(view_loss)
 
                         nll_loss = ret["nll_loss"]
                         kl_loss = ret["kl_loss"]

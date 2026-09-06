@@ -196,7 +196,7 @@ _val_participants = [97, 175, 226, 18, 30, 38, 85, 124, 227, 240]
 dataset_presets = {
     "single_sequence": dict(
         type="pt_video",
-        data_path=DATA_ROOT + "/p017/EMO-1-shout+laugh/frames.pt",
+        data_path=DATA_ROOT + "/p031/EMO-1-shout+laugh/EMO-1-shout+laugh.pt",
         #"/p018/EXP-1-head/p018_EXP-1-head.pt",
         repeat=1,
     ),

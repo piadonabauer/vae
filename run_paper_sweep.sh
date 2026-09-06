@@ -257,7 +257,7 @@ if [[ "$OVERFIT" != "1" && "$TASK" =~ ^[456]$ && "$INIT_CKPT" != "none" ]]; then
     best_ep=-1
     for d in "${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job"*/; do
       [[ -d "$d" ]] || continue
-      ck=$(ls "$d" 2>/dev/null | grep "^epoch" | sort -V | tail -1)
+      ck=$(ls "$d" 2>/dev/null | grep "^epoch" | sort -V | tail -1) || true
       [[ -z "$ck" ]] && continue
       ep=$(echo "$ck" | grep -oP 'epoch\K[0-9]+' || echo 0)
       if (( ep > best_ep )); then best_ep=$ep; INIT_CKPT="${d}${ck}"; fi
@@ -284,7 +284,7 @@ LOAD_CKPT=""
 best_epoch=-1
 for prev_dir in "${OPEN_SORA_ROOT}/outputs/${run_name}__job"*/; do
   [[ -d "$prev_dir" ]] || continue
-  ck=$(ls "$prev_dir" 2>/dev/null | grep "^epoch" | sort -V | tail -1)
+  ck=$(ls "$prev_dir" 2>/dev/null | grep "^epoch" | sort -V | tail -1) || true
   [[ -z "$ck" ]] && continue
   ep=$(echo "$ck" | grep -oP 'epoch\K[0-9]+' || echo 0)
   if (( ep > best_epoch )); then best_epoch=$ep; LOAD_CKPT="${prev_dir}${ck}"; fi
