@@ -91,8 +91,14 @@ yang2024cogvideox, kong2024hunyuanvideo, agarwal2025cosmos}, many variants
 % against them. Definitions and the why live in the experiments metrics section.
 
 - temporal consistency of generated video: optical-flow warping error \cite{lai2018learning}, benchmark suites such as VBench with flickering/motion-smoothness scores \cite{huang2024vbench}, distributional realism via FVD \cite{unterthiner2018towards}
-- multi-view consistency of generated views: geometric agreement, e.g. reprojection-based scores or MEt3R \cite{asim2025met3r}
-- these are built for free generation, where no ground truth exists and the risk is too much change (flicker) or too little 3D agreement. Our setting is reconstruction with paired GT, and the observed failures are the opposite tail: too little temporal change (frames merging) and too much cross-view agreement (views collapsing) -- both IMPROVE the established scores. gap: consistency-with-GT diagnostics for the over-smoothing direction; our calibrated diagnostics (Sec.~experiments/metrics) fill this by referencing every score against the same statistic on the ground truth
+- multi-view consistency of generated views, several established families:
+    - epipolar-geometry scores: TSED matches keypoints between two generated views and thresholds the symmetric epipolar distance under the known relative pose \cite{yu2023long}
+    - pose-free geometric agreement: MEt3R lifts view pairs with a stereo reconstructor and measures 3D consistency without given cameras \cite{asim2025met3r}
+    - re-rendering consistency: fit a NeRF/3DGS to the generated views and score held-out re-renders -- consistent views yield a good reconstruction \cite{gao2024cat3d, voleti2024sv3d}
+    - distributional: SV4D sweeps FVD along the view axis instead of time (FVD-V) to score view coherence \cite{xie2024sv4d}
+- all of these detect one direction of failure: views (or frames) that DISAGREE too much -- flicker, geometric mismatch, broken 3D. That is the failure mode of free generation, where no ground truth exists
+- our setting is reconstruction with paired GT, and the observed failures sit at the opposite end of the same axes: too little temporal change (frames merging) and too much cross-view agreement (views collapsing toward their mean). A ghosted reconstruction is MORE epipolar-consistent and MORE 3D-coherent than the ground truth, so these scores rate the artifact as an improvement
+- we therefore keep the axes but calibrate against the ground truth: every consistency statistic is reported relative to the same statistic on the GT views/frames, which makes the measures two-sided -- deviation in either direction (flicker OR collapse) is visible (definitions in Sec.~experiments/metrics). The established scores above remain useful as a cross-check and we can report them alongside; they are just not able to raise an alarm for the collapse direction by construction
 
 
 \section{Methodology}
@@ -252,7 +258,7 @@ The experiments follow one line of reasoning:
 - Q4 is it trainability? -> unfreeze up to the whole network; if nothing-frozen still fails, trainability is ruled out (Tab.~\ref{tab:unfreeze})
 - Q5 is it capacity? -> the positive test: widen the latent 16 -> 32/64 under joint compression (Tab.~\ref{tab:width}); plus rate pressure via view count (Tab.~\ref{tab:views}) and generalization pressure via data scale (Fig.~\ref{fig:datascale})
 
-Secondary sweeps that do not carry the argument (loss configuration, discriminator layouts, LoRA rank, initialization strategy, pre-fusion encoder LoRA) are reported in the supplement.
+Secondary sweeps that tune the operating point but do not carry the argument (loss configuration, discriminator layouts, LoRA rank, initialization strategy, pre-fusion encoder LoRA) are kept in Sec.~secondary ablations for now and referred to from the analysis; once all results exist they may move to the supplement.
 
 All numbers come from reruns under one fixed protocol; per-experiment configs are pinned in the repository.
 
@@ -291,12 +297,13 @@ Reporting policy -- no single number averaged over everything:
 - per frame index (averaged across views only): temporal failures have a signature over the frame index -- cold-start frame 0, dips at chunk boundaries, flattening within chunks; ``first frame good, later frames degraded'' is an insight, one scalar is not
 - the full per-axis profiles are plotted (Fig.~\ref{fig:perframe}); tables carry per-axis means
 
-Established consistency metrics, and why they do not transfer directly:
-- temporal consistency in video generation is measured by optical-flow warping error \cite{lai2018learning} and benchmark suites such as VBench (temporal flickering, motion smoothness) \cite{huang2024vbench}; FVD \cite{unterthiner2018towards} scores distributional realism. These target free generation without ground truth; reconstruction gives us the GT clip, so temporal fidelity can be measured against it directly. More importantly, our failure is too little change (frames merging) -- exactly what smoothness-style metrics reward rather than penalize
-- multi-view consistency is measured geometrically, e.g. MEt3R \cite{asim2025met3r} or reprojection error: do generated views agree in 3D? Our failure is the opposite direction: decoded views agree too much (collapse toward the view mean), so a geometric consistency score improves as ghosting worsens and cannot detect it
-- mode-collapse diagnostics in conditional generation use average pairwise distance between samples \cite{zhu2017toward}; our cross-view similarity is that idea turned into a calibrated fidelity check against GT
+Relation to established consistency metrics (definitions and positioning in Sec.~related work/measuring):
+- established scores -- warping error \cite{lai2018learning}, VBench smoothness \cite{huang2024vbench}, TSED \cite{yu2023long}, MEt3R \cite{asim2025met3r}, re-rendering consistency \cite{gao2024cat3d}, FVD/FVD-V \cite{unterthiner2018towards, xie2024sv4d} -- detect views/frames that disagree too much (flicker, geometric mismatch); that is the failure direction of free generation, where no GT exists
+- our failures sit at the opposite end of the same axes: too little temporal change, too much cross-view agreement. A ghosted reconstruction is more view-consistent than the GT, so these scores improve as the artifact worsens -- they cannot raise an alarm for collapse, by construction
+- we therefore report the same two axes (cross-view agreement, temporal change), but each statistic is calibrated against the identical statistic on the paired GT -- deviation in either direction becomes visible. The established scores can be reported alongside as a cross-check (expected: they stay flat or improve while our GT-referenced diagnostics and per-view PSNR degrade -- that contrast is itself evidence of collapse)
+- the cross-view similarity is also the mode-collapse diagnostic of conditional generation (average pairwise distance between outputs \cite{zhu2017toward}) turned into a GT-calibrated fidelity check
 
-Our diagnostics -- each targets one failure mode and is calibrated against the ground truth:
+Our diagnostics -- implemented in the training/eval pipeline, reported for every arm; each targets one failure mode and is calibrated against the ground truth:
 - (i) cross-view similarity (view ghosting): mean pairwise cosine similarity between decoded views of the same clip (time-aligned by construction, so excess similarity is view mixing, not temporal structure), reported next to the same quantity on the GT views. At the GT reference: views decoded distinctly; above it: ghosting. Experimentally anchored by the no-view-conditioning negative control (Tab.~\ref{tab:viewcond}), which must ghost
 - (ii) bleed ratio (temporal bleeding): mean $|f_{t+1} - f_t|$ of the reconstruction divided by the same quantity of the GT -- the fraction of true motion the reconstruction reproduces. 1 = faithful motion; well below 1 = frames merged. Computed separately within 4-frame chunks and across chunk boundaries; the split ties the artifact to the chunked causal decode (Sec.~\ref{sec:preliminaries}). Anchored by the non-causal decode oracle (Tab.~\ref{tab:interventions})
 - (iii) anchor-drift profile: mean $|f_k - f_0|$ for $k = 1..T{-}1$, GT vs.\ reconstruction. The GT curve rises with $k$ as motion accumulates; a flat reconstruction curve means all frames stay too close to the clip start. Complements (ii): consecutive-frame deltas miss a slow collapse toward a static clip, the anchored version does not
@@ -367,7 +374,7 @@ Expected: ghosting and lost identity detail only in the fused TC-on row.}}
 Expected reading (hypotheses from prior runs; every bullet must be re-established -- the old runs had a loader bug, so the picture may weaken, move, or partly disappear):
 - joint compression collapses; single-axis compression is fine (the rate-quality curve is the headline figure). In particular view fusion alone (with spatial compression, TC off) works -> the view axis CAN be absorbed, just not on top of the temporal axis
 - reading the table row-wise: floor $\ll$ matched references $\le$ ceiling locates the domain gap and the achievable range; the fused rows are then judged against the matched references at their respective rates
-- secondary observations (loss configuration matters, discriminator should see the view axis jointly, lower perceptual/KL weights improve pixel fidelity, LoRA rank plateaus) are documented in the supplement -- they tune the operating point but do not change the storyline
+- secondary observations (loss configuration matters, discriminator should see the view axis jointly, lower perceptual/KL weights improve pixel fidelity, LoRA rank plateaus) are documented in Sec.~secondary ablations -- they tune the operating point but do not change the storyline
 
 \subsection{Failure mode 1: view ghosting}
 
@@ -527,10 +534,6 @@ V & Rate (TC on) & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim \\
 \end{tabular}
 \end{table}
 
-% [feedback] moved to supplement: pre-fusion encoder LoRA, initialization strategy (warm start
-% vs. joint from Wan weights), loss configuration / discriminator layouts, LoRA rank. They tune
-% the operating point but do not carry the storyline.
-
 \subsubsection{Generalization pressure: training-set size}
 
 - single sequence -> one person -> all participants (one expression): bleed ratio and ghosting vs dataset size -> compression only breaks when it must generalize
@@ -545,6 +548,22 @@ Expected: both diagnostics clean at single-sequence, degrading with dataset size
 \label{fig:datascale}
 \end{figure}
 
+\subsection{Secondary ablations}
+% [feedback] kept in the main text for now; referred to from the analysis above. Once all
+% results exist these may move to the supplement.
+
+\subsubsection{Loss configuration}
+- no discriminator vs.\ the three multi-view discriminator layouts (views flattened into batch / stacked on channels / explicit 4D with per-view embeddings); perceptual and KL weight sensitivity
+- prior-run expectation: no discriminator or the 4D layout best, standard 3D PatchGAN hurts colors and sharpness -> if a discriminator is used, it should see the view axis jointly; lower perceptual/KL weights improved pixel fidelity
+
+\subsubsection{LoRA rank}
+- rank sweep at fixed everything else; expect a plateau (prior runs: 32--128 similar)
+
+\subsubsection{Initialization strategy}
+- staged warm-start of the joint model from a temporal-compression checkpoint (with re-randomized view attention) vs.\ joint training from Wan-pretrained weights only
+
+\subsubsection{Pre-fusion encoder LoRA}
+- optionally add LoRAs to the frozen per-view encoder stem -> does adapting the encoder before fusion help, or is the bottleneck after it?
 
 \section{Discussion}
 
@@ -632,15 +651,7 @@ designing a 4D tokenizer:
 - effective batch 64 via micro-batch x accumulation (OOM ladder re-balances the product, never the total)
 - jobs chained in 18h slices with automatic checkpoint resume; identical optimizer-update budget for every arm
 
-\subsection*{D. Secondary ablations}
-
-% [feedback] moved out of the main text: they tune the operating point, not the storyline
-- loss configuration: no discriminator vs.\ the three multi-view discriminator layouts; perceptual/KL weight sensitivity
-- LoRA rank sweep (expect a plateau)
-- initialization strategy: staged warm-start from a temporal-compression checkpoint vs.\ joint training from Wan weights only
-- pre-fusion encoder LoRA: adapting the frozen per-view encoder stem before fusion
-
-\subsection*{E. Additional tables and figures}
+\subsection*{D. Additional tables and figures}
 
 - per-view (instead of view-averaged) metric tables for every experiment
 - full per-frame PSNR profiles and anchor-drift ($|f_k - f_0|$) curves for all arms

@@ -23,7 +23,7 @@ then sat frozen at random init, and the rank-32 LoRA paths had to compensate. Th
 remaps the keys and hard-fails if any pretrained encoder/decoder key goes unloaded. Expect
 the rerun numbers (and possibly some qualitative conclusions) to differ from the old sweeps.
 
-**Status after the supervisor meeting (Sep 2026):**
+**Status after the meeting (01 Sep 2026):**
 - Sweep tasks already run on the cluster: **1, 2, 3, 7, 8, 9** (= E1a, E1b, E1c, E1z, E11a, E11b).
   Missing: **4, 5, 6** (= E2 fusion arms; they warm-start from task 2's checkpoint, which exists).
   All completed arms can be re-run if anything below invalidates them — nothing below does:
@@ -39,6 +39,38 @@ the rerun numbers (and possibly some qualitative conclusions) to differ from the
   identities excluded). Requires the all-expressions data to be preprocessed first.
 - Reporting policy: no metric is reported as a single global average. PSNR per view and per
   frame index; diagnostics plotted as curves, scalars only summarize.
+
+**How to continue on the cluster laptop (do these in order):**
+
+1. Pull this branch. If git refuses because *untracked working tree files would be
+   overwritten* (e.g. `Open-Sora/opensora/datasets/__init__.py`): the datasets package used
+   to be gitignored and is now partially tracked. Back up the local copies and retry:
+   ```bash
+   cd Open-Sora/opensora/datasets
+   for f in __init__.py pt_video.py pin_memory_cache.py; do [ -f "$f" ] && mv "$f" "$f.local-bak"; done
+   git pull
+   ```
+   Use the tracked `__init__.py` as-is: it imports `pt_video.py`, which now handles both
+   data layouts (`frames.pt` / `<seq>.pt`, tensor or dict payload, either axis order) and
+   has everything the old local `pt_video_dataset.py` had (`target_frames`, `pt_files`).
+   **Never import `pt_video.py` and `pt_video_dataset.py` together** — both register the
+   dataset name `pt_video` and the duplicate registry entry crashes at import time.
+2. Run the missing fusion arms (warm-start checkpoint from task 2 already exists):
+   ```bash
+   sbatch --array=4-6%3 run_paper_sweep.sh
+   ```
+3. Refresh the finished arms' final evals so they include the new per-view PSNR and
+   anchor-drift metrics (resubmitting a finished arm loads its last checkpoint, trains 0
+   remaining epochs, and re-runs the final eval — cheap):
+   ```bash
+   sbatch --array=1-3,7-9%4 run_paper_sweep.sh
+   ```
+   Note: with 0 new steps wandb may not re-initialize; that is fine — the refreshed
+   numbers land in each run dir's `eval_metrics.jsonl`, which is what the tables use.
+4. Preprocess the all-expressions data (command below), then launch the ceiling arm:
+   ```bash
+   sbatch --array=10 run_paper_sweep.sh
+   ```
 
 ## E0 — Per-view LoRA ceiling (Table 1 upper anchor)  [MUST HAVE — supervisor-requested]
 

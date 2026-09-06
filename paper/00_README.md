@@ -33,7 +33,7 @@ Code changes vs. the old branches:
   and LPIPS (VGG, fp32, per-clip mean over views+frames — same backbone as the
   training perceptual loss). All logged to wandb and appended to
   `outputs/<run>/eval_metrics.jsonl`.
-- Supervisor-meeting round (Sep 6):
+- Supervisor-meeting round (Sep 1):
   - new eval diagnostics in `train.py`: per-view PSNR (`psnr_view{v}`) and the
     anchor-drift profile mean |f_k − f_0| (`l1_from_frame0_gt{k}/_rec{k}`); both
     wandb-logged and in `eval_metrics.jsonl`. Completed runs only need a re-eval
@@ -45,6 +45,15 @@ Code changes vs. the old branches:
   - `pt_video.py` now accepts both on-disk conventions (`<seq>/frames.pt` and
     `<seq>/<seq>.pt`, raw tensor or dict payload, [V,T,C,H,W] or [V,C,T,H,W]),
     so the same branch runs on both machines' data trees.
+  - PULLING ON THE OTHER MACHINE: `opensora/datasets/` used to be fully gitignored
+    and is now partially tracked (`__init__.py`, `pt_video.py`, `pin_memory_cache.py`,
+    plus the laptop's `dataloader.py`, `pt_video_dataset.py`). If `git pull` refuses
+    because untracked local files would be overwritten, back them up
+    (`mv <file> <file>.local-bak`) and pull; then use the tracked `__init__.py`.
+    It imports `pt_video.py` only. **Never import `pt_video.py` and
+    `pt_video_dataset.py` together** — both register the dataset name `pt_video`
+    and the duplicate registry entry crashes at import. Step-by-step commands are
+    in `paper/02_experiments.md` ("How to continue on the cluster laptop").
   - draft: metrics section rewritten (established consistency metrics + calibrated
     diagnostics + disentangling setup), failure-mode storyline in the experiments
     section, per-view/per-frame PSNR reporting policy, Table 1 ceiling row,
