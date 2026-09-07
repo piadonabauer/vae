@@ -2599,9 +2599,13 @@ def main():
                 "train_psnr_guard_min_updates": train_psnr_guard_min_updates,
             },
         )
-    # Predefine for the eval-only case (epochs=0, e.g. the zero-shot reference
-    # arm): the loop body never runs, but final-eval logging references `epoch`.
+    # Predefine for the eval-only case (epochs=0 or resume-at-completion):
+    # the loop body never runs, but final-eval logging references `epoch`.
+    # `step` and `global_step` are None when no training ran; the final
+    # checkpoint save is guarded against that below.
     epoch = start_epoch - 1
+    step = None
+    global_step = None
     for epoch in range(start_epoch, cfg_epochs):
         epoch_psnr_sum = 0.0
         epoch_psnr_count = 0
@@ -4041,7 +4045,7 @@ def main():
     # =======================================================
     if coordinator.is_master():
         save_ckpt = cfg.get("save_ckpt", False)
-        if save_ckpt and last_saved_ckpt_epoch != epoch and not train_psnr_bad_for_ckpt:
+        if save_ckpt and step is not None and last_saved_ckpt_epoch != epoch and not train_psnr_bad_for_ckpt:
             logger.info("Saving final checkpoint...")
             use_async_io = False
 
@@ -4082,6 +4086,8 @@ def main():
         else:
             if not save_ckpt:
                 logger.info("Skipping final checkpoint save (save_ckpt=False).")
+            elif step is None:
+                logger.info("Skipping final checkpoint save (no training ran; checkpoint from previous run already covers this epoch).")
             elif last_saved_ckpt_epoch == epoch:
                 logger.info("Skipping final checkpoint save (already saved at epoch end).")
             elif train_psnr_bad_for_ckpt:
