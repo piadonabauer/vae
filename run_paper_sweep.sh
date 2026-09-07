@@ -6,7 +6,7 @@
 #SBATCH --time=0-18:00:00
 #SBATCH --output=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.out
 #SBATCH --error=/home/piado/projects/aip-lindell/piado/vae/Open-Sora/slurm_logs/%x_%A_%a.err
-#SBATCH --array=1-10%4
+#SBATCH --array=1-26%4
 
 # Paper rerun sweep: E1 (rate-quality 2x2 + per-view references) and E5 (unfreeze).
 # All runs share ONE fixed protocol (see paper/02_experiments.md):
@@ -26,6 +26,24 @@
 #   8  E11a E1d + latent widened 16->32 channels
 #   9  E11b E1d + latent widened 16->64 channels
 #   10 E0   per-view LoRA ceiling: all people, ALL expressions (not just EMO-1),
+#           TC off. Supervisor-requested Table-1 ceiling row.
+#   11 E2b  fusion=self_attention, TC off
+#   12 E2c  fusion=conv3d, TC off
+#   13 E2d  fusion=conv4d, TC off
+#   14 E3a  view_emb=on, viewwise_lora=off, TC off
+#   15 E3c  view_emb=on, viewwise_lora=on, TC off
+#   16 E3d  view_emb=off, viewwise_lora=off, TC off (negative control -- should ghost)
+#   17 E3e  view_emb=off, viewwise_lora=on, full_finetune_decoder, TC off
+#   18 E4b  noncausal_decode=True (oracle: no chunked decode bleeding)
+#   19 E4c  temporal_reflection_pad=True
+#   20 E4d  temporal_side_channel=True
+#   21 E4e  noncausal_decode + decoder_temporal_attention
+#   22 E4f  learned_cache_update=True
+#   23 E4g  subframe_position_embedding=True
+#   24 E4h  temporal_diff_loss_weight=2.0
+#   25 E7b  E1d config, no warm start (staged vs. joint-from-scratch ablation)
+#   26 E8b  E1d config, data_preset=one_person (data-scale ablation)
+#
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
 #           other arms on purpose (way more data, fewer epochs) -- it anchors the
@@ -244,6 +262,129 @@ case "$TASK" in
                  --val_dataset_presets.all_people.expression_sequence "EMO-1-shout+laugh"
                  --epochs "${CEILING_EPOCHS:-20}" )
     ;;
+
+  # ── E2: fusion mechanism ablation (TC=False; E2-a = E1c, reuse) ─────────────
+  # Fixed: crossview encoder, viewwise decoder LoRA, TC off. Vary fusion_mode.
+  11)
+    run_name="paper_E2b_fused_tcF_self_attn"
+    MODEL_ARGS=( --model.fusion_mode self_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False )
+    ;;
+  12)
+    run_name="paper_E2c_fused_tcF_conv3d"
+    MODEL_ARGS=( --model.fusion_mode conv3d --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False )
+    ;;
+  13)
+    run_name="paper_E2d_fused_tcF_conv4d"
+    MODEL_ARGS=( --model.fusion_mode conv4d --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False )
+    ;;
+
+  # ── E3: view-conditioned decoding ablation (TC=False, cross_attention) ───────
+  # E3-b (view_emb=off, viewwise_lora=on) = E1c -- reuse, not included here.
+  # E3-c (view_emb=on, viewwise_lora=on) is the new baseline with emb added.
+  14)
+    run_name="paper_E3a_view_emb_noLora"
+    MODEL_ARGS=( --model.fusion_mode cross_attention
+                 --model.use_view_embedding True
+                 --model.use_viewwise_decoder_lora False
+                 --model.temporal_compression False )
+    ;;
+  15)
+    run_name="paper_E3c_view_emb_plus_lora"
+    MODEL_ARGS=( --model.fusion_mode cross_attention
+                 --model.use_view_embedding True
+                 --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False )
+    ;;
+  16)
+    run_name="paper_E3d_no_emb_no_lora"
+    # Negative control: no view embedding, no viewwise decoder LoRA.
+    # Expected to ghost (both views reconstruct identically).
+    MODEL_ARGS=( --model.fusion_mode cross_attention
+                 --model.use_view_embedding False
+                 --model.use_viewwise_decoder_lora False
+                 --model.temporal_compression False )
+    ;;
+  17)
+    run_name="paper_E3e_full_dec_finetune"
+    # Upper bound: viewwise LoRA + full decoder finetune (nothing frozen in decoder).
+    MODEL_ARGS=( --model.fusion_mode cross_attention
+                 --model.use_view_embedding False
+                 --model.use_viewwise_decoder_lora True
+                 --model.full_finetune_decoder True
+                 --model.temporal_compression False )
+    ;;
+
+  # ── E4: temporal interventions (TC=True, fused; E4-a = E1d, reuse) ──────────
+  # Primary metric: bleed_ratio_within + per-frame PSNR profile.
+  18)
+    run_name="paper_E4b_noncausal_decode"
+    # Oracle upper bound: removes chunked decode entirely (no temporal bleeding
+    # by construction). Gap vs E1d isolates the chunk mechanism's damage.
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.use_noncausal_decode True )
+    ;;
+  19)
+    run_name="paper_E4c_reflection_pad"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.use_temporal_reflection_pad True )
+    ;;
+  20)
+    run_name="paper_E4d_side_channel"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.use_temporal_side_channel True )
+    ;;
+  21)
+    run_name="paper_E4e_noncausal_dec_attn"
+    # Noncausal decode + decoder temporal attention (requires noncausal).
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.use_noncausal_decode True
+                 --model.use_decoder_temporal_attention True )
+    ;;
+  22)
+    run_name="paper_E4f_learned_cache_update"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.use_learned_cache_update True )
+    ;;
+  23)
+    run_name="paper_E4g_subframe_pos_emb"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.use_subframe_position_embedding True )
+    ;;
+  24)
+    run_name="paper_E4h_temporal_diff_loss"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --temporal_diff_loss_weight 2.0 )
+    ;;
+
+  # ── E7b: warm-start ablation (E1d config, no INIT_CKPT) ─────────────────────
+  # Answers: does staged training (temporal first, then view) beat joint from scratch?
+  25)
+    run_name="paper_E7b_fused_tcT_no_warmstart"
+    INIT_CKPT="none"  # Disable warm start; new modules zero-init.
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True )
+    ;;
+
+  # ── E8b: data-scale ablation (E1d config, one_person data) ──────────────────
+  # E8-a = single_sequence (overfit, done), E8-c = all_people_one_expression (= E1d),
+  # E8-d = all_people (= E0). Only E8-b (one_person) is a new run.
+  26)
+    run_name="paper_E8b_one_person_data"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --data_preset one_person )
+    ;;
+
   *)
     echo "Unknown TASK=$TASK"; exit 1 ;;
 esac
@@ -269,11 +410,12 @@ if [[ -n "${SLURM_JOB_ID:-}" && "$CHAIN_LEFT" -gt 0 && "$DRY_RUN" != "1" ]]; the
     || echo "[chain] WARNING: could not queue successor; resubmit by hand if the job times out"
 fi
 
-# Staged init for the joint arms (4-6): default to the best E1b checkpoint unless
-# the caller pins INIT_CKPT or disables it with INIT_CKPT=none. Skipped in overfit
-# mode (the gate tests the architecture, not the curriculum).
+# Staged init for joint TC=True fused arms: tasks 4-6 (E1d, E5b, E5c) and
+# tasks 18-24 (E4 temporal interventions, all TC=True fused variants of E1d).
+# Default to the best E1b checkpoint; disable with INIT_CKPT=none.
+# Skipped in overfit mode (the gate tests the architecture, not the curriculum).
 WARMSTART_ARGS=()
-if [[ "$OVERFIT" != "1" && "$TASK" =~ ^[456]$ && "$INIT_CKPT" != "none" ]]; then
+if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) ) && "$INIT_CKPT" != "none" ]]; then
   if [[ -z "$INIT_CKPT" ]]; then
     best_ep=-1
     for d in "${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job"*/; do
