@@ -287,7 +287,8 @@ if [[ "$OVERFIT" != "1" && "$TASK" =~ ^[456]$ && "$INIT_CKPT" != "none" ]]; then
   if [[ -n "$INIT_CKPT" ]]; then
     echo "[init] warm start from: $INIT_CKPT"
     WARMSTART_ARGS=( --load "$INIT_CKPT" --load_optimizer False
-                     --model.reinit_view_attention_after_load True )
+                     --model.reinit_view_attention_after_load True
+                     --start_epoch 0 )
   else
     echo "[init] WARNING: no E1b checkpoint found -- falling back to Wan-only init."
     echo "[init] Run TASK=2 first, or pass INIT_CKPT explicitly (INIT_CKPT=none to silence)."
