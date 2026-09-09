@@ -43,6 +43,7 @@
 #   24 E4h  temporal_diff_loss_weight=2.0
 #   25 E7b  E1d config, no warm start (staged vs. joint-from-scratch ablation)
 #   26 E8b  E1d config, data_preset=one_person (data-scale ablation)
+#   27 E2e  best fusion (self_attention) + TC=True (fusion ranking sanity check)
 #
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
@@ -366,6 +367,15 @@ case "$TASK" in
                  --temporal_diff_loss_weight 2.0 )
     ;;
 
+  # ── E2e: best fusion mode (self_attention) with TC=True ──────────────────────
+  # Sanity check that the fusion ranking holds under temporal compression.
+  # Warm-starts from E1b like the other TC=True fused arms.
+  27)
+    run_name="paper_E2e_fused_tcT_self_attn"
+    MODEL_ARGS=( --model.fusion_mode self_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True )
+    ;;
+
   # ── E7b: warm-start ablation (E1d config, no INIT_CKPT) ─────────────────────
   # Answers: does staged training (temporal first, then view) beat joint from scratch?
   25)
@@ -415,7 +425,7 @@ fi
 # Default to the best E1b checkpoint; disable with INIT_CKPT=none.
 # Skipped in overfit mode (the gate tests the architecture, not the curriculum).
 WARMSTART_ARGS=()
-if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) ) && "$INIT_CKPT" != "none" ]]; then
+if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) || "$TASK" == "27" ) && "$INIT_CKPT" != "none" ]]; then
   if [[ -z "$INIT_CKPT" ]]; then
     best_ep=-1
     for d in "${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job"*/; do
