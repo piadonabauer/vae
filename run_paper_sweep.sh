@@ -45,6 +45,10 @@
 #   26 E8b  E1d config, data_preset=one_person (data-scale ablation)
 #   27 E2e  best fusion (self_attention) + TC=True (fusion ranking sanity check)
 #   28 E4i  best combo: temporal_diff_loss + learned_cache_update
+#   29 E6b  V=4, TC=F, cross_attention (view-count ablation)
+#   30 E6c  V=4, TC=T, cross_attention
+#   31 E6d  V=8, TC=F, cross_attention
+#   32 E6e  V=8, TC=T, cross_attention
 #
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
@@ -396,6 +400,56 @@ case "$TASK" in
     INIT_CKPT="none"  # Disable warm start; new modules zero-init.
     MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
                  --model.temporal_compression True )
+    ;;
+
+  # ── E6: view-count ablation (V=4 and V=8, TC=F and TC=T) ────────────────────
+  # Prediction: fused-view quality degrades monotonically with V even at TC=F.
+  # V=2 references: E1c (TC=F) and E1d (TC=T).
+  # Data: 4-views/128-res and 8-views/128-res (EMO-1 only, all participants).
+  # No warm-start: view_in differs from E1b so the warmstart conv shapes mismatch.
+  29)
+    run_name="paper_E6b_4view_tcF"
+    INIT_CKPT="none"
+    _4V=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-views/128-res
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.view_in 4
+                 --dataset_presets.all_people_one_expression.data_path "$_4V"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_4V"
+                 --dataset_presets.all_people_one_expression.expected_views 4
+                 --val_dataset_presets.all_people_one_expression.expected_views 4 )
+    ;;
+  30)
+    run_name="paper_E6c_4view_tcT"
+    INIT_CKPT="none"
+    _4V=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-views/128-res
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True --model.view_in 4
+                 --dataset_presets.all_people_one_expression.data_path "$_4V"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_4V"
+                 --dataset_presets.all_people_one_expression.expected_views 4
+                 --val_dataset_presets.all_people_one_expression.expected_views 4 )
+    ;;
+  31)
+    run_name="paper_E6d_8view_tcF"
+    INIT_CKPT="none"
+    _8V=/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-views/128-res
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.view_in 8
+                 --dataset_presets.all_people_one_expression.data_path "$_8V"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_8V"
+                 --dataset_presets.all_people_one_expression.expected_views 8
+                 --val_dataset_presets.all_people_one_expression.expected_views 8 )
+    ;;
+  32)
+    run_name="paper_E6e_8view_tcT"
+    INIT_CKPT="none"
+    _8V=/datasets/lindell-proj/neumayr/nersemble_v2/processed/8-views/128-res
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True --model.view_in 8
+                 --dataset_presets.all_people_one_expression.data_path "$_8V"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_8V"
+                 --dataset_presets.all_people_one_expression.expected_views 8
+                 --val_dataset_presets.all_people_one_expression.expected_views 8 )
     ;;
 
   # ── E8b: data-scale ablation (E1d config, one_person data) ──────────────────
