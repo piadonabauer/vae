@@ -50,6 +50,8 @@
 #   31 E6d  V=8, TC=F, cross_attention
 #   32 E6e  V=8, TC=T, cross_attention
 #   33 E6b-flat  V=4, TC=F, flat merge (binary-tree topology ablation)
+#   34 E9a  E1d config at 256px (resolution scaling)
+#   35 E9b  E1d config at 512px (resolution scaling)
 #
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
@@ -470,6 +472,29 @@ case "$TASK" in
                  --val_dataset_presets.all_people_one_expression.expected_views 4 )
     ;;
 
+  # ── E9: resolution scaling (E1d config at 256px and 512px) ──────────────────
+  # Shows that 128px PSNR is limited by pixel count, not model capacity.
+  # Same architecture as E1d (fused cross_attn, TC=T, viewwise LoRA, warmstart E1b).
+  # Bucket config and data_path override the COMMON 128px defaults.
+  34)
+    run_name="paper_E9a_256px"
+    _256=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --bucket_config "{'256px_ar1:1': {9: (1.0, 1)}}"
+                 --dataset_presets.all_people_one_expression.data_path "$_256"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_256" )
+    ;;
+  35)
+    run_name="paper_E9b_512px"
+    _512=/datasets/lindell-proj/neumayr/nersemble_v2/processed/512-res
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --bucket_config "{'512px_ar1:1': {9: (1.0, 1)}}"
+                 --dataset_presets.all_people_one_expression.data_path "$_512"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_512" )
+    ;;
+
   # ── E8b: data-scale ablation (E1d config, one_person data) ──────────────────
   # E8-a = single_sequence (overfit, done), E8-c = all_people_one_expression (= E1d),
   # E8-d = all_people (= E0). Only E8-b (one_person) is a new run.
@@ -510,7 +535,7 @@ fi
 # Default to the best E1b checkpoint; disable with INIT_CKPT=none.
 # Skipped in overfit mode (the gate tests the architecture, not the curriculum).
 WARMSTART_ARGS=()
-if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) || "$TASK" == "27" || "$TASK" == "28" ) && "$INIT_CKPT" != "none" ]]; then
+if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) || "$TASK" == "27" || "$TASK" == "28" || "$TASK" == "34" || "$TASK" == "35" ) && "$INIT_CKPT" != "none" ]]; then
   if [[ -z "$INIT_CKPT" ]]; then
     best_ep=-1
     for d in "${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job"*/; do
