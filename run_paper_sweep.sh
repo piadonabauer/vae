@@ -49,6 +49,7 @@
 #   30 E6c  V=4, TC=T, cross_attention
 #   31 E6d  V=8, TC=F, cross_attention
 #   32 E6e  V=8, TC=T, cross_attention
+#   33 E6b-flat  V=4, TC=F, flat merge (binary-tree topology ablation)
 #
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
@@ -450,6 +451,23 @@ case "$TASK" in
                  --val_dataset_presets.all_people_one_expression.data_path "$_8V"
                  --dataset_presets.all_people_one_expression.expected_views 8
                  --val_dataset_presets.all_people_one_expression.expected_views 8 )
+    ;;
+
+  # ── E6b-flat: merge topology ablation (binary tree vs flat, V=4, TC=F) ──────
+  # Ablates the hierarchical binary-tree design by using a single flat merge
+  # (concat all 4 enriched views → ResBlock(4C→C)) instead of 3 pairwise merges.
+  # Reference: E6b (task 29) uses cross_attention (tree). No warm-start.
+  33)
+    run_name="paper_E6b_flat_merge"
+    INIT_CKPT="none"
+    _4V=/datasets/lindell-proj/neumayr/nersemble_v2/processed/4-views/128-res
+    MODEL_ARGS=( --model.fusion_mode cross_attention_flat
+                 --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.view_in 4
+                 --dataset_presets.all_people_one_expression.data_path "$_4V"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_4V"
+                 --dataset_presets.all_people_one_expression.expected_views 4
+                 --val_dataset_presets.all_people_one_expression.expected_views 4 )
     ;;
 
   # ── E8b: data-scale ablation (E1d config, one_person data) ──────────────────

@@ -2364,6 +2364,8 @@ class AttentionMultiViewVideoVan(nn.Module):
         self.fusion_resblock1 = None
         self.fusion_resblock2 = None
         self.tree_resblocks = None  # per-level pairs for cross_attention tree merge
+        self.flat_resblock1 = None  # for cross_attention_flat
+        self.flat_resblock2 = None  # for cross_attention_flat
 
         if fusion_mode == "cross_attention":
             self.cross_attn = ViewAttention(dim=bottleneck_channels, num_heads=view_attn_num_heads)
@@ -2402,6 +2404,13 @@ class AttentionMultiViewVideoVan(nn.Module):
                     if _last.bias is not None:
                         nn.init.zeros_(_last.bias)
             """
+        elif fusion_mode == "cross_attention_flat":
+            # Same cross-view attention as the tree merge, but collapses all V views in
+            # a single flat step: concat all V enriched feature maps → ResBlock(V·C → C).
+            # This ablates the hierarchical binary-tree design (E6b in the paper).
+            self.cross_attn = ViewAttention(dim=bottleneck_channels, num_heads=view_attn_num_heads)
+            self.flat_resblock1 = ResidualBlock(fused_channels, bottleneck_channels, dropout)
+            self.flat_resblock2 = ResidualBlock(bottleneck_channels, bottleneck_channels, dropout)
         elif fusion_mode == "self_attention":
             # Full-sequence self-attention over both views' tokens (JointViewAttention), then concat + ResBlocks.
             self.joint_attn = JointViewAttention(embed_dim=bottleneck_channels, num_heads=8)
@@ -2444,7 +2453,7 @@ class AttentionMultiViewVideoVan(nn.Module):
         else:
             raise ValueError(
                 f"Unsupported fusion_mode={fusion_mode}. "
-                "Use one of: cross_attention, self_attention, conv3d, conv4d, none."
+                "Use one of: cross_attention, cross_attention_flat, self_attention, conv3d, conv4d, none."
             )
 
         # Optional per-view latent LoRA adapters for decoding.
@@ -2744,6 +2753,17 @@ class AttentionMultiViewVideoVan(nn.Module):
                         next_level.append(current[-1])  # carry odd view forward
                     current = next_level
                 fused = current[0]
+        elif self.fusion_mode == "cross_attention_flat":
+            # E6b ablation: same cross-attn enrichment, but flat (non-hierarchical) merge.
+            num_v = len(tokens_per_view)
+            with ProfileTimer.block("encode.fusion.cross_attention"):
+                stacked = torch.stack(tokens_per_view, dim=2)  # [B, T, V, N, C]
+                enriched = self.cross_attn(stacked)             # [B, T, V, N, C]
+                feats_enriched = [unflatten_tokens(enriched[:, :, v_idx]) for v_idx in range(num_v)]
+            with ProfileTimer.block("encode.fusion.flat_merge"):
+                fused = torch.cat(feats_enriched, dim=1)  # [B, V*C, T', H', W']
+                fused = self.flat_resblock1(fused)          # V*C → C
+                fused = self.flat_resblock2(fused)          # C   → C
         elif self.fusion_mode == "self_attention":
             with ProfileTimer.block("encode.fusion.self_attention"):
                 tokens_enriched = self.joint_attn(tokens_per_view)
