@@ -183,7 +183,7 @@ def resolve_vae_discriminator_bundle(choice: Choice) -> Dict[str, Any]:
             ),
         )
 
-    if sn in ("train_multiview_stack", "train_mv_stack"):
+    if sn in ("train_multiview_stack", "train_mv_stack", "trainmultiviewstack"):
         # Stack views in channel dim [B, V*3, T, H, W]; standard 3D PatchGAN (disc_multiview_mode=stack_channels).
         return dict(
             discriminator=dict(

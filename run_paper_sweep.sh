@@ -52,6 +52,18 @@
 #   33 E6b-flat  V=4, TC=F, flat merge (binary-tree topology ablation)
 #   34 E9a  E1d config at 256px (resolution scaling)
 #   35 E9b  E1d config at 512px (resolution scaling)
+#   36 E_combo  E4h (diff-loss) + E11a (widen32): test if the two best
+#              improvements are additive under joint TC+fused compression
+#   37 E7_disc3d     E1d + 3D PatchGAN (flatten views into batch)
+#   38 E7_disc4d     E1d + joint 4D discriminator
+#   39 E7_discstack  E1d + stacked-view 3D PatchGAN
+#   40 E7_perc0p5    E1d + perceptual_loss_weight=0.5
+#   41 E7_perc3p0    E1d + perceptual_loss_weight=3.0
+#   42 E7_kl1e7      E1d + kl_loss_weight=1e-7
+#   43 E10_rank8     E1c + LoRA rank 8
+#   44 E10_rank128   E1c + LoRA rank 128
+#   45 E10_before_tcT  E1d + use_lora_before (pre-fusion encoder LoRA)
+#   46 E10_before_tcF  E1c + use_lora_before
 #
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
@@ -492,7 +504,95 @@ case "$TASK" in
                  --model.temporal_compression True
                  --bucket_config "{'512px_ar1:1': {9: (1.0, 1)}}"
                  --dataset_presets.all_people_one_expression.data_path "$_512"
-                 --val_dataset_presets.all_people_one_expression.data_path "$_512" )
+                 --val_dataset_presets.all_people_one_expression.data_path "$_512"
+                 --model.crossview_grad_checkpoint_encoder True )
+    # 512px = 16× pixels vs 128px. Even batch 2 OOMs on 48 GB GPUs.
+    # Start the OOM ladder at batch 1 (eff. batch = 1×64 = 64 unchanged).
+    # Encoder checkpoint also enabled above to cut activation memory.
+    BATCH_LADDER=( "2:32" "1:64" )
+    ;;
+
+  # ── E_combo: diff-loss + widen32 (test additivity of two best improvements) ──
+  # E4h gave +1.83 dB; E11a gave +2.40 dB. Are they additive?
+  # Expected upper bound if additive: ~29.5 dB; saturation would be ~27-28 dB.
+  # INIT_CKPT=none: boundary conv shapes differ from E1b (32ch != 16ch).
+  36)
+    run_name="paper_E_combo_diffLoss_widen32"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.latent_widen_to 32
+                 --temporal_diff_loss_weight 2.0 )
+    INIT_CKPT="none"
+    ;;
+
+  # ── E7: loss configuration (E1d baseline: no disc, perc=1.5, kl=1e-6) ──────
+  # Discriminator layouts named in the draft; reuse E1d for "none".
+  37)
+    run_name="paper_E7_disc3d_flatten"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --discriminator_choice Train --gen_disc_weight 0.1 )
+    BATCH_LADDER=( "8:8" "4:16" "2:32" )
+    ;;
+  38)
+    run_name="paper_E7_disc4d"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --discriminator_choice TrainMultiview4D --gen_disc_weight 0.1 )
+    BATCH_LADDER=( "8:8" "4:16" "2:32" )
+    ;;
+  39)
+    run_name="paper_E7_discstack"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --discriminator_choice TrainMultiviewStack --gen_disc_weight 0.1 )
+    BATCH_LADDER=( "8:8" "4:16" "2:32" )
+    ;;
+  40)
+    run_name="paper_E7_perc0p5"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --perceptual_loss_weight 0.5
+                 --vae_loss_config.perceptual_loss_weight 0.5 )
+    ;;
+  41)
+    run_name="paper_E7_perc3p0"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --perceptual_loss_weight 3.0
+                 --vae_loss_config.perceptual_loss_weight 3.0 )
+    ;;
+  42)
+    run_name="paper_E7_kl1e7"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --kl_loss_weight 1e-7
+                 --vae_loss_config.kl_loss_weight 1e-7 )
+    ;;
+
+  # ── E10: LoRA rank / pre-fusion placement ──────────────────────────────────
+  # Rank sweep at E1c (fused, TC off). Rank 32 is E1c itself (31.21 dB).
+  43)
+    run_name="paper_E10_rank8"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.lora_rank 8 )
+    ;;
+  44)
+    run_name="paper_E10_rank128"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.lora_rank 128 )
+    ;;
+  # Pre-fusion encoder LoRA: default is after-only. Test whether adapting the
+  # frozen per-view stem helps, or whether the bottleneck is after fusion.
+  45)
+    run_name="paper_E10_lora_before_tcT"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True --model.use_lora_before True )
+    ;;
+  46)
+    run_name="paper_E10_lora_before_tcF"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.use_lora_before True )
     ;;
 
   # ── E8b: data-scale ablation (E1d config, one_person data) ──────────────────
@@ -523,7 +623,7 @@ fi
 # exits via the marker if this job finishes the arm.
 CHAIN_LEFT="${CHAIN_LEFT:-3}"
 if [[ -n "${SLURM_JOB_ID:-}" && "$CHAIN_LEFT" -gt 0 && "$DRY_RUN" != "1" ]]; then
-  sbatch --dependency="afterany:${SLURM_JOB_ID}" \
+  sbatch --dependency="afterany:${SLURM_JOB_ID}" --array=1 \
          --export="ALL,TASK=${TASK},OVERFIT=${OVERFIT},CHAIN_LEFT=$((CHAIN_LEFT - 1)),INIT_CKPT=${INIT_CKPT}" \
          "$0" \
     && echo "[chain] successor queued (CHAIN_LEFT=$((CHAIN_LEFT - 1)))" \
@@ -535,7 +635,7 @@ fi
 # Default to the best E1b checkpoint; disable with INIT_CKPT=none.
 # Skipped in overfit mode (the gate tests the architecture, not the curriculum).
 WARMSTART_ARGS=()
-if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) || "$TASK" == "27" || "$TASK" == "28" || "$TASK" == "34" || "$TASK" == "35" ) && "$INIT_CKPT" != "none" ]]; then
+if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) || "$TASK" == "27" || "$TASK" == "28" || "$TASK" == "34" || "$TASK" == "35" || ( "$TASK" -ge 37 && "$TASK" -le 42 ) || "$TASK" == "45" ) && "$INIT_CKPT" != "none" ]]; then
   if [[ -z "$INIT_CKPT" ]]; then
     best_ep=-1
     for d in "${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job"*/; do
