@@ -40,6 +40,36 @@ the rerun numbers (and possibly some qualitative conclusions) to differ from the
 - Reporting policy: no metric is reported as a single global average. PSNR per view and per
   frame index; diagnostics plotted as curves, scalars only summarize.
 
+**⚠ XView-sim eval inconsistency found while checking the report (2026-09-19):**
+
+The per-arm XView values in the drafts split into two clusters *by launch batch*, not by
+model: E1a–d and the E7 loss arms report GT-level ≈ **0.907**, while E0, E2b–d, E3a/c/d/e
+and the E10 rank arms report GT-level ≈ **0.978–0.979** (see `tab:viewcond`: rank-32 = reused
+E1c = 0.907 next to rank-8/128 = 0.979 in the *same* table). GT similarity depends only on
+the eval data, so the eval input pipeline differed between the two batches — most likely a
+value-range/loader mismatch in the `x01` conversion (data already [0,1] treated as [-1,1]
+shifts everything into [0.5,1] and inflates cosine sim). PSNR is computed *before* that
+conversion and bleed is a ratio (a common shift cancels), so those columns are fine —
+**only the XView columns from the second batch are not comparable to Table 1.**
+
+Follow-ups on the cluster (added to the checklist below):
+
+- For every arm, check `xview_sim_gt` in its `eval_metrics.jsonl`. Arms with GT ≉ 0.907
+  were evaluated on the mismatched pipeline → refresh their final eval (step 3 below does
+  this anyway) and re-fill the XView columns.
+- **E3d ("none", 31.50 dB) is not a valid negative control as logged.** With one fused
+  latent and truly no view conditioning, both decoded views are identical, so
+  `xview_sim_rec` would be exactly 1.0 under ANY pipeline — measured is 0.979 (GT level),
+  so the decoded views genuinely differ. Check the run's config/wandb: either the
+  view-wise LoRA / view embedding was not actually disabled, or the arm silently fell back
+  to an unfused per-view path (note 31.50 = exactly the E1b per-view number). Until
+  verified, don't claim "cross-view attention alone carries view identity".
+- The datascale figure's all-people GT XView (0.918) also disagrees with Table 1 (0.907) —
+  same family of problem; recompute both points of that figure in one consistent eval.
+- Minor: the prose says 32→64 ch adds "+0.01 dB" but the tables say 27.71→27.60 (−0.11).
+  Check whether +0.01 came from best-val vs final-EMA readout; the report now says
+  "no further gain (27.60 vs 27.71)".
+
 **How to continue on the cluster laptop (do these in order):**
 
 1. Pull this branch. If git refuses because *untracked working tree files would be
