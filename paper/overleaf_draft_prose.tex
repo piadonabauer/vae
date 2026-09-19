@@ -2,15 +2,14 @@
 % Needs in the preamble: \usepackage{amsmath, graphicx, booktabs, enumitem}
 
 % ============================================================
-% TODO — EXPERIMENTS STILL RUNNING (fill these in when they finish)
+% EXPERIMENT STATUS (headline + secondary arms filled)
 % ============================================================
 %
-% [RUNNING] E7/E10 secondary ablations (protocol-matched, 170 ep)
-%            37 disc3d flatten   38 disc4d   39 discstack
-%            40 perc=0.5         41 perc=3.0  42 kl=1e-7     (vs E1d 25.31)
-%            43 LoRA rank 8      44 rank 128                 (vs E1c 31.21)
-%            45 lora_before TC=on (E1d)  46 lora_before TC=off (E1c)
-%            Historical wandb/April numbers are not cited (wrong protocol + LoRA load bug).
+% DONE   E7/E10 secondary ablations (protocol-matched, 170 ep)
+%            disc3d 26.05 / disc4d 25.97   (stacked disc dropped)
+%            perc0.5 26.46 / perc3.0 25.66 / kl1e-7 26.05   (vs E1d 25.31)
+%            rank8 31.23 / rank128 32.13                   (vs E1c 31.21)
+%            lora_before TC=on 25.98 / TC=off 31.47
 %
 % DONE   E9b  512px fused+TC=on. Best val 26.64 dB / LPIPS 0.170 / Bleed-W 0.904 / XView 0.904
 %            128: 25.31 → 256: 27.78 → 512: 26.64. The 128→256 lift does not continue.
@@ -198,7 +197,7 @@ The reconstruction term follows the standard latent-diffusion tokenizer recipe \
 \;+\; 10^{-6} \cdot D_{\mathrm{KL}}\!\left(q(z \mid x) \,\Vert\, \mathcal{N}(0, I)\right).
 \label{eq:objective}
 \end{equation}
-The KL term is always included, at weight $10^{-6}$, the standard tokenizer setting \cite{rombach2022high}, and is logged separately during training: the latent must stay a proper VAE posterior for downstream diffusion, not degrade into a plain autoencoder. An optional adversarial term uses one of three multi-view discriminator layouts, all PatchGAN-style 3D \cite{isola2017image}: views flattened into the batch, views stacked on channels, or an explicit 4D discriminator with a view axis and per-view embeddings.
+The KL term is always included, at weight $10^{-6}$, the standard tokenizer setting \cite{rombach2022high}, and is logged separately during training: the latent must stay a proper VAE posterior for downstream diffusion, not degrade into a plain autoencoder. An optional adversarial term uses a PatchGAN-style 3D discriminator \cite{isola2017image}: either views flattened into the batch, or an explicit 4D discriminator with a view axis and per-view embeddings.
 
 % [feedback] "Data und Preprocessing" moved into the experiments section (merged with the dataset
 % subsection there); val subject selection moved to the supplement.
@@ -569,11 +568,11 @@ Expected: both diagnostics clean at single-sequence, degrading with dataset size
 
 \subsubsection{Loss configuration}
 
-The default protocol uses no discriminator, perceptual weight $1.5$, and KL weight $10^{-6}$. We re-run the E1d setting (fused, TC on) with each discriminator layout and with lower/higher perceptual weight and a lower KL weight (Tab.~\ref{tab:loss}). \textbf{[RUNNING]} Protocol-matched jobs 37--42 are queued (5528048--5528053). Historical April/wandb numbers are not cited: they mixed batch sizes and used a LoRA checkpoint-load bug that left most of the backbone randomly initialized.
+The default protocol uses no discriminator, perceptual weight $1.5$, and KL weight $10^{-6}$. Re-running E1d with the 3D PatchGAN (views flattened) and the joint 4D discriminator, and with lower/higher perceptual or KL weight (Tab.~\ref{tab:loss}), shows that none of these choices closes the joint-compression gap. Both discriminators improve PSNR by ${+}0.66$--${+}0.74$~dB over the no-disc baseline, with a matching LPIPS drop (0.082$\to$0.069); they are nearly equivalent to each other. Lowering the perceptual weight to $0.5$ is the best loss tweak (${+}1.15$~dB), while raising it to $3.0$ helps less (${+}0.35$~dB). Lowering KL to $10^{-7}$ matches the 3D disc gain (${+}0.74$~dB). These gains are small relative to width (${+}2.40$~dB) or the temporal-difference loss (${+}1.83$~dB), and none removes bleeding.
 
 \begin{table}[t]
 \centering
-\caption{Loss configuration under joint compression (fused, TC on). Default row is E1d. Discriminator and weight arms are \textbf{[RUNNING]}.}
+\caption{Loss configuration under joint compression (fused, TC on). Default row is E1d.}
 \label{tab:loss}
 \begin{tabular}{lrrr}
 \toprule
@@ -581,13 +580,12 @@ Loss config & PSNR $\uparrow$ & LPIPS $\downarrow$ & Bleed-W $\uparrow$ \\
 \midrule
 none, perc $1.5$, KL $10^{-6}$ (default) & 25.31 & 0.082 & 0.919 \\
 \midrule
-3D PatchGAN, views flattened            & \textbf{[RUNNING]} & --- & --- \\
-joint 4D discriminator                  & \textbf{[RUNNING]} & --- & --- \\
-3D PatchGAN, views stacked on channels  & \textbf{[RUNNING]} & --- & --- \\
+3D PatchGAN, views flattened            & 26.05 & 0.069 & 0.903 \\
+joint 4D discriminator                  & 25.97 & 0.069 & 0.910 \\
 \midrule
-perceptual weight $0.5$                 & \textbf{[RUNNING]} & --- & --- \\
-perceptual weight $3.0$                 & \textbf{[RUNNING]} & --- & --- \\
-KL weight $10^{-7}$                     & \textbf{[RUNNING]} & --- & --- \\
+perceptual weight $0.5$                 & \textbf{26.46} & 0.071 & 0.882 \\
+perceptual weight $3.0$                 & 25.66 & 0.069 & 0.901 \\
+KL weight $10^{-7}$                     & 26.05 & 0.069 & 0.907 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -595,19 +593,19 @@ KL weight $10^{-7}$                     & \textbf{[RUNNING]} & --- & --- \\
 
 \subsubsection{LoRA rank}
 
-We sweep rank $\{8,32,128\}$ at the E1c setting (fused, TC off), holding data and budget fixed. Rank 32 is the protocol default (31.21~dB). \textbf{[RUNNING]} Ranks 8 and 128 are jobs 43--44 (5528054--5528055).
+We sweep rank $\{8,32,128\}$ at the E1c setting (fused, TC off), holding data and budget fixed (Tab.~\ref{tab:lora_rank}). Rank 8 matches the default rank 32 (31.23 vs.\ 31.21~dB). Rank 128 gains ${+}0.92$~dB (32.13~dB) and improves LPIPS (0.044$\to$0.033). The plateau starts by rank 8; larger ranks help a little but are not required for the main claims, which use rank 32.
 
 \begin{table}[t]
 \centering
-\caption{LoRA rank at fused TC=off. Rank 32 is E1c; 8 and 128 are \textbf{[RUNNING]}.}
+\caption{LoRA rank at fused TC=off. Rank 32 is E1c.}
 \label{tab:lora_rank}
 \begin{tabular}{lrrr}
 \toprule
 LoRA rank & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim \\
 \midrule
-8     & \textbf{[RUNNING]} & --- & --- \\
+8            & 31.23 & 0.038 & 0.979 \\
 32 (default) & 31.21 & 0.044 & 0.907 \\
-128   & \textbf{[RUNNING]} & --- & --- \\
+128          & \textbf{32.13} & \textbf{0.033} & 0.979 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -619,21 +617,21 @@ We compare a staged warm-start of the joint model from a temporal-compression ch
 
 \subsubsection{Pre-fusion encoder LoRA}
 
-The default places LoRA only after fusion (bottleneck and decoder). Adding LoRA on the frozen per-view encoder stem ($E_{\mathrm{pre}}$) tests whether the joint-compression failure is an under-adapted encoder or a bottleneck after fusion (Tab.~\ref{tab:lora_before}). \textbf{[RUNNING]} Jobs 45 (E1d) and 46 (E1c) are 5528056--5528057. If pre-fusion LoRA does not close the joint-compression gap, the information is missing from the latent, not from the stem.
+The default places LoRA only after fusion (bottleneck and decoder). Adding LoRA on the frozen per-view encoder stem ($E_{\mathrm{pre}}$) tests whether the joint-compression failure is an under-adapted encoder or a bottleneck after fusion (Tab.~\ref{tab:lora_before}). Under TC off, before+after gains ${+}0.26$~dB (31.47 vs.\ 31.21). Under TC on --- the joint-compression setting --- the gain is ${+}0.67$~dB (25.98 vs.\ 25.31), still far from closing the gap to the per-view TC reference (31.50~dB). Adapting the stem helps a little; the information is still missing from the latent.
 
 \begin{table}[t]
 \centering
-\caption{Pre-fusion encoder LoRA. Default is after-only. Both ``before+after'' arms are \textbf{[RUNNING]}.}
+\caption{Pre-fusion encoder LoRA. Default is after-only.}
 \label{tab:lora_before}
 \begin{tabular}{llrrr}
 \toprule
 TC & LoRA placement & PSNR $\uparrow$ & LPIPS $\downarrow$ & Bleed-W $\uparrow$ \\
 \midrule
 off & after only (E1c)     & 31.21 & 0.044 & 0.974 \\
-off & before + after       & \textbf{[RUNNING]} & --- & --- \\
+off & before + after       & 31.47 & 0.038 & 0.972 \\
 \midrule
 on  & after only (E1d)     & 25.31 & 0.082 & 0.919 \\
-on  & before + after       & \textbf{[RUNNING]} & --- & --- \\
+on  & before + after       & 25.98 & 0.069 & 0.903 \\
 \bottomrule
 \end{tabular}
 \end{table}
