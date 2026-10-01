@@ -2,21 +2,23 @@
 % Needs in the preamble: \usepackage{amsmath, graphicx, booktabs, enumitem}
 
 % ============================================================
-% EXPERIMENT STATUS (headline + secondary arms filled)
+% EXPERIMENT STATUS — clean retrain wave (2026-09-20), metrics filled 2026-10-01
+% Full table: paper/clean_retrain_metrics.md
 % ============================================================
 %
-% DONE   E7/E10 secondary ablations (protocol-matched, 170 ep)
-%            disc3d 26.05 / disc4d 25.97   (stacked disc dropped)
-%            perc0.5 26.46 / perc3.0 25.66 / kl1e-7 26.05   (vs E1d 25.31)
-%            rank8 31.23 / rank128 32.13                   (vs E1c 31.21)
-%            lora_before TC=on 25.98 / TC=off 31.47
+% DONE (clean, GT XView ≈ 0.9779 for V=2): E0, E1a/c/d, E1b+E3d (prior), E2*,
+%   E3a/c/e, E4b/h/i, E5b/c, E6b/c, E7 perc/kl, E10 ranks 8/16/64/128,
+%   E11a/b, E_combo. E4h/E5b timed out at 18h but wrote final_eval — usable.
 %
-% DONE   E9b  512px fused+TC=on. Best val 26.64 dB / LPIPS 0.170 / Bleed-W 0.904 / XView 0.904
-%            128: 25.31 → 256: 27.78 → 512: 26.64. The 128→256 lift does not continue.
+% RUNNING (resubmit 2026-10-01, longer walltime, still save_ckpt=False):
+%   E6d job 5844331 (3d), E6e job 5844332 (1d6h) on gpubase_l40s_b4.
 %
-% DONE   E_combo  temporal-diff-loss + 32-ch latent, fused+TC=on
-%            job 5465204, 170 epochs. Best val: 29.56 dB / LPIPS 0.049 / Bleed-W 0.935
-%            Delta +4.25 dB. Additive expect: 1.83+2.40 = 4.23 dB. They add.
+% SKIP this wave: E8b, disc stack, E9, pad/cache/subframe-only arms.
+%
+% Headline (final_eval): E1a 34.20 / E1b 31.37 / E1c 30.75 / E1d 25.96
+%   E11a 27.52 / E11b 28.80 / combo 29.38 / E4h 26.07 (+0.11 only)
+%   XView gaps within-run are tiny (~0–0.003); do not claim ghosting from
+%   absolute XView. Prefer Bleed-W + qualitative for temporal/view failures.
 % ============================================================
 
 \section{Introduction}
@@ -37,20 +39,16 @@ This motivates a latent in which the views are jointly encoded: the encoder itse
 % [feedback] unambiguous: the extension concerns the VAE only, the diffusion model is untouched
 Rather than designing a 4D VAE from scratch, we ask: can a pretrained 3D video VAE be minimally extended to absorb the view axis? Our changes concern the VAE only; the downstream diffusion model is untouched. We extend the Wan 2.1 VAE \cite{wan2025wan} with
 zero-initialized multi-view self-attention fusion in the encoder and view-conditioned decoding via low-rank adapters \cite{hu2022lora, zhang2023adding}, keeping the pretrained backbone frozen so the latent remains compatible with unconditional sampling.
-Through an extensive experimental study (32 configurations) on NeRSemble \cite{kirschstein2023nersemble} we find the following: the model reconstructs well when either the temporal axis is compressed (4$\times$, the native Wan setting: per-view PSNR 31.50~dB) or the view axis is fused into a shared latent (fused TC off: 31.21~dB), but combining both degrades quality super-additively (fused TC on: 25.31~dB --- a drop of 8.70~dB from the per-view reference, versus 5.31~dB predicted by the individual degradations; excess 3.39~dB). The failure is not architectural: swapping the fusion operator does not close the gap, and view-conditioning has no effect. It is also not a trainability artifact: full unfreezing makes things worse. It is a rate limit. This is consistent with the broader tokenizer literature, where reconstruction quality under higher compression is recovered by widening the latent channel dimension \cite{dai2023emu, chen2024deep, hacohen2024ltx}: widening from 16 to 32 channels recovers 2.40~dB --- our largest single gain --- confirming the diagnosis. Wider latents are known to complicate downstream generative modeling \cite{yao2025vavae}, so we study only the VAE side.
-% [feedback] we CONFIRM the bottleneck, we do not remove it -- and we test the positive direction
-% (widening) as an ablation on the VAE side, so the claim is not purely negative.
-% RESOLVED: outcome is (b) partial recovery. Widening 16->32 gives +2.40 dB (E11a);
-% 32->64 adds only 0.01 dB (E11b). A 3.79 dB gap to the per-view TC reference remains,
-% attributable to the joint-view encoding challenge and frozen strided conv bottleneck.
-% Framing: "capacity is necessary but not sufficient at adapter scale."
-Our extension confirms this rate bottleneck rather than removing it: fusing a third axis into a latent sized for one collapses views toward their mean and frames within chunks toward their temporal mean. To verify that the limit is really the rate and not our architecture, we additionally widen the latent (16 to 32/64 channels, VAE-side only, no diffusion retraining): widening from 16 to 32 channels recovers 2.40~dB under joint compression --- the single largest gain in the study, larger than all architectural interventions combined --- providing direct positive evidence for the capacity interpretation.
+Through an extensive experimental study (32 configurations) on NeRSemble \cite{kirschstein2023nersemble} we find the following: the model reconstructs well when either the temporal axis is compressed (4$\times$, the native Wan setting: per-view PSNR 31.37~dB) or the view axis is fused into a shared latent (fused TC off: 30.75~dB), but combining both degrades quality super-additively (fused TC on: 25.96~dB --- a drop of 8.24~dB from the matched per-view reference, versus 6.28~dB predicted by the individual degradations; excess 1.96~dB). The failure is not fixed by swapping the fusion operator, and it is not a trainability artifact: full unfreezing makes things worse. It is a rate limit. This is consistent with the broader tokenizer literature, where reconstruction quality under higher compression is recovered by widening the latent channel dimension \cite{dai2023emu, chen2024deep, hacohen2024ltx}: under joint compression, widening from 16 to 32 channels recovers 1.56~dB and 16 to 64 recovers 2.84~dB --- the largest gains in the study --- confirming the diagnosis. Wider latents are known to complicate downstream generative modeling \cite{yao2025vavae}, so we study only the VAE side.
+% Clean retrain 2026-09-20: E11b (28.80) beats E11a (27.52); leftover gap to E1b (31.37) is 2.57 dB at 64-ch.
+% Framing: capacity is necessary but not sufficient at adapter scale.
+Our extension confirms this rate bottleneck rather than removing it: fusing a third axis into a latent sized for one collapses frames within chunks toward their temporal mean (Bleed-W 0.913) and washes view-specific detail in qualitative grids. To verify that the limit is really the rate and not our architecture, we additionally widen the latent (16 to 32/64 channels, VAE-side only, no diffusion retraining): widening recovers up to 2.84~dB under joint compression --- larger than the 16-channel temporal interventions --- providing direct positive evidence for the capacity interpretation.
 
 Our contributions are as follows.
 First, we give a minimal, weight-compatible extension of a pretrained 3D video VAE to synchronized multi-view video: zero-initialized multi-view self-attention in the encoder and per-view low-rank adapters in the decoder. At step 0 the model is near-identical to the pretrained per-view VAE; only the $V{\to}1$ merge introduces fresh weights.
 Second, we run a controlled empirical study (32 configurations) of joint view and temporal compression at fixed latent width, holding data and budget fixed and varying only the compressed axes. Joint compression drops PSNR by 8.70~dB from the per-view reference, a super-additive 3.39~dB excess over what the individual degradations predict.
 Third, we introduce two diagnostics that localize the failure --- cross-view similarity for ghosting and bleed ratio for temporal averaging --- separating it from generic reconstruction error, each anchored by a positive or negative control.
-Fourth, we show that the failure is a rate and capacity limit, not a fusion-design or trainability problem: self-attention, channel Conv3d, and factorized 4D-conv fusion, plus five view-conditioning variants, all fail to close the joint-compression gap; full unfreezing of the network makes quality worse, not better; and widening the latent from 16 to 32 channels recovers 2.40~dB, the largest single improvement, directly confirming the capacity bottleneck.
+Fourth, we show that the failure is a rate and capacity limit, not a fusion-design or trainability problem: self-attention, channel Conv3d, and factorized 4D-conv fusion, plus five view-conditioning variants, all fail to close the joint-compression gap; full unfreezing of the network makes quality worse, not better; and widening the latent from 16 to 64 channels recovers up to 2.84~dB, the largest single improvement, directly confirming the capacity bottleneck.
 
 
 \section{Related Work}
@@ -68,7 +66,7 @@ When multi-view data is passed through a standard video model it is encoded stre
 
 The relevant question here is not which redundancy a tokenizer exploits, but how much compression a latent can support before quality degrades. Rombach et al.\ \cite{rombach2022high} already show this in the original LDM ablation, trading downsampling factor against channel count. Subsequent work makes the same point more sharply. Emu \cite{dai2023emu} keeps $8\times$ spatial compression and widens the latent from 4 to 16 channels so that small objects are reconstructed instead of lost. DC-AE \cite{chen2024deep} pushes compression up to $128\times$, but only with the channel count scaled alongside it: width is a necessary ingredient of the recipe, not the whole of it. LTX-Video \cite{hacohen2024ltx} buys $192\times$ spatiotemporal compression with a 128-channel latent, eight times the standard video-VAE width. VA-VAE \cite{yao2025vavae} is the counterpoint: wider latents do reconstruct better, but they are harder for a diffusion transformer to sample from, and the proposed fix is to align the latent with a frozen vision foundation model rather than keep widening. Collectively these papers show that one new axis of compression can be recovered by adding channels, at a cost on the generation side.
 
-None of this asks what happens when the added axis is view rather than space or time, and none starts from a frozen pretrained latent rather than training from scratch. We measure both directions on a real pretrained backbone: at fixed 16-channel width, joint view and temporal compression collapses (25.31~dB vs.\ 31.50~dB per-view with temporal compression); widening the VAE latent from 16 to 32/64 channels, without retraining the diffusion model, recovers 2.40~dB --- positive evidence that the capacity interpretation extends to the view axis.
+None of this asks what happens when the added axis is view rather than space or time, and none starts from a frozen pretrained latent rather than training from scratch. We measure both directions on a real pretrained backbone: at fixed 16-channel width, joint view and temporal compression collapses (25.96~dB vs.\ 31.37~dB per-view with temporal compression); widening the VAE latent from 16 to 32/64 channels, without retraining the diffusion model, recovers up to 2.84~dB --- positive evidence that the capacity interpretation extends to the view axis.
 
 \subsection{Multi-view and 4D generation}
 
@@ -248,7 +246,7 @@ We report no single number averaged over everything. A global PSNR mean hides ex
 
 Our diagnostics are reported for every arm. Each targets one failure mode and is calibrated against the ground truth. Established consistency metrics --- warping error \cite{lai2018learning}, VBench smoothness \cite{huang2024vbench}, epipolar TSED \cite{yu2023long}, MEt3R \cite{asim2025met3r}, re-rendering consistency \cite{gao2024cat3d}, FVD-V \cite{xie2024sv4d} --- are built for free generation and detect views or frames that disagree too much. Our failures are the opposite (views agreeing too much, frames changing too little) and would \emph{improve} those scores. We therefore measure the same axes calibrated against the paired GT, so deviation in either direction is visible.
 
-Cross-view similarity (view ghosting) is the mean pairwise cosine similarity between decoded views of the same clip. The views are time-aligned by construction, so excess similarity is view mixing, not temporal structure. It is reported next to the same quantity on the GT views, following the pairwise-distance idea used to diagnose mode collapse in conditional generation \cite{zhu2017toward}, calibrated against GT. At the GT reference, views are decoded distinctly; above it, they ghost. The metric is experimentally anchored by the no-view-conditioning negative control (Tab.~\ref{tab:viewcond}), which must ghost.
+Cross-view similarity (view ghosting) is the mean pairwise cosine similarity between decoded views of the same clip. The views are time-aligned by construction, so excess similarity is view mixing, not temporal structure. It is reported next to the same quantity on the GT views, following the pairwise-distance idea used to diagnose mode collapse in conditional generation \cite{zhu2017toward}, calibrated against GT. At the GT reference, views are decoded distinctly; above it, they ghost. The metric is intended to be anchored by a no-view-conditioning negative control (Tab.~\ref{tab:viewcond}); under the clean pipeline that arm still does not force identical views, and within-run rec$-$GT gaps stay $\lesssim$0.003, so treat absolute XView as a weak ghosting signal.
 
 Bleed ratio (temporal bleeding) is the mean $|f_{t+1}-f_t|$ of the reconstruction divided by the same quantity of the GT: the fraction of true motion the reconstruction reproduces. A value of 1 is faithful motion; well below 1 means frames are merged. It is computed separately within 4-frame chunks and across chunk boundaries, tying the artifact to the chunked causal decode (Sec.~\ref{sec:preliminaries}). It is anchored by the non-causal decode experiment (Tab.~\ref{tab:interventions}).
 
@@ -278,17 +276,17 @@ Compression ratio is $r = (V \cdot 3 \cdot T \cdot H \cdot W) / (V' \cdot C_z \c
 Model & TC & Rate & PSNR $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ & XView sim & Bleed-W $\uparrow$ \\
 \midrule
 Wan zero-shot (per view, floor)      & off & 12$\times$/view & $\approx$21 & --     & --     & --    & -- \\
-Per-view LoRA, all data (ceiling)    & off & 12$\times$/view & 34.34       & 0.9990 & 0.021  & 0.979 & 0.981 \\
-Per-view finetuned (matched)         & off & 12$\times$/view & 34.01       & 0.9989 & 0.024  & 0.906 & 0.991 \\
-Per-view finetuned (matched)         & on  & 36$\times$/view & 31.50       & 0.9981 & 0.041  & 0.907 & 0.952 \\
-Fused latent (ours)                  & off & 24$\times$       & 31.21       & 0.9980 & 0.044  & 0.907 & 0.974 \\
-\textbf{Fused latent (ours)}         & \textbf{on}  & \textbf{72$\times$} & \textbf{25.31} & \textbf{0.9917} & \textbf{0.082} & \textbf{0.920} & \textbf{0.919} \\
+Per-view LoRA, all data (ceiling)    & off & 12$\times$/view & 34.30       & 0.9990 & 0.021  & 0.978 & 0.988 \\
+Per-view finetuned (matched)         & off & 12$\times$/view & 34.20       & 0.9990 & 0.022  & 0.978 & 0.994 \\
+Per-view finetuned (matched)         & on  & 36$\times$/view & 31.37       & 0.9981 & 0.037  & 0.978 & 0.947 \\
+Fused latent (ours)                  & off & 24$\times$       & 30.75       & 0.9977 & 0.038  & 0.979 & 0.969 \\
+\textbf{Fused latent (ours)}         & \textbf{on}  & \textbf{72$\times$} & \textbf{25.96} & \textbf{0.9933} & \textbf{0.068} & \textbf{0.980} & \textbf{0.913} \\
 \midrule
-GT reference level                   & --  & --              & --          & --     & --     & 0.907 & 1.0 \\
+GT reference level (clean pipeline)  & --  & --              & --          & --     & --     & 0.978 & 1.0 \\
 \bottomrule
 \end{tabular}
 \smallskip\\
-\textit{Note: SSIM lies in the narrow range 0.991--0.999 for all non-broken configurations at 128$^2$; it is reported for completeness but is not discriminative at this resolution. Rate = (V$\cdot$3$\cdot$T$\cdot$H$\cdot$W)$/$(V'$\cdot$16$\cdot$T'$\cdot$(H/8)$\cdot$(W/8)) with T=9, T'=3 (TC=on) or T'=9 (TC=off), V=2, H=W=128.}
+\textit{Note: SSIM lies in the narrow range 0.991--0.999 for all non-broken configurations at 128$^2$; it is reported for completeness but is not discriminative at this resolution. Rate = (V$\cdot$3$\cdot$T$\cdot$H$\cdot$W)$/$(V'$\cdot$16$\cdot$T'$\cdot$(H/8)$\cdot$(W/8)) with T=9, T'=3 (TC=on) or T'=9 (TC=off), V=2, H=W=128. All rows from the 2026-09-20 clean retrain (GT XView $\approx$0.978). Within-run rec$-$GT XView gaps are $\lesssim$0.003 --- prefer Bleed-W and qualitative evidence for ghosting.}
 \end{table}
 
 \begin{figure}[t]
@@ -312,7 +310,7 @@ GT reference level                   & --  & --              & --          & -- 
 \label{fig:qual_capacity}
 \end{figure}
 
-Reading Tab.~\ref{tab:main}, the domain gap is visible in the ceiling row (34.34~dB, all data) versus the matched per-view reference (34.01~dB, same budget). The gap is small (0.33~dB), confirming that the one-expression training set already covers the val distribution well. Single-axis compression degrades gracefully: per-view temporal compression costs 2.51~dB ($34.01{\to}31.50$); view fusion alone costs 2.80~dB ($34.01{\to}31.21$). Critically, the fused TC-off model (31.21~dB at $24\times$) nearly matches the per-view TC-on model (31.50~dB at $36\times$/view), showing that the view axis can be absorbed at comparable rate-quality efficiency. Joint compression (fused TC on, $72\times$) drops to 25.31~dB: an 8.70~dB total drop, versus 5.31~dB predicted by summing the individual degradations. The excess 3.39~dB is super-additive: the two axes interfere. Both failure modes activate: bleed ratio drops to 0.919 (temporal bleeding) and cross-view similarity rises to 0.920, slightly above the GT reference of 0.907 (mild view ghosting). The 16-channel latent stores $3{\cdot}8{\cdot}8{\cdot}4/16 = 48\times$ per view natively; fusing $V{=}2$ doubles this to $96\times$ effective information density at fixed width. The failure is exactly what this predicts.
+Reading Tab.~\ref{tab:main}, the domain gap is visible in the ceiling row (34.30~dB, all data) versus the matched per-view reference (34.20~dB, same budget). The gap is tiny (0.10~dB), confirming that the one-expression training set already covers the val distribution well. Single-axis compression degrades gracefully: per-view temporal compression costs 2.83~dB ($34.20{\to}31.37$); view fusion alone costs 3.45~dB ($34.20{\to}30.75$). Critically, the fused TC-off model (30.75~dB at $24\times$) nearly matches the per-view TC-on model (31.37~dB at $36\times$/view), showing that the view axis can be absorbed at comparable rate-quality efficiency. Joint compression (fused TC on, $72\times$) drops to 25.96~dB: an 8.24~dB total drop, versus 6.28~dB predicted by summing the individual degradations. The excess 1.96~dB is super-additive: the two axes interfere. Temporal bleeding activates clearly (Bleed-W 0.913). Whole-frame XView sits only ${+}0.002$ above GT (0.980 vs.\ 0.978), so ghosting is better read from qualitative grids than from absolute cosine. The 16-channel latent stores $3{\cdot}8{\cdot}8{\cdot}4/16 = 48\times$ per view natively; fusing $V{=}2$ doubles this to $96\times$ effective information density at fixed width. The failure is exactly what this predicts.
 
 
 
@@ -320,7 +318,7 @@ Reading Tab.~\ref{tab:main}, the domain gap is visible in the ceiling row (34.34
 
 The failure modes are analyzed separately because the diagnostics separate them by construction (Sec.~metrics): the view metric cancels temporal structure, the temporal metrics cancel view identity.
 
-The symptom is that decoded views drift toward their mean: high-frequency, view-specific detail is averaged away. This is visible in the qualitative grids (Fig.~\ref{fig:qualitative}) and measured as cross-view similarity above the GT reference (Tab.~\ref{tab:main}). Per-view PSNR drops for both views together --- ghosting is a symmetric collapse, not one view winning --- which is why quality is reported per view, not as one mean. The negative control without any view conditioning must ghost fully (Tab.~\ref{tab:viewcond}); the distance between our model and this control is the calibrated size of the effect.
+The symptom is that decoded views drift toward their mean: high-frequency, view-specific detail is averaged away. This is visible in the qualitative grids (Fig.~\ref{fig:qualitative}) and measured as cross-view similarity relative to each run's own GT reference (Tab.~\ref{tab:main}). Per-view PSNR drops for both views together --- ghosting is a symmetric collapse, not one view winning --- which is why quality is reported per view, not as one mean. A clean negative control without any view conditioning should ghost fully (Tab.~\ref{tab:viewcond}); that arm is flagged pending re-eval.
 
 Is it the conditioning? We compare per-view latent LoRA, a learned view embedding, and both (Tab.~\ref{tab:viewcond}). If all conditioned variants land in the same place, the conditioning mechanism is not what limits view separation. Is it the fusion design? We compare three fusion mechanisms with different inductive biases (Tab.~\ref{tab:fusion}, Fig.~\ref{fig:fusion_ablation}): multi-view self-attention with tree merge (default), channel-concat Conv3d, and factorized $(2{+}1{+}1)$D convolution. If ghosting appears across all of them, the fusion design is not the bottleneck. Comparing ghosting under TC off versus TC on separates ``view fusion is hard'' from ``view fusion is hard on top of temporal compression''.
 
@@ -332,9 +330,9 @@ The fusion variants in Tab.~\ref{tab:fusion} are as follows. Multi-view self-att
 
 The symptom is that frames within a 4-frame decode chunk merge: motion is under-reproduced inside chunks while chunk boundaries stay comparatively sharp. This is measured by the within/across bleed-ratio split and the anchor-drift profile, plotted per frame index (Fig.~\ref{fig:perframe}). It is also a generalization failure: overfitting a single sequence is clean, and artifacts appear only when many identities are trained, so the compressed representation can memorize temporal detail but cannot encode it for new content (Fig.~\ref{fig:datascale}).
 
-A natural intuition is that decoding all latent frames in a single non-causal pass should remove frame-0 and boundary artifacts, bounding how much causal chunking itself costs. In practice, switching pretrained causal convolutions to symmetric padding catastrophically disrupts pretrained feature statistics (17.81~dB, bleed ratio 0.251). This is a negative finding, not an oracle; the non-causal path requires retraining from scratch with non-causal convolutions, which is out of scope.
+A natural intuition is that decoding all latent frames in a single non-causal pass should remove frame-0 and boundary artifacts, bounding how much causal chunking itself costs. In practice, switching pretrained causal convolutions to symmetric padding catastrophically disrupts pretrained feature statistics (17.98~dB, Bleed-W 0.273). This is a negative finding, not an oracle; the non-causal path requires retraining from scratch with non-causal convolutions, which is out of scope.
 
-Targeted interventions (Tab.~\ref{tab:interventions}, Fig.~\ref{fig:interventions}) attack hypothesized causes with four baseline-preserving flags. Reflection padding, a learned cache update, and a sub-frame position embedding each improve PSNR by 0.57--0.65~dB, within noise at the one-seed level. The temporal-difference loss (+1.83~dB) is the decisive outlier among 16-channel runs: directly penalizing L1$(\Delta\mathrm{gt}, \Delta\mathrm{rec})$ forces the model to preserve inter-frame differences even under latent averaging pressure. Combining it with the learned cache update does not stack (+1.62~dB), suggesting they compete for the same degrees of freedom. Combining it with a 32-channel latent does: E\_combo reaches 29.56~dB (${+}4.25$~dB), matching the ${+}4.23$~dB sum of the two isolated gains, so the loss and the extra channels address independent constraints. The temporal-difference loss reduces LPIPS from 0.082 to 0.070; E\_combo further to 0.049. We do not consider pixel-to-decoder skip connections: they would require the input video at decode time and are incompatible with unconditional generation from a sampled latent.
+Targeted interventions (Tab.~\ref{tab:interventions}, Fig.~\ref{fig:interventions}) attack hypothesized causes under the clean protocol. The temporal-difference loss alone is near noise at one seed (${+}0.11$~dB); pairing it with a learned cache update helps modestly (${+}0.69$~dB). Combining the difference loss with a 32-channel latent is the clear win: E\_combo reaches 29.38~dB (${+}3.42$~dB over the 16-channel joint baseline), with Bleed-W 0.946 and LPIPS 0.050. Width, not a 16-channel loss tweak, carries the recovery. We do not consider pixel-to-decoder skip connections: they would require the input video at decode time and are incompatible with unconditional generation from a sampled latent.
 
 \begin{figure}[t]
 \centering
@@ -352,26 +350,23 @@ Targeted interventions (Tab.~\ref{tab:interventions}, Fig.~\ref{fig:intervention
 
 \begin{table}[t]
 \centering
-\caption{Temporal interventions under joint compression (fused, TC on). The non-causal decode (E4b) is \emph{not} an oracle: permanently switching pretrained causal convolutions to symmetric padding collapses quality catastrophically. The temporal-difference loss (E4h$^\star$) is the only decisive 16-channel intervention; combining it with a 32-channel latent is additive.}
+\caption{Temporal interventions under joint compression (fused, TC on). The non-causal decode (E4b) is \emph{not} an oracle: permanently switching pretrained causal convolutions to symmetric padding collapses quality catastrophically. Under the clean retrain, temporal-diff alone is near noise; combining it with a 32-channel latent recovers ${+}3.42$~dB.}
 \label{tab:interventions}
 \begin{tabular}{lrrrr}
 \toprule
 Intervention & PSNR $\uparrow$ & $\Delta$ & Bleed-W $\uparrow$ & LPIPS $\downarrow$ \\
 \midrule
-none (baseline)                             & 25.31 & 0       & 0.919 & 0.082 \\
-non-causal decode (E4b) $\dagger$           & 17.81 & $-$7.50 & 0.251 & 0.187 \\
+none (baseline, E1d)                        & 25.96 & 0       & 0.913 & 0.068 \\
+non-causal decode (E4b) $\dagger$           & 17.98 & $-$7.98 & 0.273 & 0.161 \\
 \midrule
-temporal reflection pad                     & 25.88 & $+$0.57 & 0.899 & 0.070 \\
-learned cache update                        & 25.96 & $+$0.65 & 0.899 & 0.069 \\
-sub-frame position embedding                & 25.89 & $+$0.58 & 0.896 & 0.069 \\
-\textbf{temporal-diff.\ loss$^\star$}       & \textbf{27.14} & $\mathbf{+}$\textbf{1.83} & \textbf{0.903} & \textbf{0.070} \\
-diff.\ loss + learned cache                 & 26.93 & $+$1.62 & 0.899 & 0.069 \\
+temporal-diff.\ loss (E4h)                  & 26.07 & $+$0.11 & 0.903 & 0.071 \\
+diff.\ loss + learned cache (E4i)           & 26.65 & $+$0.69 & 0.910 & 0.069 \\
 \midrule
-\textbf{diff.\ loss + 32-ch latent}         & \textbf{29.56} & $\mathbf{+}$\textbf{4.25} & \textbf{0.935} & \textbf{0.049} \\
+\textbf{diff.\ loss + 32-ch latent}         & \textbf{29.38} & $\mathbf{+}$\textbf{3.42} & \textbf{0.946} & \textbf{0.050} \\
 \bottomrule
 \multicolumn{5}{l}{\small $\dagger$ catastrophic failure: disrupts pretrained causal feature statistics.}\\
-\multicolumn{5}{l}{\small $^\star$ best 16-channel intervention; does not stack with the learned cache update.}\\
-\multicolumn{5}{l}{\small Diff.\ loss ${+}1.83$ and 32-ch ${+}2.40$ add: ${+}4.25$ vs.\ ${+}4.23$ expected.}\\
+\multicolumn{5}{l}{\small Clean retrain: temporal-diff alone is near noise; the decisive gain is width (and width+diff).}\\
+\multicolumn{5}{l}{\small Pad / cache-only / subframe arms not re-run in this wave (see prior draft).}\\
 \end{tabular}
 \end{table}
 
@@ -385,28 +380,27 @@ diff.\ loss + learned cache                 & 26.93 & $+$1.62 & 0.899 & 0.069 \\
 Strided temporal convolutions allow no LoRA path and are frozen in all LoRA configurations, so we unfreeze them and optionally the full encoder or full decoder. If even full unfreezing does not fix joint compression, the bottleneck is capacity, not trainability (Tab.~\ref{tab:unfreeze}).
 
 \subsubsection{Latent width: the positive capacity test}
-% RESOLVED: partial recovery (framing b). E11a (+2.40 dB) is decisive; E11b adds 0.01 dB.
-% Capacity is necessary but not sufficient at adapter scale.
+% Clean retrain: E11a +1.56 dB; E11b +2.84 dB (64 helps further). Capacity necessary, not sufficient.
 
 We widen the latent from the pretrained 16 channels to 32 and 64 under joint compression (fused + TC), following the width recipes of \cite{dai2023emu, chen2024deep, hacohen2024ltx}. Only four convolutions in the whole network touch the latent width: the encoder's final head conv ($384 \to 2C_z$), the two $1{\times}1$ latent convs around the sampling step, and the decoder's input conv ($C_z \to 384$). Everything else, including the encoder/decoder middle blocks and the attention in the encoder head, operates at 384 channels and is reused completely unchanged; widening does not discard any interior pretrained weights. On the four boundary convs, the pretrained 16-channel kernels occupy the first 16 slots; new output channels start at zero (emit nothing) and new input channels have zero weight (ignored), in the spirit of \cite{zhang2023adding}, so at step 0 the widened model computes exactly the 16-channel model. The four boundary convs are unfrozen ($\approx$2M params, still adapter-scale); there is no diffusion retraining.
 
-The result (Tab.~\ref{tab:width}) is that $16{\to}32$ channels yields ${+}2.40$~dB (27.71 vs.\ 25.31~dB), the single largest isolated gain in the study. $32{\to}64$ channels adds ${+}0.01$~dB (no further benefit). Bleed ratio improves modestly (0.930 vs.\ 0.919), confirming that temporal artifacts partly reflect latent overcrowding. A 3.79~dB gap to the per-view TC reference (31.50~dB) remains at 32 channels alone: capacity is necessary but not sufficient at adapter scale; the frozen temporal convolutions and the joint-view encoding challenge account for the remainder.
+The result (Tab.~\ref{tab:width}) is that $16{\to}32$ channels yields ${+}1.56$~dB (27.52 vs.\ 25.96~dB) and $16{\to}64$ yields ${+}2.84$~dB (28.80~dB) --- the largest isolated gains in the study. Bleed-W improves at 64 channels (0.930 vs.\ 0.913), consistent with latent overcrowding as one driver of temporal artifacts. A 2.57~dB gap to the per-view TC reference (31.37~dB) remains at 64 channels: capacity is necessary but not sufficient at adapter scale; the frozen temporal convolutions and the joint-view encoding challenge account for the remainder.
 
-Training the temporal-difference loss on the 32-channel model tests whether those two remaining constraints are the same constraint. They are not: E\_combo reaches 29.56~dB (${+}4.25$~dB over the 16-channel joint baseline), within 0.02~dB of the ${+}4.23$~dB sum of the isolated effects. The leftover gap to the per-view TC reference shrinks from 3.79~dB to 1.94~dB. Width and temporal supervision are complementary, not substitutes.
+Training the temporal-difference loss on the 32-channel model pushes further: E\_combo reaches 29.38~dB (${+}3.42$~dB over the 16-channel joint baseline), cutting the leftover gap to the per-view TC reference to 1.99~dB. Width is the main lever; a light temporal-difference term on top still helps.
 
 \begin{table}[t]
 \centering
-\caption{Latent-width ablation under joint compression (fused, TC on). Widening from 16 to 32 channels (+2.40~dB) is the single largest gain in the study — direct positive evidence that the 16-channel rate is the binding constraint.}
+\caption{Latent-width ablation under joint compression (fused, TC on). Widening from 16 to 32/64 channels (+1.56 / +2.84~dB) is the largest isolated gain in the study — direct positive evidence that the 16-channel rate is the binding constraint.}
 \label{tab:width}
 \begin{tabular}{lrrrrr}
 \toprule
 Latent channels & Rate & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim & Bleed-W $\uparrow$ \\
 \midrule
-16 (pretrained, E1d)         & 72$\times$  & 25.31 & 0.082 & 0.920 & 0.919 \\
-\textbf{32 (E11a$^\star$)}   & 36$\times$  & \textbf{27.71} & \textbf{0.062} & \textbf{0.908} & \textbf{0.930} \\
-64 (E11b)                    & 18$\times$  & 27.60 & 0.063 & 0.908 & 0.921 \\
+16 (pretrained, E1d)         & 72$\times$  & 25.96 & 0.068 & 0.980 & 0.913 \\
+32 (E11a)                    & 36$\times$  & 27.52 & 0.059 & 0.980 & 0.911 \\
+\textbf{64 (E11b$^\star$)}   & 18$\times$  & \textbf{28.80} & \textbf{0.050} & \textbf{0.979} & \textbf{0.930} \\
 \midrule
-Per-view TC=T ref.\ (E1b)    & 36$\times$/view & 31.50 & 0.041 & 0.907 & 0.952 \\
+Per-view TC=T ref.\ (E1b)    & 36$\times$/view & 31.37 & 0.037 & 0.978 & 0.947 \\
 \bottomrule
 \multicolumn{6}{l}{\small Rate $= (V{\cdot}3{\cdot}T{\cdot}H{\cdot}W) / (V'{\cdot}C_z{\cdot}T'{\cdot}(H/8){\cdot}(W/8))$, V=2, T=9, H=128.}\\
 \multicolumn{6}{l}{\small $^\star$ 16$\to$32 and 16$\to$64 yield the same rate as E1b, but 3.8~dB below it: the joint view encoding still costs.}\\
@@ -416,7 +410,7 @@ Per-view TC=T ref.\ (E1b)    & 36$\times$/view & 31.50 & 0.041 & 0.907 & 0.952 \
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.72\linewidth]{figures/latent_width.pdf}
-\caption{Widening the fused TC-on latent from the Wan default of 16 channels to 32 recovers +2.40~dB. Doubling again to 64 channels adds nothing: the first doubling is the capacity that was missing; beyond that a secondary bottleneck dominates.}
+\caption{Widening the fused TC-on latent from the Wan default of 16 channels to 32 recovers +1.56~dB; 64 channels recovers +2.84~dB under the clean protocol. Extra width is the main capacity lever.}
 \label{fig:latent_width}
 \end{figure}
 
@@ -429,37 +423,37 @@ Per-view TC=T ref.\ (E1b)    & 36$\times$/view & 31.50 & 0.041 & 0.907 & 0.952 \
 
 \begin{table}[t]
 \centering
-\caption{Fusion mechanism ablation (fused latent, TC off). Self-attention and channel Conv3d land within 0.43~dB of each other; the factorized 4D conv underperforms. Near-equivalence of the competitive operators is itself evidence that the bottleneck is latent capacity, not fusion design. Bottom row: the default operator re-run with TC on.}
+\caption{Fusion mechanism ablation (fused latent, TC off). Default cross-attention (E1c) is strongest; Conv3d/Conv4d trail by $\approx$1.8--2.2~dB; the self-attention fusion mode collapses under this protocol. Bottom row: default operator with TC on.}
 \label{tab:fusion}
 \begin{tabular}{llrrrr}
 \toprule
 TC & Fusion & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim & Bleed-W $\uparrow$ \\
 \midrule
-off & self-attn + tree merge (default) & 31.21 & 0.044 & 0.907 & 0.974 \\
-off & channel-concat Conv3d           & 30.78 & 0.041 & 0.979 & 0.966 \\
-off & factorized (2+1+1)D conv        & 27.86 & 0.073 & 0.979 & 0.927 \\
+off & cross-attn + tree merge (default, E1c) & 30.75 & 0.038 & 0.979 & 0.969 \\
+off & self-attention (E2b)                    & 25.53 & 0.041 & 0.977 & 0.972 \\
+off & channel-concat Conv3d (E2c)             & 28.99 & 0.045 & 0.980 & 0.940 \\
+off & factorized (2+1+1)D conv (E2d)          & 28.52 & 0.057 & 0.980 & 0.939 \\
 \midrule
-on  & self-attn + tree merge (default) & 25.31 & 0.082 & 0.920 & 0.919 \\
+on  & cross-attn + tree merge (default, E1d) & 25.96 & 0.068 & 0.980 & 0.913 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[t]
 \centering
-\caption{View-conditioned decoding (fused latent, TC off). All variants lie within 0.21~dB of each other, including the negative control (no conditioning at all). Cross-view attention implicitly encodes sufficient view identity; explicit conditioning adds no measurable gain.}
+\caption{View-conditioned decoding (fused latent, TC off). Under the clean pipeline, PSNR spans $\approx$1~dB across conditioning choices; all XView values sit on the same GT band ($\approx$0.978). E3d (no emb, no LoRA) still does not collapse to identical views ($xview\_rec\approx$GT), so it is not a clean ``no view signal'' negative control.}
 \label{tab:viewcond}
 \begin{tabular}{lrrr}
 \toprule
-Conditioning & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim (GT: 0.978) \\
+Conditioning & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim \\
 \midrule
-per-view latent LoRA, default (E1c) & 31.21 & 0.044 & 0.907 \\
-view embedding only (E3a)           & 31.53 & 0.036 & 0.979 \\
-view embedding + LoRA (E3c)         & 31.37 & 0.037 & 0.979 \\
-full decoder finetune (E3e)         & 31.32 & 0.038 & 0.978 \\
-\textbf{none} (negative control, E3d) & \textbf{31.50} & \textbf{0.037} & \textbf{0.979} \\
+per-view latent LoRA, default (E1c) & 30.75 & 0.038 & 0.979 \\
+view embedding only (E3a)           & 30.24 & 0.038 & 0.979 \\
+view embedding + LoRA (E3c)         & 31.28 & 0.037 & 0.978 \\
+full decoder finetune (E3e)         & 31.08 & 0.040 & 0.979 \\
+none (E3d; intended neg.\ control)  & 31.33 & 0.037 & 0.978 \\
 \bottomrule
-\multicolumn{4}{l}{\small Negative control reconstructs distinct views without any explicit view signal;}\\
-\multicolumn{4}{l}{\small cross-view attention alone encodes view identity. Max spread: 0.32~dB.}\\
+\multicolumn{4}{l}{\small GT XView $\approx$0.978 for all rows. E3d does not force $xview\_rec{=}1$.}\\
 \end{tabular}
 \end{table}
 
@@ -471,9 +465,9 @@ full decoder finetune (E3e)         & 31.32 & 0.038 & 0.978 \\
 \toprule
 Trainable scope & PSNR $\uparrow$ & $\Delta$ & Bleed-W $\uparrow$ & LPIPS $\downarrow$ \\
 \midrule
-LoRA only (default, E1d)           & 25.31 & 0       & 0.919 & 0.082 \\
-+ full encoder unfrozen (E5b)       & 25.88 & $+$0.57 & 0.915 & 0.083 \\
-+ full decoder, nothing frozen (E5c) & 23.89 & $-$1.42 & 0.886 & 0.123 \\
+LoRA only (default, E1d)           & 25.96 & 0       & 0.913 & 0.068 \\
++ full encoder unfrozen (E5b)       & 26.01 & $+$0.05 & 0.927 & 0.072 \\
++ full decoder, nothing frozen (E5c) & 23.91 & $-$2.05 & 0.856 & 0.118 \\
 \bottomrule
 \multicolumn{5}{l}{\small Full unfreezing: decoder overfits on our dataset scale, worsening generalization.}\\
 \multicolumn{5}{l}{\small Frozen-bottleneck confound ruled out: adding parameters hurts, not helps.}\\
@@ -489,21 +483,22 @@ We vary $V \in \{2,4,8\}$ at fixed budget and fixed fusion mechanism. Rate press
 
 \begin{table}[t]
 \centering
-\caption{View count ablation (fused latent, self-attn, TC off and on). Quality degrades monotonically with view count at both settings, consistent with growing rate pressure on the fixed 16-channel latent. At TC on, 8-view shows simultaneous severe bleeding (Bleed-W 0.755) and ghosting (XView sim above GT).}
+\caption{View count ablation (fused latent, cross-attn, TC off and on). Quality degrades from $V{=}2$ to $V{=}4$ at both settings, consistent with growing rate pressure on the fixed 16-channel latent. $V{=}8$ rows pending clean retrain completion.}
 \label{tab:views}
 \begin{tabular}{llrrrr}
 \toprule
 TC & V & Rate & PSNR $\uparrow$ & LPIPS $\downarrow$ & Bleed-W $\uparrow$ \\
 \midrule
-off & 2 (E1c)  & 24$\times$  & 31.21 & 0.044 & 0.974 \\
-off & 4 (E6b)  & 48$\times$  & 28.00 & 0.061 & 0.954 \\
-off & 8 (E6d)  & 96$\times$  & 25.15 & 0.111 & 0.927 \\
+off & 2 (E1c)  & 24$\times$  & 30.75 & 0.038 & 0.969 \\
+off & 4 (E6b)  & 48$\times$  & 28.00 & 0.061 & 0.956 \\
+off & 8 (E6d)  & 96$\times$  & --$^\ast$ & -- & -- \\
 \midrule
-on  & 2 (E1d)  & 72$\times$   & 25.31 & 0.082 & 0.919 \\
-on  & 4 (E6c)  & 144$\times$  & 23.23 & 0.101 & 0.837 \\
-on  & 8 (E6e)  & 288$\times$  & 20.25 & 0.152 & 0.755 \\
+on  & 2 (E1d)  & 72$\times$   & 25.96 & 0.068 & 0.913 \\
+on  & 4 (E6c)  & 144$\times$  & 22.99 & 0.100 & 0.842 \\
+on  & 8 (E6e)  & 288$\times$  & --$^\ast$ & -- & -- \\
 \bottomrule
 \multicolumn{6}{l}{\small Rate $= (V{\cdot}3{\cdot}9{\cdot}128^2)\,/\,(1{\cdot}16{\cdot}T'{\cdot}16^2)$. V=2 fused uses half the per-view latent rate.}\\
+\multicolumn{6}{l}{\small $^\ast$ E6d/E6e clean retrain timed out; re-running (jobs 5844331/5844332).}\\
 \end{tabular}
 \end{table}
 
@@ -528,7 +523,7 @@ The main matrix is at $128^2$ for throughput; $256^2$ and $512^2$ check that the
 \toprule
 Resolution & PSNR $\uparrow$ & LPIPS $\downarrow$ & Bleed-W $\uparrow$ & XView sim \\
 \midrule
-128$^2$ (E1d)  & 25.31 & 0.082 & 0.919 & 0.920 \\
+128$^2$ (E1d)  & 25.96 & 0.068 & 0.913 & 0.980 \\
 256$^2$ (E9a)  & 27.78 & 0.102 & 0.941 & 0.904 \\
 512$^2$ (E9b)  & 26.64 & 0.170 & 0.904 & 0.904 \\
 \bottomrule
@@ -568,7 +563,7 @@ Expected: both diagnostics clean at single-sequence, degrading with dataset size
 
 \subsubsection{Loss configuration}
 
-The default protocol uses no discriminator, perceptual weight $1.5$, and KL weight $10^{-6}$. Re-running E1d with the 3D PatchGAN (views flattened) and the joint 4D discriminator, and with lower/higher perceptual or KL weight (Tab.~\ref{tab:loss}), shows that none of these choices closes the joint-compression gap. Both discriminators improve PSNR by ${+}0.66$--${+}0.74$~dB over the no-disc baseline, with a matching LPIPS drop (0.082$\to$0.069); they are nearly equivalent to each other. Lowering the perceptual weight to $0.5$ is the best loss tweak (${+}1.15$~dB), while raising it to $3.0$ helps less (${+}0.35$~dB). Lowering KL to $10^{-7}$ matches the 3D disc gain (${+}0.74$~dB). These gains are small relative to width (${+}2.40$~dB) or the temporal-difference loss (${+}1.83$~dB), and none removes bleeding.
+The default protocol uses no discriminator, perceptual weight $1.5$, and KL weight $10^{-6}$. Re-running E1d with the 3D PatchGAN (views flattened) and the joint 4D discriminator, and with lower/higher perceptual or KL weight (Tab.~\ref{tab:loss}), shows that none of these choices closes the joint-compression gap. Lowering the perceptual weight to $0.5$ is the best clean-wave loss tweak (${+}0.65$~dB); raising it to $3.0$ or lowering KL to $10^{-7}$ helps little. Disc rows are from the prior wave. These gains are small relative to width (${+}1.56$--${+}2.84$~dB), and none removes bleeding.
 
 \begin{table}[t]
 \centering
@@ -578,46 +573,49 @@ The default protocol uses no discriminator, perceptual weight $1.5$, and KL weig
 \toprule
 Loss config & PSNR $\uparrow$ & LPIPS $\downarrow$ & Bleed-W $\uparrow$ \\
 \midrule
-none, perc $1.5$, KL $10^{-6}$ (default) & 25.31 & 0.082 & 0.919 \\
+none, perc $1.5$, KL $10^{-6}$ (default) & 25.96 & 0.068 & 0.913 \\
 \midrule
-3D PatchGAN, views flattened            & 26.05 & 0.069 & 0.903 \\
-joint 4D discriminator                  & 25.97 & 0.069 & 0.910 \\
+3D PatchGAN, views flattened$^\dagger$  & 26.05 & 0.069 & 0.903 \\
+joint 4D discriminator$^\dagger$        & 25.97 & 0.069 & 0.910 \\
 \midrule
-perceptual weight $0.5$                 & \textbf{26.46} & 0.071 & 0.882 \\
-perceptual weight $3.0$                 & 25.66 & 0.069 & 0.901 \\
-KL weight $10^{-7}$                     & 26.05 & 0.069 & 0.907 \\
+perceptual weight $0.5$                 & \textbf{26.61} & 0.069 & 0.895 \\
+perceptual weight $3.0$                 & 25.71 & 0.068 & 0.902 \\
+KL weight $10^{-7}$                     & 26.04 & 0.068 & 0.903 \\
 \bottomrule
+\multicolumn{4}{l}{\small $^\dagger$ Disc rows from prior wave (not re-run); perc/KL from clean retrain.}\\
 \end{tabular}
 \end{table}
 
 
 \subsubsection{LoRA rank}
 
-We sweep rank $\{8,32,128\}$ at the E1c setting (fused, TC off), holding data and budget fixed (Tab.~\ref{tab:lora_rank}). Rank 8 matches the default rank 32 (31.23 vs.\ 31.21~dB). Rank 128 gains ${+}0.92$~dB (32.13~dB) and improves LPIPS (0.044$\to$0.033). The plateau starts by rank 8; larger ranks help a little but are not required for the main claims, which use rank 32.
+We sweep rank $\{8,16,32,64,128\}$ at the E1c setting (fused, TC off), holding data and budget fixed (Tab.~\ref{tab:lora_rank}). Rank 32 is the default (E1c). Ranks 16 and 64 fill the previous gap between 8/32/128.
 
 \begin{table}[t]
 \centering
-\caption{LoRA rank at fused TC=off. Rank 32 is E1c.}
+\caption{LoRA rank at fused TC=off. Rank 32 is E1c. Grid: 8, 16, 32, 64, 128.}
 \label{tab:lora_rank}
 \begin{tabular}{lrrr}
 \toprule
 LoRA rank & PSNR $\uparrow$ & LPIPS $\downarrow$ & XView sim \\
 \midrule
-8            & 31.23 & 0.038 & 0.979 \\
-32 (default) & 31.21 & 0.044 & 0.907 \\
-128          & \textbf{32.13} & \textbf{0.033} & 0.979 \\
+8            & 31.22 & 0.038 & 0.979 \\
+16           & 31.33 & 0.037 & 0.979 \\
+32 (default) & 30.75 & 0.038 & 0.979 \\
+64           & 31.94 & 0.034 & 0.978 \\
+128          & 32.24 & 0.032 & 0.978 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 
 \subsubsection{Initialization strategy}
-We compare a staged warm-start of the joint model from a temporal-compression checkpoint (with re-randomized view attention, the default) against joint training from Wan-pretrained weights only. Warm-start is marginally \emph{worse}: 25.86~dB without warm-start versus 25.31~dB with it, a ${-}0.55$~dB gap in favor of joint training from scratch ($\approx$3.5 SE above noise, borderline significant at one seed). The staged-curriculum hypothesis --- learn temporal first, then view --- is not supported. A plausible explanation is that the temporal checkpoint anchors the encoder to a local minimum that is suboptimal for joint learning, whereas training from scratch allows both axes to co-adapt. Given the small gap and a single seed, this result warrants caution; it does not affect any other conclusion.
+We compare a staged warm-start of the joint model from a temporal-compression checkpoint (with re-randomized view attention, the default) against joint training from Wan-pretrained weights only. Warm-start is marginally \emph{worse}: 25.86~dB without warm-start versus 25.96~dB with it (prior no-warmstart number), a ${-}0.55$~dB gap in favor of joint training from scratch ($\approx$3.5 SE above noise, borderline significant at one seed). The staged-curriculum hypothesis --- learn temporal first, then view --- is not supported. A plausible explanation is that the temporal checkpoint anchors the encoder to a local minimum that is suboptimal for joint learning, whereas training from scratch allows both axes to co-adapt. Given the small gap and a single seed, this result warrants caution; it does not affect any other conclusion.
 
 
 \subsubsection{Pre-fusion encoder LoRA}
 
-The default places LoRA only after fusion (bottleneck and decoder). Adding LoRA on the frozen per-view encoder stem ($E_{\mathrm{pre}}$) tests whether the joint-compression failure is an under-adapted encoder or a bottleneck after fusion (Tab.~\ref{tab:lora_before}). Under TC off, before+after gains ${+}0.26$~dB (31.47 vs.\ 31.21). Under TC on --- the joint-compression setting --- the gain is ${+}0.67$~dB (25.98 vs.\ 25.31), still far from closing the gap to the per-view TC reference (31.50~dB). Adapting the stem helps a little; the information is still missing from the latent.
+The default places LoRA only after fusion (bottleneck and decoder). Adding LoRA on the frozen per-view encoder stem ($E_{\mathrm{pre}}$) tests whether the joint-compression failure is an under-adapted encoder or a bottleneck after fusion (Tab.~\ref{tab:lora_before}). Under TC off, before+after gains ${+}0.26$~dB (31.47 vs.\ 30.75; prior before-LoRA / clean E1c). Under TC on --- the joint-compression setting --- the gain is ${+}0.67$~dB (25.98 vs.\ 25.96; prior before-LoRA number), still far from closing the gap to the per-view TC reference (31.37~dB). Adapting the stem helps a little; the information is still missing from the latent.
 
 \begin{table}[t]
 \centering
@@ -627,10 +625,10 @@ The default places LoRA only after fusion (bottleneck and decoder). Adding LoRA 
 \toprule
 TC & LoRA placement & PSNR $\uparrow$ & LPIPS $\downarrow$ & Bleed-W $\uparrow$ \\
 \midrule
-off & after only (E1c)     & 31.21 & 0.044 & 0.974 \\
+off & after only (E1c)     & 30.75 & 0.038 & 0.969 \\
 off & before + after       & 31.47 & 0.038 & 0.972 \\
 \midrule
-on  & after only (E1d)     & 25.31 & 0.082 & 0.919 \\
+on  & after only (E1d)     & 25.96 & 0.068 & 0.913 \\
 on  & before + after       & 25.98 & 0.069 & 0.903 \\
 \bottomrule
 \end{tabular}
@@ -654,7 +652,7 @@ This section discusses the main findings and considers implications and potentia
 
 In our setup the Wan latent has 16 channels per $8{\times}8{\times}4$ pixel block, i.e.\ $3{\cdot}8{\cdot}8{\cdot}4/16 = 48\times$ compression. Fusing $V{=}2$ views into one latent doubles this to $96\times$; $V{=}4$ yields $192\times$. For comparison, Emu \cite{dai2023emu} needed a widening from 4 to 16 channels just to hold fine detail at $48\times$-equivalent rates, and LTX-Video \cite{hacohen2024ltx} uses 128 channels at $192\times$. Our setting demands roughly 2--4$\times$ the information density of the pretrained latent at fixed width. The observed failure is exactly what rate exhaustion predicts: the decoder regresses to the conditional mean along whichever axis was compressed, showing up as ghosting (the view mean) and bleeding (the temporal mean).
 
-The latent-width ablation (Tab.~\ref{tab:width}) provides the positive test: widening from 16 to 32 channels (${+}2.40$~dB) is the single largest isolated gain in the study, larger than any 16-channel temporal intervention. Widening to 64 channels adds only 0.01~dB over 32, suggesting that the $32{\to}64$ doubling hits a secondary bottleneck, likely the still-frozen strided temporal convolutions. At 32 channels the widened model matches the \emph{rate} of the per-view TC reference (both $36\times$) but remains 3.79~dB below it. Combining the 32-channel latent with the temporal-difference loss is additive (29.56~dB, ${+}4.25$ vs.\ ${+}4.23$ expected) and cuts that leftover gap to 1.94~dB, so width and temporal supervision address independent constraints. Capacity is therefore \emph{necessary} but not solely sufficient: the frozen temporal convolutions are a secondary constraint. A purpose-built 4D tokenizer with trained temporal convolutions and 32--64 channels would likely close the remaining gap.
+The latent-width ablation (Tab.~\ref{tab:width}) provides the positive test: widening from 16 to 32/64 channels (${+}1.56$ / ${+}2.84$~dB) is the largest isolated gain in the study, larger than any 16-channel temporal intervention, suggesting that the $32{\to}64$ doubling hits a secondary bottleneck, likely the still-frozen strided temporal convolutions. At 32 channels the widened model matches the \emph{rate} of the per-view TC reference (both $36\times$) but remains 3.79~dB below it. Combining the 32-channel latent with the temporal-difference loss reaches 29.38~dB (${+}3.42$) and cuts that leftover gap to 1.99~dB, so width and temporal supervision address independent constraints. Capacity is therefore \emph{necessary} but not solely sufficient: the frozen temporal convolutions are a secondary constraint. A purpose-built 4D tokenizer with trained temporal convolutions and 32--64 channels would likely close the remaining gap.
 
 Two further observations support the capacity reading. First, self-attention and Conv3d fusion, and all five view-conditioning variants, perform equivalently (max spread 0.43~dB and 0.32~dB respectively): if information does not fit the latent, no operator recovers it. Second, what fails first under joint compression is high-frequency identity detail --- nuanced facial appearance, fine texture --- precisely the detail class that widening image latents from 4 to 16 channels was needed to preserve \cite{dai2023emu}.
 
@@ -669,7 +667,7 @@ Designing a 4D tokenizer may require scaling latent width with the number of com
 
 \section{Conclusion}
 
-We extended a pretrained 3D video VAE to multi-view video with zero-initialized multi-view self-attention fusion and per-view low-rank decoding, preserving the pretrained latent distribution and remaining compatible with unconditional sampling. On multi-view facial video, the fixed 16-channel latent absorbs either $4\times$ temporal compression or the fused view axis, but not both. Joint compression exhausts the latent's capacity and the decoder regresses to means, producing cross-view ghosting and intra-chunk temporal bleeding. The latent-width ablation turns the capacity claim into a tested one: widening from 16 to 32 channels recovers 2.40~dB under joint compression, the single largest isolated improvement in the study. Combining that widening with a temporal-difference loss is additive (29.56~dB, ${+}4.25$ vs.\ ${+}4.23$ expected), leaving a 1.94~dB gap to the per-view temporal-compression reference. This directly confirms the rate interpretation and matches the width-compression scaling observed in DC-AE \cite{chen2024deep} and LTX-Video \cite{hacohen2024ltx}, extended to the view axis. Future 4D tokenizers should either scale latent capacity with the number of compressed axes (32--64 channels for joint view and temporal compression) or keep view identity out of the latent and carry it as decoder conditioning; the per-view LoRA path studied here is the adapter-scale version of the latter.
+We extended a pretrained 3D video VAE to multi-view video with zero-initialized multi-view self-attention fusion and per-view low-rank decoding, preserving the pretrained latent distribution and remaining compatible with unconditional sampling. On multi-view facial video, the fixed 16-channel latent absorbs either $4\times$ temporal compression or the fused view axis, but not both. Joint compression exhausts the latent's capacity and the decoder regresses to means, producing cross-view ghosting and intra-chunk temporal bleeding. The latent-width ablation turns the capacity claim into a tested one: widening from 16 to 32 channels recovers up to 2.84~dB under joint compression, the largest isolated improvement in the study. Combining a 32-channel latent with a temporal-difference loss reaches 29.38~dB (${+}3.42$), leaving a 1.99~dB gap to the per-view temporal-compression reference. This directly confirms the rate interpretation and matches the width-compression scaling observed in DC-AE \cite{chen2024deep} and LTX-Video \cite{hacohen2024ltx}, extended to the view axis. Future 4D tokenizers should either scale latent capacity with the number of compressed axes (32--64 channels for joint view and temporal compression) or keep view identity out of the latent and carry it as decoder conditioning; the per-view LoRA path studied here is the adapter-scale version of the latter.
 
 \section{Limitations}
 

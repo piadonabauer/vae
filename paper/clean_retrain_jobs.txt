@@ -1,0 +1,34 @@
+5562190:1:paper_E1a_perview_tcF
+5562191:3:paper_E1c_fused_tcF
+5562192:4:paper_E1d_fused_tcT
+5562193:10:paper_E0_perview_ceiling
+5562194:11:paper_E2b_fused_tcF_self_attn
+5562195:12:paper_E2c_fused_tcF_conv3d
+5562196:13:paper_E2d_fused_tcF_conv4d
+5562197:27:paper_E2e_fused_tcT_self_attn
+5562198:14:paper_E3a_view_emb_noLora
+5562199:15:paper_E3c_view_emb_plus_lora
+5562200:17:paper_E3e_full_dec_finetune
+5562201:8:paper_E11a_fused_tcT_widen32
+5562202:9:paper_E11b_fused_tcT_widen64
+5562203:18:paper_E4b_noncausal_decode
+5562204:24:paper_E4h_temporal_diff_loss
+5562205:28:paper_E4i_diff_loss_plus_cache
+5562206:36:paper_E_combo_diffLoss_widen32
+5562207:5:paper_E5b_fused_tcT_unfreeze_enc
+5562208:6:paper_E5c_fused_tcT_unfreeze_all
+5562209:29:paper_E6b_4view_tcF
+5562210:30:paper_E6c_4view_tcT
+5562211:31:paper_E6d_8view_tcF
+5562212:32:paper_E6e_8view_tcT
+5562213:43:paper_E10_rank8
+5562214:47:paper_E10_rank16
+5562215:44:paper_E10_rank128
+5562216:48:paper_E10_rank64
+5562217:40:paper_E7_perc0p5
+5562218:41:paper_E7_perc3p0
+5562219:42:paper_E7_kl1e7
+5844331:31:paper_E6d_8view_tcF
+5844332:32:paper_E6e_8view_tcT
+--- resume note ---
+2026-10-01: E6d/E6e resubmit (prior TIMEOUT; no ckpts to resume; longer walltime, save_ckpt still False)

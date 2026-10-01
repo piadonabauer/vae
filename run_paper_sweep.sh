@@ -62,6 +62,8 @@
 #   42 E7_kl1e7      E1d + kl_loss_weight=1e-7
 #   43 E10_rank8     E1c + LoRA rank 8
 #   44 E10_rank128   E1c + LoRA rank 128
+#   47 E10_rank16    E1c + LoRA rank 16
+#   48 E10_rank64    E1c + LoRA rank 64
 #   45 E10_before_tcT  E1d + use_lora_before (pre-fusion encoder LoRA)
 #   46 E10_before_tcF  E1c + use_lora_before
 #
@@ -194,14 +196,8 @@ COMMON=(
   --wandb True
   --optimization False
   --FAST_MODE False
-  --save_ckpt True
-  # Logging cadence, tuned for the actual run length: 358 train samples at
-  # effective batch 64 = 5 updates/epoch = ~850 updates over 170 epochs.
-  # Scalars: dense early schedule, then every 20 updates (~4 epochs) -> ~50 points.
-  # Images: same early schedule, then geometric backoff (x1.5, capped) -> ~20 grids.
-  # Full eval: every 50 updates (~10 epochs) -> ~17 val evals per run; the val set
-  # is only 10 clips so this is cheap, and best-val selection needs the density.
-  # All cadences count OPTIMIZER UPDATES, so eval/log points align across arms.
+  --save_ckpt False
+  # Metrics live in eval_metrics.jsonl + wandb; mid-run shards eat too much disk.
   --log_every 20
   --log_schedule_steps "[1,2,3,5,8,12,20,30,50,75,100,150,200]"
   --image_log_growth_factor 1.5
@@ -572,6 +568,7 @@ case "$TASK" in
 
   # ── E10: LoRA rank / pre-fusion placement ──────────────────────────────────
   # Rank sweep at E1c (fused, TC off). Rank 32 is E1c itself (31.21 dB).
+  # Full grid: 8, 16, 32 (E1c), 64, 128.
   43)
     run_name="paper_E10_rank8"
     MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
@@ -581,6 +578,16 @@ case "$TASK" in
     run_name="paper_E10_rank128"
     MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
                  --model.temporal_compression False --model.lora_rank 128 )
+    ;;
+  47)
+    run_name="paper_E10_rank16"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.lora_rank 16 )
+    ;;
+  48)
+    run_name="paper_E10_rank64"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False --model.lora_rank 64 )
     ;;
   # Pre-fusion encoder LoRA: default is after-only. Test whether adapting the
   # frozen per-view stem helps, or whether the bottleneck is after fusion.
