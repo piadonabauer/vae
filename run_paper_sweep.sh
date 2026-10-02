@@ -196,7 +196,8 @@ COMMON=(
   --wandb True
   --optimization False
   --FAST_MODE False
-  --save_ckpt False
+  # Default False (disk). Seed-repeat / long 8-view arms may set SAVE_CKPT=True.
+  --save_ckpt "${SAVE_CKPT:-False}"
   # Metrics live in eval_metrics.jsonl + wandb; mid-run shards eat too much disk.
   --log_every 20
   --log_schedule_steps "[1,2,3,5,8,12,20,30,50,75,100,150,200]"
@@ -210,6 +211,10 @@ COMMON=(
   # NOT from the shuffled batch -- identical people in every run and every arm.
   --num_reconstruction_vis_samples 3
 )
+# Optional second seed: SEED=43 sbatch --export=ALL,SEED=43,...
+if [[ -n "${SEED:-}" ]]; then
+  COMMON+=( --seed "$SEED" )
+fi
 
 MODEL_ARGS=()
 case "$TASK" in
@@ -251,6 +256,18 @@ case "$TASK" in
     MODEL_ARGS=( --model.independent_views True --model.temporal_compression False
                  --epochs 0 --save_ckpt False --final_eval True
                  --wandb_min_steps_before_init -1 )
+    ;;
+  49)
+    # Zero-shot floor at 256² (same pretrained Wan, no training).
+    run_name="paper_E1z_perview_zeroshot_256"
+    _256=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res
+    MODEL_ARGS=( --model.independent_views True --model.temporal_compression False
+                 --epochs 0 --save_ckpt False --final_eval True
+                 --wandb_min_steps_before_init -1
+                 --bucket_config "{'256px_ar1:1': {9: (1.0, 1)}}"
+                 --dataset_presets.all_people_one_expression.data_path "$_256"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_256" )
+    BATCH_LADDER=( "4:16" "2:32" "1:64" )
     ;;
   8)
     run_name="paper_E11a_fused_tcT_widen32"
@@ -617,6 +634,10 @@ case "$TASK" in
 esac
 
 [[ "$OVERFIT" == "1" ]] && run_name="${run_name}_overfit"
+# Distinct name/DONE marker for seed repeats (default config seed is 42).
+if [[ -n "${SEED:-}" && "${SEED}" != "42" ]]; then
+  run_name="${run_name}_s${SEED}"
+fi
 
 # Finished arms leave a marker; leftover chained successors exit immediately.
 DONE_MARKER="${OPEN_SORA_ROOT}/outputs/${run_name}.DONE"
@@ -642,7 +663,17 @@ fi
 # Default to the best E1b checkpoint; disable with INIT_CKPT=none.
 # Skipped in overfit mode (the gate tests the architecture, not the curriculum).
 WARMSTART_ARGS=()
-if [[ "$OVERFIT" != "1" && ( "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) || "$TASK" == "27" || "$TASK" == "28" || "$TASK" == "34" || "$TASK" == "35" || ( "$TASK" -ge 37 && "$TASK" -le 42 ) || "$TASK" == "45" ) && "$INIT_CKPT" != "none" ]]; then
+# Honor an explicit INIT_CKPT for any task (seed repeats, widen, combo, …).
+# Else auto-warmstart the historical TC=True fused task list from best E1b.
+_do_warm=0
+if [[ "$OVERFIT" != "1" && "$INIT_CKPT" != "none" ]]; then
+  if [[ -n "$INIT_CKPT" ]]; then
+    _do_warm=1
+  elif [[ "$TASK" =~ ^[456]$ || ( "$TASK" -ge 18 && "$TASK" -le 24 ) || "$TASK" == "27" || "$TASK" == "28" || "$TASK" == "34" || "$TASK" == "35" || ( "$TASK" -ge 37 && "$TASK" -le 42 ) || "$TASK" == "45" || "$TASK" == "8" || "$TASK" == "9" || "$TASK" == "36" ]]; then
+    _do_warm=1
+  fi
+fi
+if [[ "$_do_warm" == "1" ]]; then
   if [[ -z "$INIT_CKPT" ]]; then
     best_ep=-1
     for d in "${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job"*/; do

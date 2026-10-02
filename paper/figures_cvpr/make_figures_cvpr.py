@@ -22,7 +22,10 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import pymupdf
+try:
+    import pymupdf
+except ImportError:  # optional: only needed for PDF-tile qualitative extractors
+    pymupdf = None
 from PIL import Image
 
 OUT = os.path.dirname(os.path.abspath(__file__))
@@ -262,18 +265,18 @@ def _chunk_bands(ax, ymax_label=None):
 
 
 def fig_perframe():
-    """Single-column per-frame PSNR (V=2 main setting)."""
+    """Single-column per-frame PSNR (V=2 main setting). Clean-wave final_eval."""
     series = [
-        ("Fused, TC off", C_FUSED, "-",
-         [33.42, 33.81, 33.38, 33.20, 33.19, 33.10, 33.35, 33.27, 32.81]),
-        ("Fused, TC on", C_JOINT, "-",
-         [32.48, 30.59, 28.30, 29.56, 28.42, 25.56, 26.60, 28.77, 28.07]),
-        ("+ diff-loss", "#17becf", "--",
-         [32.81, 31.30, 29.57, 30.21, 28.93, 27.35, 28.23, 29.82, 28.93]),
-        ("+ 32-ch", C_32CH, ":",
-         [34.19, 32.25, 29.92, 31.77, 30.04, 28.12, 28.85, 31.57, 30.00]),
-        ("+ both", "#7a3e9d", "-.",
-         [35.44, 33.76, 31.33, 32.60, 31.03, 29.84, 30.28, 32.53, 31.24]),
+        ("Fused, TC off (E1c)", C_FUSED, "-",
+         [33.60, 33.45, 32.81, 32.38, 32.39, 32.34, 32.52, 32.63, 32.54]),
+        ("Fused, TC on (E1d)", C_JOINT, "-",
+         [32.95, 30.82, 28.66, 29.35, 27.88, 25.94, 27.35, 28.60, 28.22]),
+        ("+ diff-loss (E4h)", "#17becf", "--",
+         [32.01, 30.20, 28.69, 29.75, 28.38, 26.04, 27.38, 29.15, 28.43]),
+        ("+ 32-ch (E11a)", C_32CH, ":",
+         [33.51, 31.76, 29.96, 30.30, 29.38, 27.94, 28.59, 30.23, 29.46]),
+        ("+ both (combo)", "#7a3e9d", "-.",
+         [35.37, 33.57, 31.26, 32.51, 30.95, 29.62, 30.03, 32.37, 31.05]),
     ]
     xs = np.arange(9)
     fig, ax = plt.subplots(figsize=(W1, 2.0))
@@ -318,14 +321,14 @@ def fig_perframe():
 def fig_latent_width():
     """Single column: widening under joint compression + per-view reference."""
     xs = np.arange(3)
-    psnrs = [25.31, 27.71, 27.60]
+    psnrs = [25.96, 27.52, 28.80]  # E1d, E11a, E11b (clean)
     cols = [C_JOINT, C_32CH, C_64CH]
 
     fig, ax = plt.subplots(figsize=(W1, 1.75))
     fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.16)
 
-    ax.axhline(31.50, color=C_PVTCT, lw=1.0, ls="--")
-    ax.text(2.32, 31.50 - 0.25, "per-view, TC on (31.50 dB)", color=C_PVTCT,
+    ax.axhline(31.37, color=C_PVTCT, lw=1.0, ls="--")
+    ax.text(2.32, 31.37 - 0.25, "per-view, TC on (31.37 dB)", color=C_PVTCT,
             fontsize=6.5, ha="right", va="top")
 
     ax.plot(xs, psnrs, "-", color="#aaaaaa", lw=1.0, zorder=2)
@@ -333,9 +336,10 @@ def fig_latent_width():
         ax.scatter([x], [p], color=col, s=34, zorder=5)
         ax.annotate(f"{p:.2f}", (x, p), xytext=(0, 6), textcoords="offset points",
                     ha="center", fontsize=6.5)
-    ax.text(0.5, 26.20, "+2.40 dB", fontsize=6.5, ha="center",
-            color="#222222", rotation=32)
-    ax.text(1.5, 27.95, "−0.11 dB", fontsize=6.5, ha="center", color="#666666")
+    ax.text(0.5, 26.40, "+1.56 dB", fontsize=6.5, ha="center",
+            color="#222222", rotation=28)
+    ax.text(1.5, 27.90, "+1.28 dB", fontsize=6.5, ha="center", color="#222222",
+            rotation=28)
 
     ax.set_xticks(xs)
     ax.set_xticklabels(["16 (Wan default)", "32", "64"])
@@ -348,28 +352,28 @@ def fig_latent_width():
 
 
 def fig_interventions():
-    """Single column: horizontal bars, deltas vs the joint baseline."""
+    """Single column: horizontal bars, deltas vs the joint baseline (clean)."""
+    base = 25.96
     items = [
-        ("Baseline (fused, TC on)", 25.31, C_JOINT),
-        ("+ reflection pad", 25.88, "#aec7e8"),
-        ("+ learned cache", 25.96, "#aec7e8"),
-        ("+ sub-frame pos. emb.", 25.89, "#aec7e8"),
-        ("+ diff-loss + cache", 26.93, "#aec7e8"),
-        ("+ temporal diff-loss", 27.14, "#6baed6"),
-        ("+ diff-loss + 32-ch", 29.56, C_32CH),
+        ("Baseline E1d (fused, TC on)", base, C_JOINT),
+        ("+ temporal diff-loss (E4h)", 26.07, "#aec7e8"),
+        ("+ diff-loss + cache (E4i)", 26.65, "#6baed6"),
+        ("+ 32-ch (E11a)", 27.52, C_32CH),
+        ("+ 64-ch (E11b)", 28.80, C_64CH),
+        ("+ diff-loss + 32-ch (combo)", 29.38, "#7a3e9d"),
     ]
     fig, ax = plt.subplots(figsize=(W1, 1.8))
-    fig.subplots_adjust(left=0.315, right=0.985, top=0.97, bottom=0.20)
+    fig.subplots_adjust(left=0.42, right=0.985, top=0.97, bottom=0.20)
     ys = np.arange(len(items))
     ax.barh(ys, [v for _, v, _ in items], color=[c for _, _, c in items],
             edgecolor="white", height=0.62, lw=0.4)
-    ax.axvline(25.31, color=C_JOINT, lw=0.7, ls="--", alpha=0.55)
+    ax.axvline(base, color=C_JOINT, lw=0.7, ls="--", alpha=0.55)
     for y, (_, v, _) in enumerate(items):
-        d = v - 25.31
-        s = f"{v:.2f}" + (f"  (+{d:.2f})" if d > 0 else "")
+        d = v - base
+        s = f"{v:.2f}" + (f"  (+{d:.2f})" if d > 0.005 else "")
         ax.text(v + 0.07, y, s, va="center", fontsize=6.3)
     ax.set_yticks(ys)
-    ax.set_yticklabels([lab for lab, _, _ in items], fontsize=6.5)
+    ax.set_yticklabels([lab for lab, _, _ in items], fontsize=6.2)
     ax.invert_yaxis()
     ax.set_xlim(24.6, 32.0)
     ax.set_xlabel("PSNR (dB)")
@@ -427,13 +431,15 @@ def fig_datascale():
 
 
 def fig_rate_quality():
-    """Single column: the 2x2 rate-quality matrix as grouped bars."""
+    """Single column: the 2x2 rate-quality matrix as grouped bars (clean)."""
     fig, ax = plt.subplots(figsize=(W1, 1.75))
     fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.155)
     x = np.arange(2)
     w = 0.32
-    perview = [34.01, 31.50]
-    fused = [31.21, 25.31]
+    perview = [34.20, 31.37]  # E1a, E1b
+    fused = [30.75, 25.96]    # E1c, E1d
+    # additive prediction at TC on: 34.20 - 2.83 - 3.45 = 27.92
+    add_pred = 34.20 - (34.20 - 31.37) - (34.20 - 30.75)
     b1 = ax.bar(x - w / 2, perview, w, color="#1f77b4", label="Per-view",
                 edgecolor="white", lw=0.4)
     b2 = ax.bar(x + w / 2, fused, w, color=C_JOINT, label="Fused",
@@ -442,9 +448,9 @@ def fig_rate_quality():
         for bar in bars:
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.18,
                     f"{bar.get_height():.2f}", ha="center", fontsize=6.3)
-    ax.plot([1 + w / 2 - 0.16, 1 + w / 2 + 0.16], [28.70, 28.70],
+    ax.plot([1 + w / 2 - 0.16, 1 + w / 2 + 0.16], [add_pred, add_pred],
             color="#444444", lw=1.4)
-    ax.text(1 + w / 2 + 0.20, 28.70, "additive\nprediction: 28.7",
+    ax.text(1 + w / 2 + 0.20, add_pred, f"additive\nprediction: {add_pred:.1f}",
             fontsize=5.8, color="#444444", va="center")
     ax.set_xticks(x)
     ax.set_xticklabels(["TC off", "TC on"])
@@ -457,9 +463,10 @@ def fig_rate_quality():
 
 
 def fig_view_count():
-    views = [2, 4, 8]
-    psnr_f, psnr_t = [31.21, 28.00, 25.15], [25.31, 23.23, 20.25]
-    bleed_f, bleed_t = [0.974, 0.954, 0.927], [0.919, 0.837, 0.755]
+    # V=8 pending clean retrain; plot 2 and 4 only from clean wave.
+    views = [2, 4]
+    psnr_f, psnr_t = [30.75, 28.00], [25.96, 22.99]
+    bleed_f, bleed_t = [0.969, 0.956], [0.913, 0.842]
 
     fig, axes = plt.subplots(1, 2, figsize=(W1, 1.55))
     fig.subplots_adjust(wspace=0.50, left=0.125, right=0.985, top=0.88, bottom=0.235)

@@ -10,15 +10,19 @@
 %   E3a/c/e, E4b/h/i, E5b/c, E6b/c, E7 perc/kl, E10 ranks 8/16/64/128,
 %   E11a/b, E_combo. E4h/E5b timed out at 18h but wrote final_eval — usable.
 %
-% RUNNING (resubmit 2026-10-01, longer walltime, still save_ckpt=False):
-%   E6d job 5844331 (3d), E6e job 5844332 (1d6h) on gpubase_l40s_b4.
+% RUNNING (2026-10-01+):
+%   E6d 5844331, E6e 5844332 (longer walltime)
+%   Seed-2 (SEED=43, save_ckpt=True): E1c/E1d/E11a/combo 5845274–77
+%   Zero-shot floor reconfirm: 128 5845272, 256 5845273
 %
-% SKIP this wave: E8b, disc stack, E9, pad/cache/subframe-only arms.
+% FOLLOW-UP DONE offline: per-view table; FG XView (ghosting_metrics.md);
+%   E2b prose clarified; CVPR figs regenerated from clean dumps.
+%   Prior E1z zero-shot = 19.71 dB at 128^2 (not ~21); clean reconfirm pending.
+%
+% SKIP: E8b, disc stack, E9, pad/cache/subframe-only, optional 128-ch / diff@64.
 %
 % Headline (final_eval): E1a 34.20 / E1b 31.37 / E1c 30.75 / E1d 25.96
 %   E11a 27.52 / E11b 28.80 / combo 29.38 / E4h 26.07 (+0.11 only)
-%   XView gaps within-run are tiny (~0–0.003); do not claim ghosting from
-%   absolute XView. Prefer Bleed-W + qualitative for temporal/view failures.
 % ============================================================
 
 \section{Introduction}
@@ -157,9 +161,10 @@ z = \mu + \sigma \odot \epsilon \;\in \mathbb{R}^{16 \times T' \times h \times w
 \centering
 \fbox{\parbox[c][5cm][c]{0.9\linewidth}{\centering
 PLACEHOLDER Fig.~\ref{fig:fusion}: the three fusion mechanisms side by side (small schematics).\\
-(a) multi-view self-attention + tree merge (ours, Eq.~\ref{eq:fusion_attn}--\ref{eq:tree_merge})\\
-(b) channel-concat + 1x1x1 Conv3d + ResBlocks\\
-(c) factorized (2+1+1)D convolution with a view-axis kernel}}
+(a) cross-attention + tree merge (default E1c, Eq.~\ref{eq:fusion_attn}--\ref{eq:tree_merge})\\
+(b) joint self-attention over $V{\cdot}N$ tokens, then channel-concat ResBlocks (E2b)\\
+(c) channel-concat + 1x1x1 Conv3d + ResBlocks\\
+(d) factorized (2+1+1)D convolution with a view-axis kernel}}
 \caption{Fusion mechanisms compared in the ablation. All reduce V per-view feature maps to one shared map at the encoder bottleneck.}
 \label{fig:fusion}
 \end{figure}
@@ -246,7 +251,7 @@ We report no single number averaged over everything. A global PSNR mean hides ex
 
 Our diagnostics are reported for every arm. Each targets one failure mode and is calibrated against the ground truth. Established consistency metrics --- warping error \cite{lai2018learning}, VBench smoothness \cite{huang2024vbench}, epipolar TSED \cite{yu2023long}, MEt3R \cite{asim2025met3r}, re-rendering consistency \cite{gao2024cat3d}, FVD-V \cite{xie2024sv4d} --- are built for free generation and detect views or frames that disagree too much. Our failures are the opposite (views agreeing too much, frames changing too little) and would \emph{improve} those scores. We therefore measure the same axes calibrated against the paired GT, so deviation in either direction is visible.
 
-Cross-view similarity (view ghosting) is the mean pairwise cosine similarity between decoded views of the same clip. The views are time-aligned by construction, so excess similarity is view mixing, not temporal structure. It is reported next to the same quantity on the GT views, following the pairwise-distance idea used to diagnose mode collapse in conditional generation \cite{zhu2017toward}, calibrated against GT. At the GT reference, views are decoded distinctly; above it, they ghost. The metric is intended to be anchored by a no-view-conditioning negative control (Tab.~\ref{tab:viewcond}); under the clean pipeline that arm still does not force identical views, and within-run rec$-$GT gaps stay $\lesssim$0.003, so treat absolute XView as a weak ghosting signal.
+Cross-view similarity (view ghosting) is the mean pairwise cosine similarity between decoded views of the same clip. The views are time-aligned by construction, so excess similarity is view mixing, not temporal structure. It is reported next to the same quantity on the GT views, following the pairwise-distance idea used to diagnose mode collapse in conditional generation \cite{zhu2017toward}, calibrated against GT. At the GT reference, views are decoded distinctly; above it, they ghost. The metric is intended to be anchored by a no-view-conditioning negative control (Tab.~\ref{tab:viewcond}); under the clean pipeline that arm still does not force identical views. Offline FG-masked cosine on the clean dumps (white-bg threshold) still yields only ${+}0.006$ gap for joint compression vs.\ ${+}0.003$ for fused TC-off, so absolute XView --- full-frame or FG --- is too weak to carry a ghosting claim. Prefer qualitative grids (Fig.~\ref{fig:qualitative}) and the per-view PSNR split (Tab.~\ref{tab:psnr_per_view}).
 
 Bleed ratio (temporal bleeding) is the mean $|f_{t+1}-f_t|$ of the reconstruction divided by the same quantity of the GT: the fraction of true motion the reconstruction reproduces. A value of 1 is faithful motion; well below 1 means frames are merged. It is computed separately within 4-frame chunks and across chunk boundaries, tying the artifact to the chunked causal decode (Sec.~\ref{sec:preliminaries}). It is anchored by the non-causal decode experiment (Tab.~\ref{tab:interventions}).
 
@@ -275,7 +280,7 @@ Compression ratio is $r = (V \cdot 3 \cdot T \cdot H \cdot W) / (V' \cdot C_z \c
 \toprule
 Model & TC & Rate & PSNR $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ & XView sim & Bleed-W $\uparrow$ \\
 \midrule
-Wan zero-shot (per view, floor)      & off & 12$\times$/view & $\approx$21 & --     & --     & --    & -- \\
+Wan zero-shot (per view, floor)      & off & 12$\times$/view & 19.71$^\ddagger$ & 0.9707 & 0.155  & 0.890 & 1.092 \\
 Per-view LoRA, all data (ceiling)    & off & 12$\times$/view & 34.30       & 0.9990 & 0.021  & 0.978 & 0.988 \\
 Per-view finetuned (matched)         & off & 12$\times$/view & 34.20       & 0.9990 & 0.022  & 0.978 & 0.994 \\
 Per-view finetuned (matched)         & on  & 36$\times$/view & 31.37       & 0.9981 & 0.037  & 0.978 & 0.947 \\
@@ -286,8 +291,28 @@ GT reference level (clean pipeline)  & --  & --              & --          & -- 
 \bottomrule
 \end{tabular}
 \smallskip\\
-\textit{Note: SSIM lies in the narrow range 0.991--0.999 for all non-broken configurations at 128$^2$; it is reported for completeness but is not discriminative at this resolution. Rate = (V$\cdot$3$\cdot$T$\cdot$H$\cdot$W)$/$(V'$\cdot$16$\cdot$T'$\cdot$(H/8)$\cdot$(W/8)) with T=9, T'=3 (TC=on) or T'=9 (TC=off), V=2, H=W=128. All rows from the 2026-09-20 clean retrain (GT XView $\approx$0.978). Within-run rec$-$GT XView gaps are $\lesssim$0.003 --- prefer Bleed-W and qualitative evidence for ghosting.}
+\textit{Note: SSIM lies in the narrow range 0.991--0.999 for all non-broken configurations at 128$^2$; it is reported for completeness but is not discriminative at this resolution. Rate = (V$\cdot$3$\cdot$T$\cdot$H$\cdot$W)$/$(V'$\cdot$16$\cdot$T'$\cdot$(H/8)$\cdot$(W/8)) with T=9, T'=3 (TC=on) or T'=9 (TC=off), V=2, H=W=128. Finetuned rows from the 2026-09-20 clean retrain (GT XView $\approx$0.978). Absolute XView is a weak ghosting signal (within-run gaps $\lesssim$0.006 even on FG-masked cosine; see \texttt{paper/ghosting\_metrics.md}) --- prefer Bleed-W and qualitative grids. $^\ddagger$ Zero-shot is pretrained Wan with no finetuning at $128^2$, inputs in $[-1,1]$ (same loader as all arms); re-confirmed under the clean pipeline as jobs 5845272/5845273 (128/256).}
 \end{table}
+
+\begin{table}[t]
+\centering
+\caption{Per-view PSNR on the same clean final\_eval dumps as Tab.~\ref{tab:main}. Both views drop together under joint compression (symmetric collapse), so a single mean does not hide one-view failure.}
+\label{tab:psnr_per_view}
+\begin{tabular}{lrrr}
+\toprule
+Model & PSNR mean & View 0 & View 1 \\
+\midrule
+Per-view matched, TC off (E1a) & 34.20 & 35.89 & 35.88 \\
+Per-view matched, TC on (E1b)  & 31.37 & 33.20 & 33.17 \\
+Fused TC off (E1c)             & 30.75 & 33.33 & 32.14 \\
+Fused TC on (E1d)              & 25.96 & 28.03 & 28.50 \\
+32-ch joint (E11a)             & 27.52 & 30.66 & 28.90 \\
+64-ch joint (E11b)             & 28.80 & 30.96 & 30.89 \\
+diff+32-ch (E\_combo)          & 29.38 & 31.50 & 31.27 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 
 \begin{figure}[t]
 \centering
@@ -310,7 +335,7 @@ GT reference level (clean pipeline)  & --  & --              & --          & -- 
 \label{fig:qual_capacity}
 \end{figure}
 
-Reading Tab.~\ref{tab:main}, the domain gap is visible in the ceiling row (34.30~dB, all data) versus the matched per-view reference (34.20~dB, same budget). The gap is tiny (0.10~dB), confirming that the one-expression training set already covers the val distribution well. Single-axis compression degrades gracefully: per-view temporal compression costs 2.83~dB ($34.20{\to}31.37$); view fusion alone costs 3.45~dB ($34.20{\to}30.75$). Critically, the fused TC-off model (30.75~dB at $24\times$) nearly matches the per-view TC-on model (31.37~dB at $36\times$/view), showing that the view axis can be absorbed at comparable rate-quality efficiency. Joint compression (fused TC on, $72\times$) drops to 25.96~dB: an 8.24~dB total drop, versus 6.28~dB predicted by summing the individual degradations. The excess 1.96~dB is super-additive: the two axes interfere. Temporal bleeding activates clearly (Bleed-W 0.913). Whole-frame XView sits only ${+}0.002$ above GT (0.980 vs.\ 0.978), so ghosting is better read from qualitative grids than from absolute cosine. The 16-channel latent stores $3{\cdot}8{\cdot}8{\cdot}4/16 = 48\times$ per view natively; fusing $V{=}2$ doubles this to $96\times$ effective information density at fixed width. The failure is exactly what this predicts.
+Reading Tab.~\ref{tab:main}, the domain gap is visible in the ceiling row (34.30~dB, all data) versus the matched per-view reference (34.20~dB, same budget). The gap is tiny (0.10~dB), confirming that the one-expression training set already covers the val distribution well. Single-axis compression degrades gracefully: per-view temporal compression costs 2.83~dB ($34.20{\to}31.37$); view fusion alone costs 3.45~dB ($34.20{\to}30.75$). Critically, the fused TC-off model (30.75~dB at $24\times$) nearly matches the per-view TC-on model (31.37~dB at $36\times$/view), showing that the view axis can be absorbed at comparable rate-quality efficiency. Joint compression (fused TC on, $72\times$) drops to 25.96~dB: an 8.24~dB total drop, versus 6.28~dB predicted by summing the individual degradations. The excess 1.96~dB is super-additive: the two axes interfere. Temporal bleeding activates clearly (Bleed-W 0.913). Whole-frame XView sits only ${+}0.002$ above GT and FG-masked gap is only ${+}0.006$, so ghosting is better read from qualitative grids and per-view PSNR than from absolute cosine. The 16-channel latent stores $3{\cdot}8{\cdot}8{\cdot}4/16 = 48\times$ per view natively; fusing $V{=}2$ doubles this to $96\times$ effective information density at fixed width. The failure is exactly what this predicts.
 
 
 
@@ -318,11 +343,11 @@ Reading Tab.~\ref{tab:main}, the domain gap is visible in the ceiling row (34.30
 
 The failure modes are analyzed separately because the diagnostics separate them by construction (Sec.~metrics): the view metric cancels temporal structure, the temporal metrics cancel view identity.
 
-The symptom is that decoded views drift toward their mean: high-frequency, view-specific detail is averaged away. This is visible in the qualitative grids (Fig.~\ref{fig:qualitative}) and measured as cross-view similarity relative to each run's own GT reference (Tab.~\ref{tab:main}). Per-view PSNR drops for both views together --- ghosting is a symmetric collapse, not one view winning --- which is why quality is reported per view, not as one mean. A clean negative control without any view conditioning should ghost fully (Tab.~\ref{tab:viewcond}); that arm is flagged pending re-eval.
+The symptom is that decoded views drift toward their mean: high-frequency, view-specific detail is averaged away. This is clearest in the qualitative grids (Fig.~\ref{fig:qualitative}). Whole-frame and FG-masked XView gaps remain small under the clean protocol, so we do not lean on absolute cosine for the claim. Per-view PSNR drops for both views together (Tab.~\ref{tab:psnr_per_view}) --- a symmetric collapse, not one view winning. The no-conditioning control (E3d) still does not force identical views (Tab.~\ref{tab:viewcond}), so it is not a clean ``must ghost'' anchor.
 
-Is it the conditioning? We compare per-view latent LoRA, a learned view embedding, and both (Tab.~\ref{tab:viewcond}). If all conditioned variants land in the same place, the conditioning mechanism is not what limits view separation. Is it the fusion design? We compare three fusion mechanisms with different inductive biases (Tab.~\ref{tab:fusion}, Fig.~\ref{fig:fusion_ablation}): multi-view self-attention with tree merge (default), channel-concat Conv3d, and factorized $(2{+}1{+}1)$D convolution. If ghosting appears across all of them, the fusion design is not the bottleneck. Comparing ghosting under TC off versus TC on separates ``view fusion is hard'' from ``view fusion is hard on top of temporal compression''.
+Is it the conditioning? We compare per-view latent LoRA, a learned view embedding, and both (Tab.~\ref{tab:viewcond}). If all conditioned variants land in the same place, the conditioning mechanism is not what limits view separation. Is it the fusion design? We compare four fusion mechanisms with different inductive biases (Tab.~\ref{tab:fusion}, Fig.~\ref{fig:fusion_ablation}): default cross-attention with tree merge, joint self-attention then channel-concat merge, channel-concat Conv3d, and factorized $(2{+}1{+}1)$D convolution. Default cross-attention remains strongest; joint self-attention is a large regression at TC off, so fusion design can matter --- but none of the competitive operators closes the joint-compression gap. Comparing ghosting under TC off versus TC on separates ``view fusion is hard'' from ``view fusion is hard on top of temporal compression''.
 
-The fusion variants in Tab.~\ref{tab:fusion} are as follows. Multi-view self-attention with tree merge (default) applies MHA over the concatenated token sequence of all views, with a zero-init output projection, then a pairwise tree merge (Eq.~\ref{eq:fusion_attn}--\ref{eq:tree_merge}). Channel-concat Conv3d stacks views on channels, followed by a $1{\times}1{\times}1$ Conv3d, GN/SiLU, and two symmetric (non-causal) 3D residual blocks. Factorized 4D convolution applies a spatial $3{\times}3$ Conv2d, a temporal $3{\times}3{\times}3$ Conv3d, then a view-axis Conv3d with kernel $(V,3,3)$ compressing $V{\to}1$. The view-conditioning variants in Tab.~\ref{tab:viewcond} are per-view latent LoRA adapters (default), a learned per-view latent embedding $e_v\in\mathbb{R}^{16}$ added to $z$, both combined, and the no-conditioning negative control.
+The fusion variants in Tab.~\ref{tab:fusion} are as follows. The default ($fusion\_mode{=}cross\_attention$, E1c) applies per-location view attention then a pairwise tree merge that reduces $V{\to}1$ (Eq.~\ref{eq:fusion_attn}--\ref{eq:tree_merge}). The $self\_attention$ ablation (E2b/E2e) is different: it runs joint MHA over all $V{\cdot}N$ spatial tokens per time step, splits the enriched tokens back per view, then channel-concats the $V$ feature maps and compresses $V{\cdot}C{\to}C$ with two residual blocks --- there is no tree merge and no mean/first-view pool. Channel-concat Conv3d stacks views on channels, followed by a $1{\times}1{\times}1$ Conv3d, GN/SiLU, and two symmetric (non-causal) 3D residual blocks. Factorized 4D convolution applies a spatial $3{\times}3$ Conv2d, a temporal $3{\times}3{\times}3$ Conv3d, then a view-axis Conv3d with kernel $(V,3,3)$ compressing $V{\to}1$. Under the clean protocol E2b collapses to 25.53~dB at TC off (vs.\ 30.75~dB for default), so that mode is a negative result, not a near-equivalent alternative. The view-conditioning variants in Tab.~\ref{tab:viewcond} are per-view latent LoRA adapters (default), a learned per-view latent embedding $e_v\in\mathbb{R}^{16}$ added to $z$, both combined, and the no-conditioning negative control.
 
 
 
