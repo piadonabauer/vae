@@ -172,9 +172,23 @@ def fig_qual_ghosting():
     save(fig, "qual_ghosting.pdf")
 
 
+def _error_tile(gt_img, rec_img, gain=4.0, rec_dy=-1):
+    """Amplified |GT - Rec| as a white-background grayscale tile (dark = error).
+    rec_dy compensates the constant 1-px vertical crop offset of the rec row
+    in the wandb grid (found by exhaustive shift search)."""
+    g = np.asarray(gt_img.convert("RGB")).astype(np.float32) / 255.0
+    r = np.asarray(rec_img.convert("RGB")).astype(np.float32) / 255.0
+    h = min(g.shape[0], r.shape[0]) - abs(rec_dy)
+    w = min(g.shape[1], r.shape[1])
+    gy, ry = max(0, rec_dy), max(0, -rec_dy)
+    diff = np.abs(g[gy:gy + h, :w] - r[ry:ry + h, :w]).mean(axis=2)
+    vis = 1.0 - np.clip(gain * diff, 0.0, 1.0)
+    return Image.fromarray((vis * 255).astype(np.uint8), mode="L").convert("RGB")
+
+
 def fig_qual_bleeding_strip():
-    """Full width: GT vs fused 16-ch reconstruction over all 9 frames (view 2),
-    chunk-colored borders. This is the main temporal-bleeding visual.
+    """Full width: GT / fused 16-ch reconstruction / amplified error over all
+    9 frames (view 2), chunk-colored borders. Main temporal-bleeding visual.
     Per-frame dB labels: per-clip PSNR computed from the dump-grid tiles
     themselves (PNG is lossless; rec row re-aligned by its constant 1-px
     vertical crop offset; values cross-checked against the dataset per-frame
@@ -183,16 +197,18 @@ def fig_qual_bleeding_strip():
     gt_row, rec_row = grid[1], grid[3]   # view 2 input / view 2 reconstruction
     frame_db = [31.7, 26.1, 25.2, 27.4, 27.1, 25.4, 28.5, 29.5, 27.3]
 
-    fig, axes = plt.subplots(2, 9, figsize=(W2, 1.92))
+    fig, axes = plt.subplots(3, 9, figsize=(W2, 2.72))
     fig.subplots_adjust(wspace=0.06, hspace=0.06, left=0.035, right=0.998,
-                        top=0.80, bottom=0.095)
+                        top=0.855, bottom=0.068)
     chunk_colors = ["#555555"] + [C_CHUNK1] * 4 + [C_CHUNK2] * 4
     for c in range(9):
         show_face(axes[0, c], gt_row[c], title=f"$f_{c}$",
                   ylabel="GT" if c == 0 else None, box_color=chunk_colors[c])
         show_face(axes[1, c], rec_row[c],
-                  ylabel="Rec." if c == 0 else None, box_color=chunk_colors[c],
-                  psnr=frame_db[c])
+                  ylabel="Rec." if c == 0 else None, box_color=chunk_colors[c])
+        show_face(axes[2, c], _error_tile(gt_row[c], rec_row[c]),
+                  ylabel="|Err.|$\\times$4" if c == 0 else None,
+                  box_color=chunk_colors[c], psnr=frame_db[c])
 
     # group labels above the tiles, at the true axes centers (no overlap)
     fig.canvas.draw()
@@ -524,6 +540,50 @@ def fig_resolution():
     save(fig, "resolution_scaling.pdf")
 
 
+def fig_zeroshot_paths():
+    """Single column: pretrained Wan 2.1, zero shot, on a natural 720p clip --
+    native chunked causal decode vs the per-frame (TC off) wrapper, across
+    resolutions. Values from paper/audit/zeroshot_local_results.json
+    (2026-10-02 audit); the NeRSemble marker is the corrected E1z table value,
+    which runs the same TC-off path at 128 px."""
+    import json
+    res_names = ["natural_704", "natural_256", "natural_128"]
+    try:
+        with open(os.path.join(os.path.dirname(OUT), "audit",
+                               "zeroshot_local_results.json")) as f:
+            R = json.load(f)
+        native = [R[f"native_TC_chunked/{n}/bf16"]["psnr"] for n in res_names]
+        tcoff = [R[f"E1z_TCoff_sampled/{n}/bf16"]["psnr"] for n in res_names]
+    except FileNotFoundError:
+        native = [36.88, 30.45, 28.14]
+        tcoff = [21.87, 21.98, 21.97]
+
+    x = np.arange(3)
+    w = 0.34
+    fig, ax = plt.subplots(figsize=(W1, 1.75))
+    fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.155)
+    b1 = ax.bar(x - w / 2, native, w, color="#1f77b4",
+                label="Native chunked decode", edgecolor="white", lw=0.4)
+    b2 = ax.bar(x + w / 2, tcoff, w, color="#d62728",
+                label="Per-frame decode (TC off)", edgecolor="white", lw=0.4)
+    for bars in (b1, b2):
+        for bar in bars:
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.25,
+                    f"{bar.get_height():.1f}", ha="center", fontsize=6.3)
+    # corrected NeRSemble zero-shot (same TC-off path, 128 px) for reference
+    ax.plot([2.47, 2.74], [23.07, 23.07], color="#444444", lw=1.4)
+    ax.text(2.605, 23.45, "NeRSemble\n23.1", fontsize=5.6,
+            color="#444444", va="bottom", ha="center")
+    ax.set_xticks(x)
+    ax.set_xticklabels(["704$^2$", "256$^2$", "128$^2$"])
+    ax.set_ylabel("PSNR (dB)")
+    ax.set_ylim(18.5, 39.6)
+    ax.set_xlim(-0.6, 2.95)
+    ax.legend(fontsize=6.0, loc="upper right", framealpha=0.95)
+    ax.grid(True, axis="y", alpha=0.25, lw=0.4)
+    save(fig, "zeroshot_paths.pdf")
+
+
 if __name__ == "__main__":
     fig_qual_ghosting()
     fig_qual_bleeding_strip()
@@ -536,4 +596,5 @@ if __name__ == "__main__":
     fig_rate_quality()
     fig_view_count()
     fig_resolution()
+    fig_zeroshot_paths()
     print("All CVPR figures written to", OUT)
