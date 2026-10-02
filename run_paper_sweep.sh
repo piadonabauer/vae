@@ -696,7 +696,7 @@ fi
 CHAIN_LEFT="${CHAIN_LEFT:-3}"
 if [[ -n "${SLURM_JOB_ID:-}" && "$CHAIN_LEFT" -gt 0 && "$DRY_RUN" != "1" ]]; then
   sbatch --dependency="afterany:${SLURM_JOB_ID}" --array=1 \
-         --export="ALL,TASK=${TASK},OVERFIT=${OVERFIT},CHAIN_LEFT=$((CHAIN_LEFT - 1)),INIT_CKPT=${INIT_CKPT}" \
+         --export="ALL,TASK=${TASK},OVERFIT=${OVERFIT},CHAIN_LEFT=$((CHAIN_LEFT - 1)),INIT_CKPT=${INIT_CKPT},TRAIN_EPOCHS=${TRAIN_EPOCHS},SAVE_CKPT=${SAVE_CKPT:-False},SEED=${SEED:-}" \
          "$0" \
     && echo "[chain] successor queued (CHAIN_LEFT=$((CHAIN_LEFT - 1)))" \
     || echo "[chain] WARNING: could not queue successor; resubmit by hand if the job times out"

@@ -100,7 +100,7 @@ def fig_qual_bleeding():
     """Rows: GT / 16-ch / 32-ch / 64-ch; cols: frames in chunk 1 (f1..f4).
     (64-ch row added 2026-10-02; regenerate on the cluster, then rerun
     figures_cvpr/make_figures_cvpr.py which re-crops this PDF.)"""
-    arms = [("GT", None), ("16ch", "E1d"), ("32ch", "E11a"), ("64ch", "E11b")]
+    arms = [("GT", None), ("E1d 16ch", "E1d"), ("E11a 32ch", "E11a"), ("E11b 64ch", "E11b")]
     frames = [1, 2, 3, 4]
     gt, _ = load_clip("E1d")
     v = 0
