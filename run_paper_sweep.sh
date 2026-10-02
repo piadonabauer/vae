@@ -66,6 +66,9 @@
 #   48 E10_rank64    E1c + LoRA rank 64
 #   45 E10_before_tcT  E1d + use_lora_before (pre-fusion encoder LoRA)
 #   46 E10_before_tcF  E1c + use_lora_before
+#   49 E1z zero-shot at 256² (TC=False legacy path, like TASK=7)
+#   50 E1z-tcON TRUE zero-shot at 128² -- TC=True = native Wan chunked path
+#   51 E1z-tcON TRUE zero-shot at 256²
 #
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
@@ -262,6 +265,28 @@ case "$TASK" in
     run_name="paper_E1z_perview_zeroshot_256"
     _256=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res
     MODEL_ARGS=( --model.independent_views True --model.temporal_compression False
+                 --epochs 0 --save_ckpt False --final_eval True
+                 --wandb_min_steps_before_init -1
+                 --bucket_config "{'256px_ar1:1': {9: (1.0, 1)}}"
+                 --dataset_presets.all_people_one_expression.data_path "$_256"
+                 --val_dataset_presets.all_people_one_expression.data_path "$_256" )
+    BATCH_LADDER=( "4:16" "2:32" "1:64" )
+    ;;
+  50)
+    # TRUE zero-shot floor at 128² (2026-10-02 audit): temporal_compression=True
+    # runs the native Wan chunked causal path (1+4+4, feat_cache). TASK=7 (TC=False)
+    # skips the pretrained temporal convs and decodes frames independently, which
+    # the audit measured to cost ~6 dB at 128² -- it is NOT the pretrained Wan floor.
+    run_name="paper_E1z_perview_zeroshot_tcON"
+    MODEL_ARGS=( --model.independent_views True --model.temporal_compression True
+                 --epochs 0 --save_ckpt False --final_eval True
+                 --wandb_min_steps_before_init -1 )
+    ;;
+  51)
+    # TRUE zero-shot floor at 256² (TC=True, native Wan path).
+    run_name="paper_E1z_perview_zeroshot_tcON_256"
+    _256=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res
+    MODEL_ARGS=( --model.independent_views True --model.temporal_compression True
                  --epochs 0 --save_ckpt False --final_eval True
                  --wandb_min_steps_before_init -1
                  --bucket_config "{'256px_ar1:1': {9: (1.0, 1)}}"

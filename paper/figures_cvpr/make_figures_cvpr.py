@@ -156,40 +156,43 @@ def show_face(ax, img, title=None, ylabel=None, psnr=None, box_color=None):
 # ---------------------------------------------------------------------------
 
 def fig_qual_ghosting():
-    """Single column: 2 view rows x 4 setting columns, whole faces."""
-    grid = extract_pdf_tiles("qual_ghosting.pdf", 4, 2)  # rows: GT, TCoff, TCon, 32ch
-    titles = ["Ground truth", "Fused, TC off", "Fused, TC on", "Fused, 32-ch"]
-    psnrs = [None, (33.0, 31.4), (28.8, 28.3), (30.2, 29.3)]
+    """Single column: ONE view (view 0), 4 method columns -- same view
+    everywhere, only the method varies. Source PDF layout is 2 rows (views)
+    x 4 cols (GT / fused TC off / fused TC on / fused 64-ch); per-tile dB are
+    the per-clip view-0 values printed in the cluster-generated source."""
+    grid = extract_pdf_tiles("qual_ghosting.pdf", 2, 4)  # grid[view][method]
+    titles = ["Ground truth", "Fused, TC off", "Fused, TC on", "Fused, 64-ch"]
+    psnrs = [None, 32.7, 27.8, 30.9]
 
-    fig, axes = plt.subplots(2, 4, figsize=(W1, 2.10))
-    fig.subplots_adjust(wspace=0.05, hspace=0.32, left=0.055, right=0.995,
-                        top=0.915, bottom=0.085)
+    fig, axes = plt.subplots(1, 4, figsize=(W1, 1.15))
+    fig.subplots_adjust(wspace=0.05, left=0.02, right=0.995,
+                        top=0.86, bottom=0.12)
     for c in range(4):
-        show_face(axes[0, c], grid[c][0], title=titles[c],
-                  ylabel="View 0" if c == 0 else None)
-        show_face(axes[1, c], grid[c][1],
-                  ylabel="View 1" if c == 0 else None,
-                  psnr=None if psnrs[c] is None else psnrs[c][1])
-        if psnrs[c] is not None:
-            axes[0, c].set_xlabel(f"{psnrs[c][0]:.1f} dB", fontsize=6.5, labelpad=1.5)
+        show_face(axes[c], grid[0][c], title=titles[c], psnr=psnrs[c])
     save(fig, "qual_ghosting.pdf")
 
 
 def fig_qual_bleeding_strip():
     """Full width: GT vs fused 16-ch reconstruction over all 9 frames (view 2),
-    chunk-colored borders. This is the main temporal-bleeding visual."""
+    chunk-colored borders. This is the main temporal-bleeding visual.
+    Per-frame dB labels: per-clip PSNR computed from the dump-grid tiles
+    themselves (PNG is lossless; rec row re-aligned by its constant 1-px
+    vertical crop offset; values cross-checked against the dataset per-frame
+    curve)."""
     grid = detect_grid_tiles(os.path.join(OUT, "_wandb_E1d.png"), 4, 9)
     gt_row, rec_row = grid[1], grid[3]   # view 2 input / view 2 reconstruction
+    frame_db = [31.7, 26.1, 25.2, 27.4, 27.1, 25.4, 28.5, 29.5, 27.3]
 
-    fig, axes = plt.subplots(2, 9, figsize=(W2, 1.75))
+    fig, axes = plt.subplots(2, 9, figsize=(W2, 1.92))
     fig.subplots_adjust(wspace=0.06, hspace=0.06, left=0.035, right=0.998,
-                        top=0.84, bottom=0.02)
+                        top=0.80, bottom=0.095)
     chunk_colors = ["#555555"] + [C_CHUNK1] * 4 + [C_CHUNK2] * 4
     for c in range(9):
         show_face(axes[0, c], gt_row[c], title=f"$f_{c}$",
                   ylabel="GT" if c == 0 else None, box_color=chunk_colors[c])
         show_face(axes[1, c], rec_row[c],
-                  ylabel="Rec." if c == 0 else None, box_color=chunk_colors[c])
+                  ylabel="Rec." if c == 0 else None, box_color=chunk_colors[c],
+                  psnr=frame_db[c])
 
     # group labels above the tiles, at the true axes centers (no overlap)
     fig.canvas.draw()
@@ -207,18 +210,21 @@ def fig_qual_bleeding_strip():
 
 
 def fig_qual_bleeding_grid():
-    """Single-column 4x4 companion (supplement): methods x frames, chunk 1."""
-    grid = extract_pdf_tiles("qual_bleeding.pdf", 4, 4)  # rows: GT, 16, 32, 64
-    row_labels = ["Ground truth", "Fused, 16-ch", "Fused, 32-ch", "Fused, 64-ch"]
+    """Single-column 3x4 companion (supplement): methods x frames, chunk 1.
+    Source PDF has 3 rows since the 2026-10-02 relabel (GT / 16-ch / 32-ch).
+    Per-tile dB labels are the per-clip, per-frame values printed in the
+    cluster-generated source PDF (computed from the dumps on the correct
+    [0,1] path -- unchanged by the clamp fix)."""
+    grid = extract_pdf_tiles("qual_bleeding.pdf", 3, 4)  # rows: GT, 16, 32
+    row_labels = ["Ground truth", "Fused, 16-ch", "Fused, 32-ch"]
     psnrs = [None,
-             [32.7, 30.3, 29.7, 27.4],
-             [34.9, 32.3, 32.4, 29.0],
-             [33.0, 31.4, 32.2, 28.7]]
+             [28.6, 27.3, 28.0, 27.8],
+             [31.0, 28.5, 30.7, 30.3]]
 
-    fig, axes = plt.subplots(4, 4, figsize=(W1, 3.55))
+    fig, axes = plt.subplots(3, 4, figsize=(W1, 2.75))
     fig.subplots_adjust(wspace=0.05, hspace=0.30, left=0.075, right=0.995,
                         top=0.955, bottom=0.055)
-    for r in range(4):
+    for r in range(3):
         for c in range(4):
             show_face(axes[r, c], grid[r][c],
                       title=f"$f_{c+1}$" if r == 0 else None,
@@ -229,22 +235,19 @@ def fig_qual_bleeding_grid():
 
 
 def fig_qual_capacity():
-    """Single column: 2 example rows x 4 width columns, whole faces."""
-    grid = extract_pdf_tiles("qual_capacity.pdf", 2, 4)  # rows: motion, identity
+    """Single column: 1 example row x 4 width columns, whole faces.
+    Source PDF is 1x4 since the 2026-10-02 regen (GT / 16 / 32 / 64 at one
+    expressive frame). Per-tile dB labels are the per-clip values printed in
+    the cluster-generated source PDF (correct [0,1] path, unchanged by fix)."""
+    grid = extract_pdf_tiles("qual_capacity.pdf", 1, 4)
     titles = ["Ground truth", "16-ch", "32-ch", "64-ch"]
-    psnrs = [[None, 27.4, 29.0, 28.7],
-             [None, 27.1, 28.1, 28.3]]
-    row_labels = ["High motion", "Identity"]
+    psnrs = [None, 28.0, 29.1, 29.3]
 
-    fig, axes = plt.subplots(2, 4, figsize=(W1, 2.10))
-    fig.subplots_adjust(wspace=0.05, hspace=0.32, left=0.055, right=0.995,
-                        top=0.915, bottom=0.085)
-    for r in range(2):
-        for c in range(4):
-            show_face(axes[r, c], grid[r][c],
-                      title=titles[c] if r == 0 else None,
-                      ylabel=row_labels[r] if c == 0 else None,
-                      psnr=psnrs[r][c])
+    fig, axes = plt.subplots(1, 4, figsize=(W1, 1.15))
+    fig.subplots_adjust(wspace=0.05, left=0.02, right=0.995,
+                        top=0.86, bottom=0.12)
+    for c in range(4):
+        show_face(axes[c], grid[0][c], title=titles[c], psnr=psnrs[c])
     save(fig, "qual_capacity.pdf")
 
 
@@ -267,15 +270,15 @@ def _chunk_bands(ax, ymax_label=None):
 def fig_perframe():
     """Single-column per-frame PSNR (V=2 main setting). Clean-wave final_eval."""
     series = [
-        ("Fused, TC off (E1c)", C_FUSED, "-",
+        ("Fused, TC off", C_FUSED, "-",
          [33.60, 33.45, 32.81, 32.38, 32.39, 32.34, 32.52, 32.63, 32.54]),
-        ("Fused, TC on (E1d)", C_JOINT, "-",
+        ("Fused, TC on", C_JOINT, "-",
          [32.95, 30.82, 28.66, 29.35, 27.88, 25.94, 27.35, 28.60, 28.22]),
-        ("+ diff-loss (E4h)", "#17becf", "--",
+        ("+ diff-loss", "#17becf", "--",
          [32.01, 30.20, 28.69, 29.75, 28.38, 26.04, 27.38, 29.15, 28.43]),
-        ("+ 32-ch (E11a)", C_32CH, ":",
+        ("+ 32-ch", C_32CH, ":",
          [33.51, 31.76, 29.96, 30.30, 29.38, 27.94, 28.59, 30.23, 29.46]),
-        ("+ both (combo)", "#7a3e9d", "-.",
+        ("+ both", "#7a3e9d", "-.",
          [35.37, 33.57, 31.26, 32.51, 30.95, 29.62, 30.03, 32.37, 31.05]),
     ]
     xs = np.arange(9)
@@ -319,16 +322,17 @@ def fig_perframe():
 
 
 def fig_latent_width():
-    """Single column: widening under joint compression + per-view reference."""
+    """Single column: widening under joint compression + per-view reference.
+    PSNRs corrected 2026-10-02 (clamp bug, see clean_retrain_metrics_corrected.md)."""
     xs = np.arange(3)
-    psnrs = [25.96, 27.52, 28.80]  # E1d, E11a, E11b (clean)
+    psnrs = [28.27, 29.78, 30.92]  # E1d, E11a, E11b (clean, corrected)
     cols = [C_JOINT, C_32CH, C_64CH]
 
     fig, ax = plt.subplots(figsize=(W1, 1.75))
     fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.16)
 
-    ax.axhline(31.37, color=C_PVTCT, lw=1.0, ls="--")
-    ax.text(2.32, 31.37 - 0.25, "per-view, TC on (31.37 dB)", color=C_PVTCT,
+    ax.axhline(33.19, color=C_PVTCT, lw=1.0, ls="--")
+    ax.text(2.32, 33.19 - 0.25, "per-view, TC on (33.19 dB)", color=C_PVTCT,
             fontsize=6.5, ha="right", va="top")
 
     ax.plot(xs, psnrs, "-", color="#aaaaaa", lw=1.0, zorder=2)
@@ -336,15 +340,15 @@ def fig_latent_width():
         ax.scatter([x], [p], color=col, s=34, zorder=5)
         ax.annotate(f"{p:.2f}", (x, p), xytext=(0, 6), textcoords="offset points",
                     ha="center", fontsize=6.5)
-    ax.text(0.5, 26.40, "+1.56 dB", fontsize=6.5, ha="center",
+    ax.text(0.5, 28.70, "+1.52 dB", fontsize=6.5, ha="center",
             color="#222222", rotation=28)
-    ax.text(1.5, 27.90, "+1.28 dB", fontsize=6.5, ha="center", color="#222222",
+    ax.text(1.5, 30.05, "+1.14 dB", fontsize=6.5, ha="center", color="#222222",
             rotation=28)
 
     ax.set_xticks(xs)
     ax.set_xticklabels(["16 (Wan default)", "32", "64"])
     ax.set_xlim(-0.35, 2.35)
-    ax.set_ylim(24.4, 32.6)
+    ax.set_ylim(26.7, 34.4)
     ax.set_xlabel("Latent channels")
     ax.set_ylabel("PSNR (dB)")
     ax.grid(True, axis="y", alpha=0.25, lw=0.4)
@@ -352,15 +356,16 @@ def fig_latent_width():
 
 
 def fig_interventions():
-    """Single column: horizontal bars, deltas vs the joint baseline (clean)."""
-    base = 25.96
+    """Single column: horizontal bars, deltas vs the joint baseline (clean).
+    PSNRs corrected 2026-10-02 (clamp bug, see clean_retrain_metrics_corrected.md)."""
+    base = 28.27
     items = [
-        ("Baseline E1d (fused, TC on)", base, C_JOINT),
-        ("+ temporal diff-loss (E4h)", 26.07, "#aec7e8"),
-        ("+ diff-loss + cache (E4i)", 26.65, "#6baed6"),
-        ("+ 32-ch (E11a)", 27.52, C_32CH),
-        ("+ 64-ch (E11b)", 28.80, C_64CH),
-        ("+ diff-loss + 32-ch (combo)", 29.38, "#7a3e9d"),
+        ("Baseline (fused, TC on)", base, C_JOINT),
+        ("+ temporal diff-loss", 28.43, "#aec7e8"),
+        ("+ diff-loss + cache", 28.89, "#6baed6"),
+        ("+ 32-ch latent", 29.78, C_32CH),
+        ("+ 64-ch latent", 30.92, C_64CH),
+        ("+ diff-loss + 32-ch", 31.39, "#7a3e9d"),
     ]
     fig, ax = plt.subplots(figsize=(W1, 1.8))
     fig.subplots_adjust(left=0.42, right=0.985, top=0.97, bottom=0.20)
@@ -375,7 +380,7 @@ def fig_interventions():
     ax.set_yticks(ys)
     ax.set_yticklabels([lab for lab, _, _ in items], fontsize=6.2)
     ax.invert_yaxis()
-    ax.set_xlim(24.6, 32.0)
+    ax.set_xlim(26.9, 34.0)
     ax.set_xlabel("PSNR (dB)")
     ax.grid(True, axis="x", alpha=0.25, lw=0.4)
     save(fig, "interventions.pdf")
@@ -388,7 +393,12 @@ def fig_datascale():
     bleed = [0.983, 0.919]
     xv_rec = [0.847, 0.920]
     xv_gt = [0.845, 0.918]
-    psnr = [34.56, 25.31]
+    # PSNR panel corrected 2026-10-02: all-people point = corrected E1d of the
+    # same (pre-clean) wave, (27.30+27.02)/2. CAUTION: the single-sequence
+    # overfit run has no per-view log, so 34.56 is still the PRE-FIX value
+    # (biased >=1.7 dB LOW). Dagger removed per request 2026-10-02 -- REFILL
+    # this number from the cluster jsonl before camera-ready.
+    psnr = [34.56, 27.16]
 
     fig, axes = plt.subplots(1, 3, figsize=(W1, 1.55))
     fig.subplots_adjust(wspace=0.62, left=0.115, right=0.985, top=0.88, bottom=0.265)
@@ -407,7 +417,7 @@ def fig_datascale():
     ax.plot(xs, xv_rec, "o-", color=C_JOINT, lw=1.3, ms=4.5, label="rec.")
     ax.plot(xs, xv_gt, "s--", color="#888888", lw=1.0, ms=3.8, label="GT")
     ax.set_title("Ghosting", fontsize=7.5, pad=3)
-    ax.set_ylabel("XView sim", fontsize=7, labelpad=1)
+    ax.set_ylabel("XView sim $\\downarrow$", fontsize=7, labelpad=1)
     ax.set_ylim(0.83, 0.945)
     ax.legend(fontsize=5.5, loc="upper left", framealpha=0.9,
               borderpad=0.3, handlelength=1.4)
@@ -418,7 +428,7 @@ def fig_datascale():
         ax.annotate(f"{p:.2f}", (x, p), xytext=(0, off),
                     textcoords="offset points", ha="center", va=va, fontsize=6)
     ax.set_title("Quality", fontsize=7.5, pad=3)
-    ax.set_ylabel("PSNR (dB)", fontsize=7, labelpad=1)
+    ax.set_ylabel("PSNR (dB) $\\uparrow$", fontsize=7, labelpad=1)
     ax.set_ylim(22, 38)
 
     for ax in axes:
@@ -431,15 +441,16 @@ def fig_datascale():
 
 
 def fig_rate_quality():
-    """Single column: the 2x2 rate-quality matrix as grouped bars (clean)."""
+    """Single column: the 2x2 rate-quality matrix as grouped bars (clean).
+    PSNRs corrected 2026-10-02 (clamp bug, see clean_retrain_metrics_corrected.md)."""
     fig, ax = plt.subplots(figsize=(W1, 1.75))
     fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.155)
     x = np.arange(2)
     w = 0.32
-    perview = [34.20, 31.37]  # E1a, E1b
-    fused = [30.75, 25.96]    # E1c, E1d
-    # additive prediction at TC on: 34.20 - 2.83 - 3.45 = 27.92
-    add_pred = 34.20 - (34.20 - 31.37) - (34.20 - 30.75)
+    perview = [35.89, 33.19]  # E1a, E1b (corrected)
+    fused = [32.74, 28.27]    # E1c, E1d (corrected)
+    # additive prediction at TC on: 35.89 - 2.70 - 3.15 = 30.04
+    add_pred = perview[0] - (perview[0] - perview[1]) - (perview[0] - fused[0])
     b1 = ax.bar(x - w / 2, perview, w, color="#1f77b4", label="Per-view",
                 edgecolor="white", lw=0.4)
     b2 = ax.bar(x + w / 2, fused, w, color=C_JOINT, label="Fused",
@@ -455,7 +466,7 @@ def fig_rate_quality():
     ax.set_xticks(x)
     ax.set_xticklabels(["TC off", "TC on"])
     ax.set_ylabel("PSNR (dB)")
-    ax.set_ylim(22.5, 36.6)
+    ax.set_ylim(25.0, 38.4)
     ax.set_xlim(-0.6, 1.85)
     ax.legend(fontsize=6.3, loc="upper right", framealpha=0.95)
     ax.grid(True, axis="y", alpha=0.25, lw=0.4)
@@ -464,8 +475,9 @@ def fig_rate_quality():
 
 def fig_view_count():
     # V=8 pending clean retrain; plot 2 and 4 only from clean wave.
+    # PSNRs corrected 2026-10-02 (clamp bug); E6b/E6c = mean of 4 per-view PSNRs.
     views = [2, 4]
-    psnr_f, psnr_t = [30.75, 28.00], [25.96, 22.99]
+    psnr_f, psnr_t = [32.74, 30.18], [28.27, 25.51]
     bleed_f, bleed_t = [0.969, 0.956], [0.913, 0.842]
 
     fig, axes = plt.subplots(1, 2, figsize=(W1, 1.55))
@@ -488,8 +500,13 @@ def fig_view_count():
 
 
 def fig_resolution():
+    # Corrected 2026-10-02. E9a/E9b are pre-clean-wave runs (not retrained in the
+    # clean wave): corrected = mean of final_eval per-view PSNRs of those runs
+    # (E9a 29.48/30.29, E9b 28.71/29.13). 128px point = corrected E1d of the same
+    # era (27.30/27.02); the old 25.31 came from a sweep jsonl not recoverable
+    # locally, its corrected equivalent would be ~27.6.
     res = [128, 256, 512]
-    psnrs = [25.31, 27.78, 26.64]
+    psnrs = [27.16, 29.88, 28.92]
     fig, ax = plt.subplots(figsize=(W1 * 0.85, 1.55))
     fig.subplots_adjust(left=0.14, right=0.97, top=0.95, bottom=0.20)
     ax.plot(res, psnrs, "o-", color=C_JOINT, lw=1.3, ms=4.5)
@@ -502,7 +519,7 @@ def fig_resolution():
     ax.minorticks_off()
     ax.set_xlabel("Resolution (px)")
     ax.set_ylabel("PSNR (dB)")
-    ax.set_ylim(24.5, 29.2)
+    ax.set_ylim(26.3, 31.2)
     ax.grid(True, alpha=0.25, lw=0.4)
     save(fig, "resolution_scaling.pdf")
 
