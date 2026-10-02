@@ -84,12 +84,12 @@ def fig_qual_ghosting():
 
 
 def fig_qual_bleeding():
-    """Rows: GT / E1d / E11a / combo; cols: frames in chunk 1 (f1..f4)."""
-    arms = [("GT", None), ("E1d 16ch", "E1d"), ("E11a 32ch", "E11a"), ("combo", "combo")]
+    """Rows: GT / 16-ch / 32-ch; cols: frames in chunk 1 (f1..f4)."""
+    arms = [("GT", None), ("16ch", "E1d"), ("32ch", "E11a")]
     frames = [1, 2, 3, 4]
     gt, _ = load_clip("E1d", 0)
     v = 0
-    fig, axes = plt.subplots(4, 4, figsize=(6.875, 6.5))
+    fig, axes = plt.subplots(3, 4, figsize=(6.875, 5.0))
     fig.subplots_adjust(wspace=0.03, hspace=0.12, left=0.06, right=0.99, top=0.95, bottom=0.04)
     for r, (lab, arm) in enumerate(arms):
         for c, t in enumerate(frames):
