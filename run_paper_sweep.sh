@@ -200,8 +200,12 @@ COMMON=(
   --wandb True
   --optimization False
   --FAST_MODE False
-  # Default False (disk). Seed-repeat / long 8-view arms may set SAVE_CKPT=True.
+  # Default False (disk). Final-wave arms set SAVE_CKPT=True for chain-resume +
+  # phase-2 warm-start only. Sparse cadence + retention: ~1 GB/run max, not
+  # every epoch (~500 MB x 300). Override via SAVE_EVERY_N_EPOCHS / KEEP_N_LATEST.
   --save_ckpt "${SAVE_CKPT:-False}"
+  --save_every_n_epochs "${SAVE_EVERY_N_EPOCHS:-50}"
+  --keep_n_latest "${KEEP_N_LATEST:-2}"
   # Metrics live in eval_metrics.jsonl + wandb; mid-run shards eat too much disk.
   --log_every 20
   --log_schedule_steps "[1,2,3,5,8,12,20,30,50,75,100,150,200]"
@@ -696,7 +700,7 @@ fi
 CHAIN_LEFT="${CHAIN_LEFT:-3}"
 if [[ -n "${SLURM_JOB_ID:-}" && "$CHAIN_LEFT" -gt 0 && "$DRY_RUN" != "1" ]]; then
   sbatch --dependency="afterany:${SLURM_JOB_ID}" --array=1 \
-         --export="ALL,TASK=${TASK},OVERFIT=${OVERFIT},CHAIN_LEFT=$((CHAIN_LEFT - 1)),INIT_CKPT=${INIT_CKPT},TRAIN_EPOCHS=${TRAIN_EPOCHS},SAVE_CKPT=${SAVE_CKPT:-False},SEED=${SEED:-}" \
+         --export="ALL,TASK=${TASK},OVERFIT=${OVERFIT},CHAIN_LEFT=$((CHAIN_LEFT - 1)),INIT_CKPT=${INIT_CKPT},TRAIN_EPOCHS=${TRAIN_EPOCHS},SAVE_CKPT=${SAVE_CKPT:-False},SAVE_EVERY_N_EPOCHS=${SAVE_EVERY_N_EPOCHS:-50},KEEP_N_LATEST=${KEEP_N_LATEST:-2},SEED=${SEED:-}" \
          "$0" \
     && echo "[chain] successor queued (CHAIN_LEFT=$((CHAIN_LEFT - 1)))" \
     || echo "[chain] WARNING: could not queue successor; resubmit by hand if the job times out"
