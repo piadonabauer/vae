@@ -69,6 +69,7 @@
 #   49 E1z zero-shot at 256² (TC=False legacy path, like TASK=7)
 #   50 E1z-tcON TRUE zero-shot at 128² -- TC=True = native Wan chunked path
 #   51 E1z-tcON TRUE zero-shot at 256²
+#   52 E_best  all improvements combined: widen64 + diff-loss + perc0.5 + rank128
 #
 #           TC off. Supervisor-requested Table-1 ceiling row: "how good can
 #           per-view LoRA finetuning on our data get". NOT budget-matched to the
@@ -271,6 +272,24 @@ case "$TASK" in
                  --dataset_presets.all_people_one_expression.data_path "$_256"
                  --val_dataset_presets.all_people_one_expression.data_path "$_256" )
     BATCH_LADDER=( "4:16" "2:32" "1:64" )
+    ;;
+  52)
+    # E_best "all improvements combined" (2026-10-02): strongest adapter-scale
+    # attempt under joint TC+fused compression -- widen-64 (E11b) + temporal
+    # diff loss (E4h) + perceptual 0.5 (E7_p0.5) + LoRA rank 128 (E10_r128).
+    # Answers "did you tune?": if it stays ~2 dB below the per-view reference,
+    # capacity is necessary-not-sufficient even at best effort; if it closes
+    # the gap, that is a result on its own.
+    # NOTE: rank 128 LoRA shapes cannot load a rank-32 E1b warm start; if the
+    # loader rejects mismatched LoRA keys, run with INIT_CKPT=none (disclose).
+    run_name="paper_Ebest_allcombined"
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 --model.latent_widen_to 64
+                 --model.lora_rank 128
+                 --temporal_diff_loss_weight 2.0
+                 --perceptual_loss_weight 0.5
+                 --vae_loss_config.perceptual_loss_weight 0.5 )
     ;;
   50)
     # TRUE zero-shot floor at 128² (2026-10-02 audit): temporal_compression=True

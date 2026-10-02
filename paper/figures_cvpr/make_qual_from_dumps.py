@@ -84,12 +84,14 @@ def fig_qual_ghosting():
 
 
 def fig_qual_bleeding():
-    """Rows: GT / 16-ch / 32-ch; cols: frames in chunk 1 (f1..f4)."""
-    arms = [("GT", None), ("16ch", "E1d"), ("32ch", "E11a")]
+    """Rows: GT / 16-ch / 32-ch / 64-ch; cols: frames in chunk 1 (f1..f4).
+    (64-ch row added 2026-10-02; regenerate on the cluster, then rerun
+    figures_cvpr/make_figures_cvpr.py which re-crops this PDF.)"""
+    arms = [("GT", None), ("16ch", "E1d"), ("32ch", "E11a"), ("64ch", "E11b")]
     frames = [1, 2, 3, 4]
     gt, _ = load_clip("E1d", 0)
     v = 0
-    fig, axes = plt.subplots(3, 4, figsize=(6.875, 5.0))
+    fig, axes = plt.subplots(len(arms), 4, figsize=(6.875, 6.6))
     fig.subplots_adjust(wspace=0.03, hspace=0.12, left=0.06, right=0.99, top=0.95, bottom=0.04)
     for r, (lab, arm) in enumerate(arms):
         for c, t in enumerate(frames):

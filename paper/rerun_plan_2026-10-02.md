@@ -25,6 +25,7 @@ so extending is impossible and only a restart keeps arms budget-comparable.
 | item | verdict | where |
 |---|---|---|
 | Main-table arms E1a/E1b/E1c/E1d/E4h/E4i/E11a/E11b/combo | **REDO** — final wave, 300 epochs, uniform staged init, ckpts, 2 seeds for headline | §A0 |
+| E_best "all improvements combined" (widen64+diff+perc0.5+rank128, TASK=52) | **RUN (new)** — one arm, answers "did you tune?" | §A0 |
 | True zero-shot TC=on @128/@256 | **RUN (new)** — eval-only, minutes | §A1 |
 | Zero-shot TC=off rows (queued 5845272/73) | keep — label as "per-frame wrapper", not Wan floor | §A3 |
 | Queued seed-43 trainings (5845274–77) | **CANCEL** — superseded by §A0 (old budget + mixed init; E11a/combo inits don't even match their seed-42 partners) | §A3 |
@@ -91,6 +92,15 @@ for T in 4 8 36; do
     --export=ALL,TASK=$T,OVERFIT=0,CHAIN_LEFT=1,TRAIN_EPOCHS=300,SAVE_CKPT=True,SEED=43,INIT_CKPT="$E1B43" \
     --array=1 ./run_paper_sweep.sh
 done
+# E_best "all improvements combined" (TASK=52, new): widen64 + diff-loss +
+# perc0.5 + rank128 under TC-on fused -- last row of the capacity table,
+# answers "did you tune?". Rank-128 LoRA shapes cannot load the rank-32 E1b
+# warm start, so this arm runs from scratch (disclose in the table footnote);
+# if train.py's loader skips mismatched keys cleanly you may try "$E1B42" and
+# keep it only if the load log shows no dropped non-LoRA keys.
+sbatch --parsable --partition=gpubase_l40s_b3 --time=0-18:00:00 \
+  --export=ALL,TASK=52,OVERFIT=0,CHAIN_LEFT=1,TRAIN_EPOCHS=300,SAVE_CKPT=True,INIT_CKPT=none \
+  --array=1 ./run_paper_sweep.sh
 ```
 
 **Pre-flight checks (do BEFORE submitting phase 2, 5 minutes):**
@@ -237,6 +247,23 @@ For the with/without-matting comparison, pass a clip preprocessed without the
 white-matting step (re-run `data/processing/preprocess_nersemble.py` on one
 sequence with matting disabled) — only one clip is needed, this is a
 diagnostic, not a table row.
+
+### B4. Add the 64-ch row to the qualitative bleeding grid
+
+`qual_bleeding_grid.pdf` currently shows GT/16-ch/32-ch only because the
+cluster-generated source (`paper/figures/qual_bleeding.pdf`, built by
+`paper/figures_cvpr/make_qual_from_dumps.py`) never included E11b. The script
+now has the 64-ch row; on the cluster run:
+
+```bash
+python paper/figures_cvpr/make_qual_from_dumps.py   # needs the E11b best_val dump
+```
+
+commit the regenerated `paper/figures/qual_bleeding.pdf`, then locally rerun
+`make_figures_cvpr.py` (the extractor auto-detects 3 vs 4 rows) and copy the
+64-ch per-frame dB printed in the new source into the `psnrs` list.
+(After the §A0 final wave, point `DUMPS` in make_qual_from_dumps.py at the
+final-wave run dirs instead.)
 
 ---
 

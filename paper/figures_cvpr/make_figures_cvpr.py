@@ -212,25 +212,28 @@ def fig_qual_bleeding_strip():
 
 def fig_qual_bleeding_grid():
     """Single-column 3x4 companion (supplement): methods x frames, chunk 1.
-    Source PDF has 3 rows since the 2026-10-02 relabel (GT / 16-ch / 32-ch).
+    Source PDF rows: GT / 16-ch / 32-ch (3 rows); becomes 4 rows with a 64-ch
+    row once make_qual_from_dumps.py is regenerated on the cluster (E11b dump).
     Per-tile dB labels are the per-clip, per-frame values printed in the
     cluster-generated source PDF (computed from the dumps on the correct
     [0,1] path -- unchanged by the clamp fix)."""
-    grid = extract_pdf_tiles("qual_bleeding.pdf", 3, 4)  # rows: GT, 16, 32
-    row_labels = ["Ground truth", "Fused, 16-ch", "Fused, 32-ch"]
+    doc = pymupdf.open(os.path.join(OLD, "qual_bleeding.pdf"))
+    nrows = len(doc[0].get_image_info()) // 4
+    doc.close()
+    grid = extract_pdf_tiles("qual_bleeding.pdf", nrows, 4)
+    row_labels = ["GT", "16-ch", "32-ch", "64-ch"][:nrows]
     psnrs = [None,
              [28.6, 27.3, 28.0, 27.8],
-             [31.0, 28.5, 30.7, 30.3]]
-
-    fig, axes = plt.subplots(3, 4, figsize=(W1, 2.52))
+             [31.0, 28.5, 30.7, 30.3],
+             None]  # 64-ch: fill from the regenerated source PDF's labels
+    fig, axes = plt.subplots(nrows, 4, figsize=(W1, 0.84 * nrows))
     fig.subplots_adjust(wspace=0.05, hspace=0.155, left=0.075, right=0.995,
-                        top=0.945, bottom=0.062)
-    for r in range(3):
+                        top=1 - 0.14 / nrows, bottom=0.186 / nrows)
+    for r in range(nrows):
         for c in range(4):
             show_face(axes[r, c], grid[r][c],
                       title=f"$f_{c+1}$" if r == 0 else None,
-                      ylabel=row_labels[r].replace("Fused, ", "").replace(
-                          "Ground truth", "GT") if c == 0 else None,
+                      ylabel=row_labels[r] if c == 0 else None,
                       psnr=None if psnrs[r] is None else psnrs[r][c])
     save(fig, "qual_bleeding_grid.pdf")
 
