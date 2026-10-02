@@ -172,43 +172,28 @@ def fig_qual_ghosting():
     save(fig, "qual_ghosting.pdf")
 
 
-def _error_tile(gt_img, rec_img, gain=4.0, rec_dy=-1):
-    """Amplified |GT - Rec| as a white-background grayscale tile (dark = error).
-    rec_dy compensates the constant 1-px vertical crop offset of the rec row
-    in the wandb grid (found by exhaustive shift search)."""
-    g = np.asarray(gt_img.convert("RGB")).astype(np.float32) / 255.0
-    r = np.asarray(rec_img.convert("RGB")).astype(np.float32) / 255.0
-    h = min(g.shape[0], r.shape[0]) - abs(rec_dy)
-    w = min(g.shape[1], r.shape[1])
-    gy, ry = max(0, rec_dy), max(0, -rec_dy)
-    diff = np.abs(g[gy:gy + h, :w] - r[ry:ry + h, :w]).mean(axis=2)
-    vis = 1.0 - np.clip(gain * diff, 0.0, 1.0)
-    return Image.fromarray((vis * 255).astype(np.uint8), mode="L").convert("RGB")
-
-
 def fig_qual_bleeding_strip():
-    """Full width: GT / fused 16-ch reconstruction / amplified error over all
-    9 frames (view 2), chunk-colored borders. Main temporal-bleeding visual.
+    """Full width: GT vs fused 16-ch reconstruction over all 9 frames (view 2),
+    chunk-colored borders. This is the main temporal-bleeding visual.
     Per-frame dB labels: per-clip PSNR computed from the dump-grid tiles
     themselves (PNG is lossless; rec row re-aligned by its constant 1-px
     vertical crop offset; values cross-checked against the dataset per-frame
-    curve)."""
+    curve). A 3-row variant with an amplified |GT-Rec| error row exists at
+    commit 2bd1284 if ever needed."""
     grid = detect_grid_tiles(os.path.join(OUT, "_wandb_E1d.png"), 4, 9)
     gt_row, rec_row = grid[1], grid[3]   # view 2 input / view 2 reconstruction
     frame_db = [31.7, 26.1, 25.2, 27.4, 27.1, 25.4, 28.5, 29.5, 27.3]
 
-    fig, axes = plt.subplots(3, 9, figsize=(W2, 2.72))
+    fig, axes = plt.subplots(2, 9, figsize=(W2, 1.92))
     fig.subplots_adjust(wspace=0.06, hspace=0.06, left=0.035, right=0.998,
-                        top=0.855, bottom=0.068)
+                        top=0.80, bottom=0.095)
     chunk_colors = ["#555555"] + [C_CHUNK1] * 4 + [C_CHUNK2] * 4
     for c in range(9):
         show_face(axes[0, c], gt_row[c], title=f"$f_{c}$",
                   ylabel="GT" if c == 0 else None, box_color=chunk_colors[c])
         show_face(axes[1, c], rec_row[c],
-                  ylabel="Rec." if c == 0 else None, box_color=chunk_colors[c])
-        show_face(axes[2, c], _error_tile(gt_row[c], rec_row[c]),
-                  ylabel="|Err.|$\\times$4" if c == 0 else None,
-                  box_color=chunk_colors[c], psnr=frame_db[c])
+                  ylabel="Rec." if c == 0 else None, box_color=chunk_colors[c],
+                  psnr=frame_db[c])
 
     # group labels above the tiles, at the true axes centers (no overlap)
     fig.canvas.draw()
