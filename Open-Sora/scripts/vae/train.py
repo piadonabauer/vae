@@ -1368,22 +1368,23 @@ def evaluate_model(
             # Handle posterior wrapping if needed
             if isinstance(posterior, (tuple, list)) and len(posterior) == 2:
                 posterior = DiagonalGaussianDistribution(torch.cat(posterior, dim=1))
-            
-            # Compute metrics
-            metrics = compute_metrics(x, x_rec)
-            
-            # Accumulate metrics
-            all_metrics["psnr"].extend(metrics["psnr_per_sample"])
-            all_metrics["ssim"].extend(metrics["ssim_per_sample"])
-            all_metrics["mse"].append(metrics["mse"])
 
-            # Diagnostics. Metrics expect [0,1]; undo the [-1,1] scaling first.
+            # Metrics expect [0,1]. Undo [-1,1] scaling BEFORE compute_metrics.
+            # Bug (fixed 2026-10-02): previously compute_metrics(x, x_rec) ran on
+            # [-1,1] tensors and clamp(0,1) inside compute_metrics crushed the
+            # negative half, under-reporting psnr_mean by ~1.7–2.4 dB vs the
+            # correctly-scaled psnr_per_view path. Keep one convention.
             if value_range == "[-1,1]":
                 x01 = ((x.float() + 1.0) / 2.0).clamp(0, 1)
                 xr01 = ((x_rec.float() + 1.0) / 2.0).clamp(0, 1)
             else:
                 x01 = x.float().clamp(0, 1)
                 xr01 = x_rec.float().clamp(0, 1)
+
+            metrics = compute_metrics(x01, xr01)
+            all_metrics["psnr"].extend(metrics["psnr_per_sample"])
+            all_metrics["ssim"].extend(metrics["ssim_per_sample"])
+            all_metrics["mse"].append(metrics["mse"])
             # LPIPS per clip: mean over all views and frames, [-1,1] fp32 frames.
             # try/except so a metric failure can never kill a training run.
             try:
