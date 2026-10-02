@@ -25,8 +25,16 @@ DUMPS = {
     "combo": "paper_E_combo_diffLoss_widen32__job5562206_t36",
 }
 
+# ONE identity + ONE frame shared by the ghosting (failure) and capacity
+# (repair) figures, so a reader can line the two up as a single story.
+# f5 is the hardest frame (chunk-2 interior, per-frame PSNR minimum).
+# The bleeding grid intentionally differs: it shows frames f1-f4 (chunk 1)
+# of the SAME clip, because its subject is within-chunk dynamics.
+QUAL_CLIP = 0
+QUAL_FRAME = 5
 
-def load_clip(arm: str, clip_idx: int = 0):
+
+def load_clip(arm: str, clip_idx: int = QUAL_CLIP, _gt_ref={}):
     d = DUMP_ROOT / DUMPS[arm]
     data = torch.load(d / "best_val_eval_dump.pt", map_location="cpu", weights_only=False)
     clip = data["clips"][clip_idx]
@@ -35,6 +43,11 @@ def load_clip(arm: str, clip_idx: int = 0):
     if gt.dtype == torch.uint8:
         gt = gt.float() / 255.0
         rec = rec.float() / 255.0
+    # Safety: every arm's dump must contain the SAME clip at this index
+    # (deterministic eval order). Guards against silently comparing identities.
+    ref = _gt_ref.setdefault(clip_idx, gt)
+    assert torch.allclose(ref, gt, atol=2 / 255), \
+        f"{arm}: GT at clip_idx={clip_idx} differs from reference dump -- eval order mismatch"
     return gt, rec  # (V,C,T,H,W)
 
 
@@ -63,10 +76,10 @@ def show(ax, img, title=None, xlabel=None):
 
 
 def fig_qual_ghosting():
-    """2 views x methods: GT, E1c, E1d, E11b — mid frame."""
+    """2 views x methods: GT, E1c, E1d, E11b — same clip+frame as capacity fig."""
     arms = [("GT", None), ("E1c", "E1c"), ("E1d", "E1d"), ("E11b", "E11b")]
-    gt, _ = load_clip("E1d", 0)
-    t = 4
+    gt, _ = load_clip("E1d")
+    t = QUAL_FRAME
     fig, axes = plt.subplots(2, 4, figsize=(6.875, 3.4))
     fig.subplots_adjust(wspace=0.04, hspace=0.08, left=0.04, right=0.99, top=0.92, bottom=0.08)
     for v in range(2):
@@ -75,7 +88,7 @@ def fig_qual_ghosting():
                 img = frame_to_img(gt[v, :, t])
                 xlab = None
             else:
-                _, rec = load_clip(arm, 0)
+                _, rec = load_clip(arm)
                 img = frame_to_img(rec[v, :, t])
                 xlab = f"{psnr(gt[v, :, t], rec[v, :, t]):.1f} dB"
             show(axes[v, c], img, title=lab if v == 0 else None, xlabel=xlab)
@@ -89,7 +102,7 @@ def fig_qual_bleeding():
     figures_cvpr/make_figures_cvpr.py which re-crops this PDF.)"""
     arms = [("GT", None), ("16ch", "E1d"), ("32ch", "E11a"), ("64ch", "E11b")]
     frames = [1, 2, 3, 4]
-    gt, _ = load_clip("E1d", 0)
+    gt, _ = load_clip("E1d")
     v = 0
     fig, axes = plt.subplots(len(arms), 4, figsize=(6.875, 6.6))
     fig.subplots_adjust(wspace=0.03, hspace=0.12, left=0.06, right=0.99, top=0.95, bottom=0.04)
@@ -99,7 +112,7 @@ def fig_qual_bleeding():
                 img = frame_to_img(gt[v, :, t])
                 xlab = f"$f_{t}$"
             else:
-                _, rec = load_clip(arm, 0)
+                _, rec = load_clip(arm)
                 img = frame_to_img(rec[v, :, t])
                 xlab = f"{psnr(gt[v, :, t], rec[v, :, t]):.1f} dB"
             show(axes[r, c], img, title=(f"$f_{t}$" if r == 0 else None), xlabel=xlab)
@@ -108,10 +121,11 @@ def fig_qual_bleeding():
 
 
 def fig_qual_capacity():
-    """GT / E1d / E11a / E11b at one expressive frame."""
+    """GT / E1d / E11a / E11b — same clip+frame as the ghosting fig (failure
+    there, repair here: one story)."""
     arms = [("GT", None), ("16-ch", "E1d"), ("32-ch", "E11a"), ("64-ch", "E11b")]
-    gt, _ = load_clip("E1d", 0)
-    t, v = 5, 0
+    gt, _ = load_clip("E1d")
+    t, v = QUAL_FRAME, 0
     fig, axes = plt.subplots(1, 4, figsize=(6.875, 1.85))
     fig.subplots_adjust(wspace=0.04, left=0.02, right=0.99, top=0.88, bottom=0.12)
     for c, (lab, arm) in enumerate(arms):
@@ -119,7 +133,7 @@ def fig_qual_capacity():
             img = frame_to_img(gt[v, :, t])
             xlab = None
         else:
-            _, rec = load_clip(arm, 0)
+            _, rec = load_clip(arm)
             img = frame_to_img(rec[v, :, t])
             xlab = f"{psnr(gt[v, :, t], rec[v, :, t]):.1f} dB"
         show(axes[c], img, title=lab, xlabel=xlab)

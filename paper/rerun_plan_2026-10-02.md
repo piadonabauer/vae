@@ -265,6 +265,19 @@ commit the regenerated `paper/figures/qual_bleeding.pdf`, then locally rerun
 (After the §A0 final wave, point `DUMPS` in make_qual_from_dumps.py at the
 final-wave run dirs instead.)
 
+**Same identity + same frame across the qualitative pair (supervisor request):**
+the ghosting (failure) and capacity (repair) figures must show the SAME clip
+and frame so a reader can line them up as one story. This is now enforced in
+`make_qual_from_dumps.py` via `QUAL_CLIP = 0` / `QUAL_FRAME = 5` (f5 = the
+hardest frame: chunk-2 interior, per-frame PSNR minimum), used by both
+figures; a built-in assertion verifies every arm's dump holds the same clip at
+that index (deterministic eval order). The bleeding grid intentionally shows
+frames f1–f4 of the same clip — its subject is within-chunk dynamics, not the
+failure/repair pairing. After regenerating, eyeball f5 once: if the expression
+at f5 is unremarkable for this clip, pick another frame by changing
+`QUAL_FRAME` in ONE place (both figures follow automatically). Diversity
+across identities belongs in a supplement grid, not in these two figures.
+
 ---
 
 ## C. Things CVPR reviewers will expect (completeness checklist)
