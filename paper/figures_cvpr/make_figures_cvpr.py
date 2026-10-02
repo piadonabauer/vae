@@ -222,9 +222,9 @@ def fig_qual_bleeding_grid():
              [28.6, 27.3, 28.0, 27.8],
              [31.0, 28.5, 30.7, 30.3]]
 
-    fig, axes = plt.subplots(3, 4, figsize=(W1, 2.75))
-    fig.subplots_adjust(wspace=0.05, hspace=0.30, left=0.075, right=0.995,
-                        top=0.955, bottom=0.055)
+    fig, axes = plt.subplots(3, 4, figsize=(W1, 2.52))
+    fig.subplots_adjust(wspace=0.05, hspace=0.155, left=0.075, right=0.995,
+                        top=0.945, bottom=0.062)
     for r in range(3):
         for c in range(4):
             show_face(axes[r, c], grid[r][c],
@@ -308,17 +308,17 @@ def fig_perframe():
     ]
     fig, ax = plt.subplots(figsize=(W1, 1.7))
     fig.subplots_adjust(left=0.105, right=0.99, top=0.97, bottom=0.15)
-    _chunk_bands(ax, ymax_label=31.7)
+    _chunk_bands(ax, ymax_label=31.25)
     for lab, col, ls, data in series_v4:
         ax.plot(np.arange(9), data, color=col, ls=ls, lw=1.2, marker="o",
                 ms=2.6, markeredgewidth=0, label=lab)
     ax.set_xticks(np.arange(9))
     ax.set_xticklabels([f"$f_{i}$" for i in range(9)])
     ax.set_xlim(-0.5, 8.5)
-    ax.set_ylim(23.0, 32.0)
+    ax.set_ylim(23.4, 31.5)
     ax.set_ylabel("PSNR (dB)")
     ax.grid(True, axis="y", alpha=0.25, lw=0.4)
-    ax.legend(fontsize=6, loc="lower left", framealpha=0.95)
+    ax.legend(fontsize=6, loc="lower right", framealpha=0.95)
     save(fig, "perframe_psnr_v4.pdf")
 
 
