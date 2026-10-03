@@ -224,6 +224,16 @@ if [[ -n "${SEED:-}" ]]; then
   COMMON+=( --seed "$SEED" )
 fi
 
+# Local-machine (no slurm) overrides. NERSEMBLE_BASE = parent of 128-res/256-res
+# (e.g. /home/coder/nersemble-data/processed/2view/); WAN_PRETRAINED = path to
+# Wan2.1_VAE.pth. Empty = keep the cluster defaults baked into the config.
+if [[ -n "${NERSEMBLE_BASE:-}" ]]; then
+  COMMON+=( --nersemble_processed_base "$NERSEMBLE_BASE" )
+fi
+if [[ -n "${WAN_PRETRAINED:-}" ]]; then
+  COMMON+=( --model.from_pretrained "$WAN_PRETRAINED" )
+fi
+
 MODEL_ARGS=()
 case "$TASK" in
   1)
@@ -268,7 +278,7 @@ case "$TASK" in
   49)
     # Zero-shot floor at 256² (same pretrained Wan, no training).
     run_name="paper_E1z_perview_zeroshot_256"
-    _256=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res
+    _256="${NERSEMBLE_BASE:+${NERSEMBLE_BASE%/}/256-res}"; _256="${_256:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res}"
     MODEL_ARGS=( --model.independent_views True --model.temporal_compression False
                  --epochs 0 --save_ckpt False --final_eval True
                  --wandb_min_steps_before_init -1
@@ -308,7 +318,7 @@ case "$TASK" in
   51)
     # TRUE zero-shot floor at 256² (TC=True, native Wan path).
     run_name="paper_E1z_perview_zeroshot_tcON_256"
-    _256=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res
+    _256="${NERSEMBLE_BASE:+${NERSEMBLE_BASE%/}/256-res}"; _256="${_256:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res}"
     MODEL_ARGS=( --model.independent_views True --model.temporal_compression True
                  --epochs 0 --save_ckpt False --final_eval True
                  --wandb_min_steps_before_init -1
@@ -551,7 +561,7 @@ case "$TASK" in
   # Bucket config and data_path override the COMMON 128px defaults.
   34)
     run_name="paper_E9a_256px"
-    _256=/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res
+    _256="${NERSEMBLE_BASE:+${NERSEMBLE_BASE%/}/256-res}"; _256="${_256:-/datasets/lindell-proj/neumayr/nersemble_v2/processed/256-res}"
     MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
                  --model.temporal_compression True
                  --bucket_config "{'256px_ar1:1': {9: (1.0, 1)}}"
@@ -744,7 +754,14 @@ if [[ "$_do_warm" == "1" ]]; then
 fi
 
 experiment_name="$run_name"
-[[ -n "${SLURM_JOB_ID:-}" ]] && experiment_name="${run_name}__job${SLURM_JOB_ID}_t${TASK}"
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+  experiment_name="${run_name}__job${SLURM_JOB_ID}_t${TASK}"
+else
+  # Local (no slurm): a timestamp pseudo job-id keeps output dirs unique AND
+  # matches the "__job*" glob the resume scan uses, so an interrupted local
+  # run picks up from its newest checkpoint on the next invocation.
+  experiment_name="${run_name}__job$(date +%s)_t${TASK}"
+fi
 MASTER_PORT=$((21000 + (${SLURM_JOB_ID:-$$} % 20000) + TASK))
 export MASTER_PORT MASTER_ADDR=127.0.0.1 WORLD_SIZE=1 RANK=0 LOCAL_RANK=0
 

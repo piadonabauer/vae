@@ -1,14 +1,114 @@
 # Rerun plan + CVPR completeness checklist (2026-10-02, FINAL)
 
-Everything below is ready to copy-paste **on the cluster** (Vector, user
-`piado`), from the repo root on branch `paper-experiments` after `git pull`.
+> **2026-10-03 SUPERSEDED FOR EXECUTION: the Vector cluster filesystem was
+> wiped and the cluster is no longer usable. All compute now runs on the local
+> single L40S (`/home/coder`). The REDO/KEEP decisions, arm definitions, and
+> checklist below remain THE reference, but every `sbatch` call is replaced by
+> §L (LOCAL EXECUTION) directly below. Cluster-only refills (§B1 corrected
+> SSIM for KEEP arms, §B2, §B4 old-dump qual regeneration) are impossible —
+> the old dumps are gone; the final wave is now the sole source for those.**
+
 Background: `paper/eval_audit_2026-10-02.md`.
 
-Prerequisite everywhere:
+---
+
+## L. LOCAL EXECUTION (2026-10-03) — single L40S, milestone schedule
+
+### L1. Data (reproduced locally, no cluster needed)
+
+Raw NeRSemble v2 is re-downloaded directly from TUM (access URL in
+`~/.config/nersemble_data/.env`; **never commit or share it**) — only
+**EMO-1-shout+laugh × 2 cameras × all 419 participants ≈ 9 GB**, then
+preprocessed with the repo's own pipeline (verified end-to-end 2026-10-03;
+camera pair from calibration = `222200037, 220700191`, matching the cluster
+2-view set):
 
 ```bash
-cd /home/piado/projects/aip-lindell/piado/vae && git pull   # must include TASK 50/51
+# 1) download (resilient retry loop, ~30-60 min)
+bash /home/coder/nersemble-data/download_all.sh
+
+# 2) preprocess -> frames.pt [2,9,3,H,W] in [0,1], 128 + 256 res in one pass
+cd /home/coder/vae
+/home/coder/venvs/inpaint-test/bin/python data/processing/preprocess_nersemble.py \
+  --nersemble-root /home/coder/nersemble-data/data \
+  --output-root /home/coder/nersemble-data/processed/2view \
+  --only-sequences "EMO-1-shout+laugh" \
+  --camera-serials 222200037 220700191 \
+  --frames 9 --image-sizes 128 256 \
+  --color-correction --bg-removal-method rvm \
+  --rvm-checkpoint data/rvm_mobilenetv3.pth \
+  --save-merged-pt --temp-dir /tmp/nersemble_preprocess --skip-existing
 ```
+
+Caveat (disclose in the paper if numbers are compared across waves): the
+reproduced dataset is statistically equivalent but not bit-identical to the
+cluster set (fresh RVM mattes). Irrelevant for the final wave, which is
+self-consistent — every arm trains and evals on the same local data.
+
+### L2. Runner
+
+`run_local_queue.sh` replaces sbatch + CHAIN_LEFT: it runs TASKs sequentially,
+`SAVE_CKPT=True`, logs to `Open-Sora/local_logs/`, stops on first failure, and
+skips `.DONE` arms, so it is safe to rerun after any interruption (runs resume
+from their newest epoch checkpoint). `run_paper_sweep.sh` got local hooks:
+`NERSEMBLE_BASE` (data root) and `WAN_PRETRAINED` (Wan weights), both set by
+the queue runner.
+
+### L3. Milestone schedule (interruptible at every M-boundary)
+
+Why not the flat 300-epoch × 14-run plan: on one GPU that is ~19 days. The
+compressed design exploits `SAVE_CKPT=True`: train everything at the original
+**170-epoch protocol first** (a complete, uniformly-budgeted, immediately
+paper-usable table), then **extend** arms to 300 by resuming — each extension
+costs only the 130-epoch tail. The all-170 table always exists as fallback
+(170-epoch evals are logged even for extended runs); report either all-170 or
+all-300, never mixed.
+
+| milestone | content | GPU time | cumulative |
+|---|---|---|---|
+| **M0** | zero-shot evals: TASK 50 (true Wan TC=on @128) + TASK 7 (TC=off wrapper); @256 variants (51/49) once 256-res data is processed | ~1 h | day 0 |
+| **M1** | core 7 @170, seed 42: E1b, E1c (scratch) → E1d, E11a, E11b, combo (warm from new E1b) → E_best (scratch) | 7 × ~18 h | **day ~5.5** |
+| **M2** | extend the climbing arms to 300: E11b, combo, E_best (resume, +130 ep each) — serves the "30+ dB" goal directly | 3 × ~14 h | day ~7 |
+| **M3** | references @170: E1a (scratch), E4h, E4i (warm) | 3 × ~18 h | day ~9.5 |
+| **M4** | extend remaining core to 300 (E1b, E1c, E1d, E11a) → full uniform-300 table | 4 × ~14 h | day ~12 |
+| **M5** | seed 43 for headline error bars (E1b_s43 → E1d/E11b/combo_s43 warm from it) | 4 × ~18 h | day ~15 |
+
+Commands:
+
+```bash
+# M0+M1 (+M3 appended; delete "1 24 28" to stop after M1):
+bash run_local_queue.sh                      # default QUEUE="50 7 2 3 4 8 9 36 52 1 24 28"
+
+# M2 extensions (after M1): rerunning with higher epochs resumes from ckpt
+TRAIN_EPOCHS=300 QUEUE="9 36 52" bash run_local_queue.sh
+
+# M4:
+TRAIN_EPOCHS=300 QUEUE="2 3 4 8" bash run_local_queue.sh
+
+# M5 (seed 43; warm arms need the SEED-MATCHED E1b passed explicitly):
+QUEUE="2:SEED=43" bash run_local_queue.sh
+E1B43=$(ls -d Open-Sora/outputs/paper_E1b_perview_tcT_s43__job*/epoch* | sort -V | tail -1)
+QUEUE="4:SEED=43,INIT_CKPT=$E1B43 9:SEED=43,INIT_CKPT=$E1B43 36:SEED=43,INIT_CKPT=$E1B43" \
+  bash run_local_queue.sh
+```
+
+Cut-line guidance: **M0–M2 (~7 days) is the minimum that tells the paper's
+story with fully-trained capacity arms**; M3 completes the ablation table; M4
+buys uniform-300 polish; M5 buys error bars. The ~18 h/170-epoch estimate is
+the cluster L40S number — same GPU model here; verify against the first run
+and rescale the table.
+
+Dropped relative to the old final wave (disclose, don't run): seed-43 for E1c;
+E9a/E9b/E8b (§A0b) unless their figures stay — E8b/datascale additionally
+needs the all-sequences dataset (~200 GB download + ~1 day preprocessing),
+decide before fetching; E6d/E6e (V=8) need 8-camera raw data (+~4× download)
+— only if V=8 stays.
+
+Still-possible option: the user's cluster **compute quota may still exist**
+(only the filesystem was wiped). If a test `sbatch` runs, bootstrapping from
+scratch (clone + venv + this same data download) takes ~half a day and
+collapses M1–M5 to ~3 days wall-clock at 4 concurrent jobs. Worth one test
+submission before committing to 2 weeks serial.
 
 ---
 
@@ -140,7 +240,7 @@ done
 
 ---
 
-## A. Jobs to submit (sbatch)
+## A. Jobs to submit (sbatch) — SUPERSEDED by §L (cluster gone); kept for arm definitions and rationale
 
 ### A1. TRUE zero-shot baseline, TC=on (REQUIRED for the paper)
 
