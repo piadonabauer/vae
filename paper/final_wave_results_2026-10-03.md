@@ -23,10 +23,16 @@ both recomputed from the local `final_eval_dump_val.pt` via
 format; dump-PSNR matches wandb to 0.01 dB). Main-table zero-shot row (filled):
 `Wan VAE zero-shot & on & 36x & 32.51 & 0.043 & 0.977`.
 
-NOTE for the main table: the old LPIPS values of E0/E1a/E1b/E1c/E1d went
-through the clamp-biased eval and could NOT be recovered (dumps gone) — REDO
-arms get fresh LPIPS from this wave; the E0 (all-data, KEEP) row's LPIPS/Bleed
-must be footnoted as pre-fix or dropped.
+NOTE for the main table (CORRECTED 2026-10-03, verified against pre-fix code
+`40295bb^` lines 1368–1405): the clamp bug biased ONLY `compute_metrics`
+outputs — `psnr_mean`, `ssim_mean`, `mse`. **LPIPS and bleed ratios were
+always computed from the correctly remapped `x01` tensors and are valid in
+every old table (Table 2, appendix included)** — matching the audit's
+per-metric verdict; an earlier note here claiming old LPIPS was biased was
+wrong. Empirical cross-check: old E1z LPIPS 0.155 ≈ fresh TC-off 0.146 while
+its PSNR moved 19.71→23.05. The column that DOES need fresh dumps is **SSIM**
+(windowed, corrected) — available only for arms in this wave; KEEP-arm SSIMs
+remain unrecoverable and should be omitted or footnoted.
 
 Takeaways:
 
