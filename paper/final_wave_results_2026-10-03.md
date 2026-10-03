@@ -9,12 +9,24 @@ recompute + qualitative figures).
 
 ## M0 — zero-shot evals (DONE 2026-10-03, no training)
 
-| arm | res | PSNR (val) | view0 / view1 | wandb |
-|---|---|---|---|---|
-| **TRUE zero-shot, pretrained Wan, TC=on** | 128² | **32.51** | 32.56 / 32.45 | [1jep01kb](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/1jep01kb) |
-| TRUE zero-shot, pretrained Wan, TC=on | 256² | **34.13** | 34.17 / 34.09 | [f2nalxpn](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/f2nalxpn) |
-| zero-shot TC=off (per-frame wrapper, = old E1z) | 128² | 23.05 | 23.18 / 22.92 | [w95ecfdw](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/w95ecfdw) |
-| zero-shot TC=off (per-frame wrapper) | 256² | 22.74 | 22.85 / 22.62 | [00mnihtl](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/00mnihtl) |
+| arm | res | PSNR (val) | LPIPS | SSIM (win) | Bleed-W | Bleed-A | wandb |
+|---|---|---|---|---|---|---|---|
+| **TRUE zero-shot, pretrained Wan, TC=on** | 128² | **32.51** | 0.043 | 0.931 | 0.977 | 1.006 | [1jep01kb](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/1jep01kb) |
+| TRUE zero-shot, pretrained Wan, TC=on | 256² | **34.15** | 0.060 | 0.931 | 0.985 | 0.996 | [f2nalxpn](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/f2nalxpn) |
+| zero-shot TC=off (per-frame wrapper, = old E1z) | 128² | 23.05 | 0.146 | 0.887 | 1.137 | 1.367 | [w95ecfdw](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/w95ecfdw) |
+| zero-shot TC=off (per-frame wrapper) | 256² | 22.74 | 0.183 | — | — | — | [00mnihtl](https://wandb.ai/pia-uni/wan_multiview_vae_paper/runs/00mnihtl) |
+
+LPIPS = `final_eval/val/lpips_mean` (same VGG eval as all table rows). SSIM =
+canonical 11×11 windowed, bleed ratios per `paper/audit/metrics_unified.py`,
+both recomputed from the local `final_eval_dump_val.pt` via
+`recompute_from_dumps.py` (loader fixed 2026-10-03 for the real train.py dump
+format; dump-PSNR matches wandb to 0.01 dB). Main-table zero-shot row (filled):
+`Wan VAE zero-shot & on & 36x & 32.51 & 0.043 & 0.977`.
+
+NOTE for the main table: the old LPIPS values of E0/E1a/E1b/E1c/E1d went
+through the clamp-biased eval and could NOT be recovered (dumps gone) — REDO
+arms get fresh LPIPS from this wave; the E0 (all-data, KEEP) row's LPIPS/Bleed
+must be footnoted as pre-fix or dropped.
 
 Takeaways:
 

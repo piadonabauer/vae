@@ -29,6 +29,10 @@ from metrics_unified import compute_all_metrics  # noqa: E402
 
 def load_dump(path):
     entries = torch.load(path, map_location="cpu", weights_only=False)
+    # Real train.py format (seen 2026-10-03 on local final-wave dumps):
+    # {"clips": [{"gt": uint8 [V,C,T,H,W], "rec": ..., "path": str}], "format": str}
+    if isinstance(entries, dict) and "clips" in entries:
+        entries = entries["clips"]
     gts, recs = [], []
     for e in entries:
         gt, rec = e["gt"], e["rec"]
