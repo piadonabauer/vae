@@ -31,14 +31,16 @@ if [[ -z "${WANDB_API_KEY:-}" ]] && ! grep -q "api.wandb.ai" "$HOME/.netrc" 2>/d
   echo "ERROR: wandb not configured (WANDB_API_KEY or ~/.netrc)." >&2
   exit 1
 fi
+export WANDB_ENTITY="${WANDB_ENTITY:-pia-uni}"
 
-# Default queue, tiered (see paper/rerun_plan_2026-10-02.md):
-#   Tier 0 (minutes):  50 true zero-shot TC=on @128, 7 E1z TC=off @128
-#   Tier 1 (core):     2 E1b, 3 E1c, 4 E1d, 8 E11a, 9 E11b, 36 combo, 52 E_best
-#   Tier 2 (refs):     1 E1a, 24 E4h, 28 E4i
-# Warm-started arms (4, 8, 9, 24, 28, 36) auto-find the newest local E1b
+# Default queue, tiered (see paper/rerun_plan_2026-10-02.md §L3):
+#   M0 (minutes): 50 true zero-shot TC=on @128, 7 E1z TC=off @128,
+#                 51/49 same @256 (256-res data comes from the same preprocess)
+#   M1 (core):    2 E1b, 3 E1c, 4 E1d, 8 E11a, 9 E11b, 36 combo, 52 E_best
+#   M3 (refs):    1 E1a, 24 E4h          (E4i/TASK 28 dropped -- see plan §L3)
+# Warm-started arms (4, 8, 9, 24, 36) auto-find the newest local E1b
 # checkpoint, so task 2 MUST come before them.
-QUEUE="${QUEUE:-50 7 2 3 4 8 9 36 52 1 24 28}"
+QUEUE="${QUEUE:-50 7 51 49 2 3 4 8 9 36 52 1 24}"
 
 LOG_DIR="$OPEN_SORA_ROOT/local_logs"
 mkdir -p "$LOG_DIR"

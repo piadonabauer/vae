@@ -40,10 +40,16 @@ cd /home/coder/vae
   --save-merged-pt --temp-dir /tmp/nersemble_preprocess --skip-existing
 ```
 
-Caveat (disclose in the paper if numbers are compared across waves): the
-reproduced dataset is statistically equivalent but not bit-identical to the
-cluster set (fresh RVM mattes). Irrelevant for the final wave, which is
-self-consistent — every arm trains and evals on the same local data.
+Fidelity vs the wiped cluster set (measured 2026-10-03 against a wandb-logged
+GT grid of val clip p038 from clean-wave run 0k5zvbk2): **even frames
+(0,2,4,6,8) are bit-exact** (max abs diff 2/255 = rounding), confirming
+identical crop, v2 color correction, RVM white matting, and resize. Odd frames
+(1,3,5,7) differ by one *source* frame (~14 ms at 73 fps): the temporal
+subsample is `linspace` over the decoded frame count, and the re-downloaded
+mp4s report a slightly different count than the (gone) tar source. Benign —
+the final wave trains and evals entirely on the new set — but do NOT mix
+old-wave and new-wave per-frame or qualitative comparisons at odd frame
+indices; regenerate all qual figures from final-wave dumps only.
 
 ### L2. Runner
 
@@ -98,11 +104,27 @@ buys uniform-300 polish; M5 buys error bars. The ~18 h/170-epoch estimate is
 the cluster L40S number — same GPU model here; verify against the first run
 and rescale the table.
 
-Dropped relative to the old final wave (disclose, don't run): seed-43 for E1c;
-E9a/E9b/E8b (§A0b) unless their figures stay — E8b/datascale additionally
-needs the all-sequences dataset (~200 GB download + ~1 day preprocessing),
-decide before fetching; E6d/E6e (V=8) need 8-camera raw data (+~4× download)
-— only if V=8 stays.
+Dropped relative to the old final wave (2026-10-03 single-GPU triage;
+disclose, don't run):
+
+- **E4i (TASK 28)** — second temporal-intervention variant; E4h carries the
+  diff-loss ablation and feeds the E_best narrative, E4i adds 18 h for a
+  supplement-only row. Keep the old corrected value with a budget footnote if
+  the row stays at all.
+- **Seed-43 for E1c** (and seed-43 generally demoted to M5, run only if ≥3
+  days remain after M4; otherwise report single-seed and say so).
+- **E9a/E9b (256/512) and E8b (one-person) retrains** — the resolution and
+  data-scale figures are within-family comparisons among KEEP arms, so the old
+  corrected numbers stay internally consistent; a retrain would also require
+  the all-sequences dataset (~200 GB + ~1 day preprocessing) for E8b. Footnote
+  the budget difference instead.
+- **E6d/E6e (V=8)** — needs 8-camera raw data (4× download) and the arms never
+  produced numbers (crashed); drop the V=8 point.
+- **§B1/§B2/§B4 old-dump refills** — impossible, dumps died with the cluster
+  filesystem. Consequence: corrected SSIM exists only for final-wave arms (new
+  local dumps); KEEP-arm rows report corrected PSNR (recovered from wandb)
+  without SSIM, disclosed in the table caption. Qualitative figures regenerate
+  from final-wave dumps (§B4 constants QUAL_CLIP/QUAL_FRAME still apply).
 
 Still-possible option: the user's cluster **compute quota may still exist**
 (only the filesystem was wiped). If a test `sbatch` runs, bootstrapping from
