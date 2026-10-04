@@ -58,9 +58,14 @@ Queue order: E1b → E1c → E1d → E11a → E11b → combo → E_best → E1a 
 | E11a widen-32 | **done** | **30.35** | 0.0540 | 29.78 | +0.57 |
 | E11b widen-64 | **done** | **30.20** | 0.0528 | 30.92 | −0.72 |
 | combo | **done** | **30.36** | 0.0526 | 31.39 | −1.03 |
-| E_best all-combined (new) | training (ep 85/170) | — | — | — | |
-| E1a per-view TC=off | queued | — | — | 35.89 | |
+| E_best all-combined (new) | **done** | **31.56** | 0.0505 | — (new arm) | |
+| E1a per-view TC=off | training | — | — | 35.89 | |
 | E4h diff-loss | queued | — | — | — | |
+
+E_best note: best TC-on fused arm already at 170 ep (beats combo by +1.2 and
+E11b by +1.4), trained FROM SCRATCH (rank-128 LoRA can't load the rank-32 E1b
+warm start — disclose in the caption). Gap to the per-view TC-on reference
+(E1b): 1.57 dB at 170 ep; the 300-ep extension will narrow or confirm it.
 
 Reading:
 
