@@ -85,8 +85,14 @@ def show(ax, img, title=None, xlabel=None):
 
 
 def fig_qual_ghosting():
-    """2 views x methods: GT, E1c, E1d, E11b — same clip+frame as capacity fig."""
-    arms = [("GT", None), ("E1c", "E1c"), ("E1d", "E1d"), ("E11b", "E11b")]
+    """2 views x methods: GT, E1c, E1d, E11b — same clip+frame as capacity fig.
+    NOTE: figure labels must stay descriptive — never show experiment codenames."""
+    arms = [
+        ("GT", None),
+        ("Fused, TC off", "E1c"),
+        ("Fused, TC on", "E1d"),
+        ("Fused, TC on, 64-ch", "E11b"),
+    ]
     gt, _ = load_clip("E1d")
     t = QUAL_FRAME
     fig, axes = plt.subplots(2, 4, figsize=(6.875, 3.4))
@@ -109,7 +115,7 @@ def fig_qual_bleeding():
     """Rows: GT / 16-ch / 32-ch / 64-ch; cols: frames in chunk 1 (f1..f4).
     (64-ch row added 2026-10-02; regenerate on the cluster, then rerun
     figures_cvpr/make_figures_cvpr.py which re-crops this PDF.)"""
-    arms = [("GT", None), ("E1d 16ch", "E1d"), ("E11a 32ch", "E11a"), ("E11b 64ch", "E11b")]
+    arms = [("GT", None), ("16-ch", "E1d"), ("32-ch", "E11a"), ("64-ch", "E11b")]
     frames = [1, 2, 3, 4]
     gt, _ = load_clip("E1d")
     v = 0
@@ -164,14 +170,14 @@ def fig_qual_overview():
     """
     arms = [
         ("GT", None),
-        ("zero-shot\n36x", "zeroshot"),
-        ("E1b per-view\nTC on, 36x", "E1b"),
-        ("E1c fused\nTC off, 36x", "E1c"),
-        ("E1d fused\nTC on, 72x", "E1d"),
-        ("E11a\nwiden32, 36x", "E11a"),
-        ("combo\nw32+diff, 36x", "combo"),
-        ("E11b\nwiden64, 18x", "E11b"),
-        ("E_best\nall, 18x", "Ebest"),
+        ("Zero-shot\nper-view, 36x", "zeroshot"),
+        ("Per-view\nTC on, 36x", "E1b"),
+        ("Fused\nTC off, 36x", "E1c"),
+        ("Fused\nTC on, 72x", "E1d"),
+        ("Fused TC on\n32-ch, 36x", "E11a"),
+        ("32-ch +\ndiff-loss, 36x", "combo"),
+        ("Fused TC on\n64-ch, 18x", "E11b"),
+        ("All tweaks\n18x", "Ebest"),
     ]
     gt, _ = load_clip("E1d")
     t = QUAL_FRAME
@@ -200,7 +206,7 @@ def fig_qual_overview():
 def fig_qual_best_temporal():
     """GT vs no-tweaks fused (E1d) vs E_best across all 9 frames: shows where
     in the chunk structure the tweak stack helps (chunk-interior frames)."""
-    arms = [("GT", None), ("E1d (no tweaks)", "E1d"), ("E_best (all tweaks)", "Ebest")]
+    arms = [("GT", None), ("Fused TC on\n(no tweaks)", "E1d"), ("Fused TC on\n(all tweaks)", "Ebest")]
     gt, _ = load_clip("E1d")
     v = 0
     T = gt.shape[2]
