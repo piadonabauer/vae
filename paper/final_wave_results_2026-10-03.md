@@ -45,21 +45,39 @@ Takeaways:
 - TC=off degrades *with* resolution (23.05 → 22.74) while TC=on improves
   (32.51 → 34.13) — more evidence the wrapper path is the bottleneck.
 
-## M1 — core arms @170 epochs, seed 42 (RUNNING)
+## M1 — core arms @170 epochs, seed 42 (updated 2026-10-04 17:30)
 
-Queue order: E1b → E1c → E1d → E11a → E11b → combo → E_best
+Queue order: E1b → E1c → E1d → E11a → E11b → combo → E_best → E1a → E4h
 (`tmux attach -t paperwave`; logs in `Open-Sora/local_logs/`).
 
-| arm | status | PSNR (val) | old corrected (cluster) |
-|---|---|---|---|
-| E1b per-view TC=on | training | — | 33.19 |
-| E1c fused TC=off | queued | — | 32.74 |
-| E1d fused TC=on | queued | — | 28.27 |
-| E11a widen-32 | queued | — | 29.78 |
-| E11b widen-64 | queued | — | 30.92 (was still climbing) |
-| combo | queued | — | 31.39 |
-| E_best all-combined (new) | queued | — | — |
+| arm | status | PSNR (val) | LPIPS | old corrected (cluster) | Δ |
+|---|---|---|---|---|---|
+| E1b per-view TC=on | **done** | **33.13** | 0.0370 | 33.19 | −0.06 |
+| E1c fused TC=off | **done** | **33.13** | 0.0374 | 32.74 | +0.39 |
+| E1d fused TC=on | **done** | **28.28** | 0.0692 | 28.27 | +0.01 |
+| E11a widen-32 | **done** | **30.35** | 0.0540 | 29.78 | +0.57 |
+| E11b widen-64 | **done** | **30.20** | 0.0528 | 30.92 | −0.72 |
+| combo | **done** | **30.36** | 0.0526 | 31.39 | −1.03 |
+| E_best all-combined (new) | training (ep 85/170) | — | — | — | |
+| E1a per-view TC=off | queued | — | — | 35.89 | |
+| E4h diff-loss | queued | — | — | — | |
+
+Reading:
+
+- **Comparability validated**: E1b (−0.06) and E1d (+0.01) reproduce the old
+  values on independently re-created data — the protocol is sound.
+- E1c +0.39 and E11a +0.57: the uniform warm-start/budget helped (old E11a was
+  from scratch).
+- **E11b −0.72 and combo −1.03**: both were from-scratch in the old wave and
+  are warm-started now; at 170 epochs the warm start has NOT caught up for the
+  widened arms — consistent with the convergence audit (E11b still climbing).
+  **Do not conclude capacity ordering from the 170-ep numbers.** The M2
+  extensions to 300 epochs (auto-chained in tmux session `paperwave2`,
+  tasks 9/36/52) are the decisive numbers for the capacity table.
 
 ## M2+ — extensions to 300 ep / references / seed 43
 
-Pending M1; see plan §L3.
+M2 (E11b, combo, E_best → 300 ep) auto-starts when the M1 queue drains
+(tmux `paperwave2` deletes the three .DONE markers and reruns with
+`TRAIN_EPOCHS=300`; runs resume from their epoch-169 checkpoints). ETA:
+M1 finishes ~Mon 03:00, M2 ~Mon midday. M4/seed-43 decisions after that.
