@@ -3,6 +3,11 @@
 Ordered by importance. For each: what it shows, layout, and how to produce it from this repo.
 (F1/F2/F3 are the ones every reader will see — invest there.)
 
+**HARD RULE: never put internal experiment codenames (E1b, E11a, E_best, "combo", …)
+in any rendered figure text — titles, row/column labels, legends, annotations.
+Always use descriptive labels ("Per-view, TC on, 36×", "Fused + 64-ch latent", …).
+Codenames are fine in code comments, dict keys, and filenames.**
+
 ## F1 — Teaser (page 1, full width)
 **Message:** multi-view facial video is 4D-redundant; we compress it into one latent; the paper
 measures how much fits.
