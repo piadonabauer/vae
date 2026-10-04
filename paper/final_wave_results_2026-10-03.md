@@ -80,6 +80,26 @@ Reading:
   extensions to 300 epochs (auto-chained in tmux session `paperwave2`,
   tasks 9/36/52) are the decisive numbers for the capacity table.
 
+## Qualitative figures (regenerated 2026-10-04 from local final dumps)
+
+`paper/figures_cvpr/make_qual_from_dumps.py` now reads the local
+`final_eval_dump_val.pt` of each finished arm (images therefore match the
+reported final_eval/val numbers exactly; same clip 0 / frame 5 as before).
+Regenerated: `qual_ghosting`, `qual_bleeding`, `qual_capacity` (paper figs,
+same composition as before), plus two new working visuals (PDF+PNG each):
+
+- `qual_overview_finalwave` — all 8 arms + GT on one clip/frame, both views,
+  with a ×5 error heatmap row. E1d's error map is visibly the worst (mouth,
+  eyes, hair); E_best's is close to E1b/zero-shot despite 72×→18× rate.
+- `qual_best_temporal` — GT vs E1d vs E_best across all 9 frames: E1d's
+  chunk-interior frames (f2–f5) show the mouth ghosting/blur; E_best keeps
+  the mouth shape and identity sharp throughout (+3–7 dB per frame).
+
+Caveat: frame 5 is an odd index, so these frames may differ by ±1 source
+frame from the old-wave PDFs — never compare old vs new figures per-frame.
+Re-run the script after M2 to refresh with 300-ep reconstructions, and add
+E1a to `DUMPS` once its final dump exists.
+
 ## M2+ — extensions to 300 ep / references / seed 43
 
 M2 (E11b, combo, E_best → 300 ep) auto-starts when the M1 queue drains
