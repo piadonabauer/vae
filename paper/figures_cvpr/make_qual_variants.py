@@ -44,8 +44,8 @@ QUAL_CLIP = 0
 QUAL_FRAME = 5
 # Inset boxes (y0, y1, x0, x1) on the 128x128 frame.
 BOX_MOUTH = (76, 110, 46, 82)
-# subject's right eye (left side of the image)
-BOX_EYE = (48, 76, 32, 64)
+# subject's left eye (right side of the image)
+BOX_EYE = (44, 72, 52, 84)
 
 _cache: dict = {}
 
@@ -125,7 +125,7 @@ def fig_ghosting_v2():
     ]
     gt, _ = load_clip("E1d")
     t = QUAL_FRAME
-    rows = ["view 0", "view 1", "mouth (v0)", "right eye (v0)", "|diff| x5 (v0)"]
+    rows = ["view 0", "view 1", "mouth (v0)", "left eye (v0)", "|diff| x5 (v0)"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 8.2))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.08, right=0.99, top=0.94, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
@@ -155,7 +155,7 @@ def fig_capacity_v2():
     ]
     gt, _ = load_clip("E1d")
     t, v = QUAL_FRAME, 0
-    rows = ["view 0", "mouth", "right eye", "|diff| x5"]
+    rows = ["view 0", "mouth", "left eye", "|diff| x5"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 6.6))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.07, right=0.99, top=0.93, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
