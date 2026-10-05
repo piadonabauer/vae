@@ -44,7 +44,8 @@ QUAL_CLIP = 0
 QUAL_FRAME = 5
 # Inset boxes (y0, y1, x0, x1) on the 128x128 frame.
 BOX_MOUTH = (76, 110, 46, 82)
-BOX_HAIR = (2, 36, 52, 92)
+# subject's right eye (left side of the image)
+BOX_EYE = (48, 76, 32, 64)
 
 _cache: dict = {}
 
@@ -97,7 +98,7 @@ def show(ax, img, title=None, xlabel=None, boxes=False):
     for s in ax.spines.values():
         s.set_visible(False)
     if boxes:
-        for box, color in [(BOX_MOUTH, "#00d0ff"), (BOX_HAIR, "#ffd000")]:
+        for box, color in [(BOX_MOUTH, "#00d0ff"), (BOX_EYE, "#ffd000")]:
             y0, y1, x0, x1 = box
             ax.add_patch(mpatches.Rectangle((x0, y0), x1 - x0, y1 - y0,
                                             fill=False, edgecolor=color, linewidth=1.0))
@@ -124,7 +125,7 @@ def fig_ghosting_v2():
     ]
     gt, _ = load_clip("E1d")
     t = QUAL_FRAME
-    rows = ["view 0", "view 1", "mouth (v0)", "hair (v0)", "|diff| x5 (v0)"]
+    rows = ["view 0", "view 1", "mouth (v0)", "right eye (v0)", "|diff| x5 (v0)"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 8.2))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.08, right=0.99, top=0.94, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
@@ -136,7 +137,7 @@ def fig_ghosting_v2():
         show(axes[0, c], img0, title=lab, xlabel=xlab0, boxes=(arm is None))
         show(axes[1, c], img1, xlabel=xlab1)
         show(axes[2, c], crop(img0, BOX_MOUTH))
-        show(axes[3, c], crop(img0, BOX_HAIR))
+        show(axes[3, c], crop(img0, BOX_EYE))
         dm = np.zeros((128, 128, 3), np.uint8) if arm is None else diff_img(gt[0, :, t], rec[0, :, t])
         show(axes[4, c], dm)
     for r, lab in enumerate(rows):
@@ -154,7 +155,7 @@ def fig_capacity_v2():
     ]
     gt, _ = load_clip("E1d")
     t, v = QUAL_FRAME, 0
-    rows = ["view 0", "mouth", "hair", "|diff| x5"]
+    rows = ["view 0", "mouth", "right eye", "|diff| x5"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 6.6))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.07, right=0.99, top=0.93, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
@@ -163,7 +164,7 @@ def fig_capacity_v2():
         xlab = None if arm is None else f"{psnr(gt[v, :, t], rec[v, :, t]):.1f} dB"
         show(axes[0, c], img, title=lab, xlabel=xlab, boxes=(arm is None))
         show(axes[1, c], crop(img, BOX_MOUTH))
-        show(axes[2, c], crop(img, BOX_HAIR))
+        show(axes[2, c], crop(img, BOX_EYE))
         dm = np.zeros((128, 128, 3), np.uint8) if arm is None else diff_img(gt[v, :, t], rec[v, :, t])
         show(axes[3, c], dm)
     for r, lab in enumerate(rows):
