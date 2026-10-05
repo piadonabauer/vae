@@ -119,3 +119,16 @@ idle 19:40–01:39. Killed the watcher and started M2 directly in tmux
 command. E11b verified resuming at epoch 170 from its checkpoint
 (~3.5 s/it → ~3.5–4 h per arm). ETA: all three 300-ep arms (E11b, combo,
 E_best) done ~Mon evening. M4/seed-43 decisions after that.
+
+### M2 results @300 epochs, seed 42
+
+| arm | PSNR @170 | PSNR @300 | Δ ext | LPIPS @300 | old cluster |
+|---|---|---|---|---|---|
+| E11b widen-64 | 30.20 | **31.34** | +1.14 | 0.0465 | 30.92 |
+| combo (w32+diff) | 30.36 | training | | | 31.39 |
+| E_best all-combined | 31.56 | queued | | | — |
+
+E11b @300 now exceeds its old cluster value (+0.42) — confirms the
+convergence audit: wide arms were undertrained at 170 ep. Use the @300
+column for the capacity table (uniform 300-ep budget for the three
+extended arms; never mix with the @170 table in one comparison).
