@@ -59,8 +59,16 @@ Queue order: E1b → E1c → E1d → E11a → E11b → combo → E_best → E1a 
 | E11b widen-64 | **done** | **30.20** | 0.0528 | 30.92 | −0.72 |
 | combo | **done** | **30.36** | 0.0526 | 31.39 | −1.03 |
 | E_best all-combined (new) | **done** | **31.56** | 0.0505 | — (new arm) | |
-| E1a per-view TC=off | training | — | — | 35.89 | |
-| E4h diff-loss | queued | — | — | — | |
+| E1a per-view TC=off | **done** | **35.85** | 0.0218 | 35.89 | −0.04 |
+| E4h diff-loss | **done** | **27.20** | 0.0749 | — | |
+
+**M1 COMPLETE** (all 9 arms, 2026-10-04 19:40 PT). E1a wandb: n7flxf2v,
+E4h wandb: 47modqhy. E1a's −0.04 is the third near-exact reproduction
+(with E1b −0.06, E1d +0.01) — comparability to the old wave is solid.
+E4h (diff-loss alone on the fused TC-on base) lands BELOW the E1d
+baseline on PSNR (27.20 vs 28.28): the temporal-diff term trades pixel
+PSNR for temporal consistency; its value shows up combined with capacity
+(combo 30.36, E_best 31.56), not alone.
 
 E_best note: best TC-on fused arm already at 170 ep (beats combo by +1.2 and
 E11b by +1.4), trained FROM SCRATCH (rank-128 LoRA can't load the rank-32 E1b
@@ -102,7 +110,12 @@ E1a to `DUMPS` once its final dump exists.
 
 ## M2+ — extensions to 300 ep / references / seed 43
 
-M2 (E11b, combo, E_best → 300 ep) auto-starts when the M1 queue drains
-(tmux `paperwave2` deletes the three .DONE markers and reruns with
-`TRAIN_EPOCHS=300`; runs resume from their epoch-169 checkpoints). ETA:
-M1 finishes ~Mon 03:00, M2 ~Mon midday. M4/seed-43 decisions after that.
+2026-10-05 01:39 PT: the paperwave2 auto-chain never fired — its
+`tmux has-session -t paperwave` check matched its OWN session by prefix
+("paperwave" matches "paperwave2"), so it waited forever and the GPU sat
+idle 19:40–01:39. Killed the watcher and started M2 directly in tmux
+`paperwave` (`TRAIN_EPOCHS=300 QUEUE="9 36 52"`, log
+`local_logs/queue_m2.log`); the @reboot cron now relaunches this M2
+command. E11b verified resuming at epoch 170 from its checkpoint
+(~3.5 s/it → ~3.5–4 h per arm). ETA: all three 300-ep arms (E11b, combo,
+E_best) done ~Mon evening. M4/seed-43 decisions after that.
