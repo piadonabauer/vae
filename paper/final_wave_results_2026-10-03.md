@@ -140,6 +140,34 @@ The @reboot cron now launches the same pipeline (idempotent: .DONE
 markers skip finished arms; `.M3_STARTED` sentinel guards the one-time
 marker clearing). ETA: M3 done ~Tue morning.
 
+### Identity metrics + draft figure variants (2026-10-05, eval-only)
+
+`paper/audit/identity_metrics.{py,json,md}` — FaceNet (VGGFace2) embeddings
+from the 170-ep final dumps, GT-detected crops applied identically to rec.
+Headlines (id sim rec-vs-GT / cross-view gap, GT xview baseline 0.964):
+
+- per-view TC off 0.971 / +0.025 — fused TC off 0.924 / +0.049
+- per-view TC on 0.893 / +0.061 — zero-shot 0.889 / +0.064
+- fused TC on 16-ch **0.756 / +0.176** — 32-ch 0.821 — 64-ch 0.830
+- combo 0.846 / +0.111 — all tweaks 0.849 / +0.101
+
+Two usable findings: (1) joint view+temporal compression hurts identity far
+more than either axis alone (gap 0.176 vs ~0.05), and tweaks only halve it;
+(2) TC hurts identity MORE than view fusion at equal PSNR cost — per-view
+TC-on (33.1 dB) has lower id-sim than fused TC-off (33.1 dB), 0.893 vs 0.924.
+
+Draft figure variants (separate files, originals untouched; from 170-ep
+dumps, rerun `make_qual_variants.py` after M3 for @300): `qual_ghosting_v2`,
+`qual_capacity_v2` (insets: mouth/hair + diff maps), `perframe_psnr_v2`
+(legend outside, per-view ref line), `perframe_motion` (decoded motion as %
+of GT motion on moving pixels — the direct bleeding evidence: fused 16-ch
+reproduces only ~79–81% of true motion at early transitions).
+
+Still pending (need GPU/checkpoints, queued after M3): latent statistics
+(sampleability proxy), view-swap eval of fused TC-off. NOT queued (decision
+needed): E5b refill, V=8 (needs new data download), 512² (no data), seed-43,
+matched-width per-view controls (recommended, 2 runs ~4 h each).
+
 ### Reporting rule (budgets per table)
 
 - Keep @170 and @300 side by side in this file for every arm that has

@@ -1,0 +1,83 @@
+{
+  "zero-shot per-view (TC on)": {
+    "id_sim_mean": 0.8893573587139447,
+    "id_sim_std": 0.09718020252193671,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.9000214603212144,
+    "xview_gap": 0.06424572335349188,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "per-view TC on": {
+    "id_sim_mean": 0.8928430704606904,
+    "id_sim_std": 0.0962181495239427,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.9037541912661659,
+    "xview_gap": 0.06051299240854047,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "per-view TC off": {
+    "id_sim_mean": 0.9707583119471868,
+    "id_sim_std": 0.015331925589291277,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.9393358475632138,
+    "xview_gap": 0.024931336111492564,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "fused TC off": {
+    "id_sim_mean": 0.9235402792692184,
+    "id_sim_std": 0.03201147742939938,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.9155971195962694,
+    "xview_gap": 0.04867006407843688,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "fused TC on (16-ch)": {
+    "id_sim_mean": 0.755686438911491,
+    "id_sim_std": 0.15821256903208025,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.7885222792625427,
+    "xview_gap": 0.17574490441216362,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "fused TC on, 32-ch": {
+    "id_sim_mean": 0.8209656250973543,
+    "id_sim_std": 0.1369417312351167,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8321863455904854,
+    "xview_gap": 0.1320808380842209,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "fused TC on, 64-ch": {
+    "id_sim_mean": 0.8300832831197315,
+    "id_sim_std": 0.13474959374082965,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8288675208886465,
+    "xview_gap": 0.13539966278605986,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "32-ch + diff-loss": {
+    "id_sim_mean": 0.8462153310577075,
+    "id_sim_std": 0.11927885137249929,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8532231840822432,
+    "xview_gap": 0.11104399959246314,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "all tweaks": {
+    "id_sim_mean": 0.8488394699162907,
+    "id_sim_std": 0.12362554356764954,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.862853557533688,
+    "xview_gap": 0.10141362614101834,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  }
+}
