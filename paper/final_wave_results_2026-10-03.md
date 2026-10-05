@@ -129,6 +129,26 @@ E_best) done ~Mon evening. M4/seed-43 decisions after that.
 | E_best all-combined | 31.56 | queued | | | — |
 
 E11b @300 now exceeds its old cluster value (+0.42) — confirms the
-convergence audit: wide arms were undertrained at 170 ep. Use the @300
-column for the capacity table (uniform 300-ep budget for the three
-extended arms; never mix with the @170 table in one comparison).
+convergence audit: wide arms were undertrained at 170 ep.
+
+### M3 — complete the 300-ep capacity table (queued 2026-10-05)
+
+After M2 drains, tmux `extchain` runs `run_extension_pipeline.sh` →
+`TRAIN_EPOCHS=300 QUEUE="4 8 2"`: E1d (16-ch) → E11a (32-ch) → E1b
+(reference insurance), each resuming from its epoch-169 checkpoint.
+The @reboot cron now launches the same pipeline (idempotent: .DONE
+markers skip finished arms; `.M3_STARTED` sentinel guards the one-time
+marker clearing). ETA: M3 done ~Tue morning.
+
+### Reporting rule (budgets per table)
+
+- Keep @170 and @300 side by side in this file for every arm that has
+  both; never mix budgets within one paper table.
+- Table 1 (main matrix) and Table 2 (ablations): @170 throughout.
+- Table 3 (capacity): @300 throughout — 16-ch, 32-ch, 64-ch, combo,
+  E_best all at 300 ep once M3 lands.
+- E1b @300 is insurance: if it stays ~33.1, the reference is converged
+  and captions can say "300 epochs"; if it moves, use the @300 value.
+- State the two budgets once, in Setup.
+- Note: E1d @300 may raise the no-tweaks baseline and shrink E_best's
+  "+3.28 dB from tweaks" delta — report the @300 delta, whatever it is.
