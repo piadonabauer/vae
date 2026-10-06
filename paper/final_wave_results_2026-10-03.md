@@ -179,10 +179,20 @@ dumps, rerun `make_qual_variants.py` after M3 for @300): `qual_ghosting_v2`,
 of GT motion on moving pixels — the direct bleeding evidence: fused 16-ch
 reproduces only ~79–81% of true motion at early transitions).
 
-Still pending (need GPU/checkpoints, queued after M3): latent statistics
-(sampleability proxy), view-swap eval of fused TC-off. NOT queued (decision
-needed): E5b refill, V=8 (needs new data download), 512² (no data), seed-43,
-matched-width per-view controls (recommended, 2 runs ~4 h each).
+Still pending (need GPU/checkpoints; run after the matched-width controls):
+latent statistics (sampleability proxy), view-swap eval of fused TC-off.
+NOT queued (decision needed): E5b refill, V=8 (needs new data download),
+512² (no data), seed-43.
+
+### M4 — matched-width per-view controls (launched 2026-10-06)
+
+Tasks 53/54 (`paper_Ectrl_perview_tcT_widen{32,64}`): per-view TC-on with
+latent widened to 32/64 ch — the control for "is the fused gap just
+capacity?". Protocol parity with the fused widen arms: warm start from the
+SAME E1b epoch-169 checkpoint (INIT_CKPT passed explicitly; the auto-finder
+would now pick the extended @300 E1b), TRAIN_EPOCHS=300, seed 42. Task 53
+OOM'd at batch 16 and runs at batch 8 / accum 8 (effective 64 unchanged).
+ETA ~9–10 h each → both done ~Wed morning. Log: `local_logs/queue_m4.log`.
 
 ### Reporting rule (budgets per table)
 

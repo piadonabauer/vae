@@ -339,6 +339,23 @@ case "$TASK" in
                  --model.temporal_compression True
                  --model.latent_widen_to 64 )
     ;;
+  # ── Matched-width per-view controls (2026-10-06) ──────────────────────────
+  # Does widening help the per-view codec as much as the fused one? If the
+  # per-view arms also gain, the fused-vs-per-view gap persists at matched
+  # width and capacity alone does not explain it. Protocol parity with the
+  # fused widen arms: warm-start from the SAME E1b epoch-169 checkpoint they
+  # used (pass INIT_CKPT explicitly; the auto-finder would now pick the
+  # extended @300 E1b). Budget: TRAIN_EPOCHS=300 (capacity-table budget).
+  53)
+    run_name="paper_Ectrl_perview_tcT_widen32"
+    MODEL_ARGS=( --model.independent_views True --model.temporal_compression True
+                 --model.latent_widen_to 32 )
+    ;;
+  54)
+    run_name="paper_Ectrl_perview_tcT_widen64"
+    MODEL_ARGS=( --model.independent_views True --model.temporal_compression True
+                 --model.latent_widen_to 64 )
+    ;;
   10)
     run_name="paper_E0_perview_ceiling"
     if [[ "$OVERFIT" == "1" ]]; then
