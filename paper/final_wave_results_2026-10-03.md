@@ -122,14 +122,30 @@ E_best) done ~Mon evening. M4/seed-43 decisions after that.
 
 ### M2 results @300 epochs, seed 42
 
-| arm | PSNR @170 | PSNR @300 | Δ ext | LPIPS @300 | old cluster |
-|---|---|---|---|---|---|
-| E11b widen-64 | 30.20 | **31.34** | +1.14 | 0.0465 | 30.92 |
-| combo (w32+diff) | 30.36 | training | | | 31.39 |
-| E_best all-combined | 31.56 | queued | | | — |
+COMPLETE 2026-10-06 (M2+M3 all drained overnight):
 
-E11b @300 now exceeds its old cluster value (+0.42) — confirms the
-convergence audit: wide arms were undertrained at 170 ep.
+| arm | rate | PSNR @170 | PSNR @300 | Δ ext | LPIPS @300 | wandb |
+|---|---|---|---|---|---|---|
+| E1d 16-ch | 72× | 28.28 | 28.20 | −0.08 | 0.0709 | 4agg9o4d |
+| E11a 32-ch | 36× | 30.35 | 30.61 | +0.26 | 0.0505 | bxa9fpmp |
+| E11b 64-ch | 18× | 30.20 | 31.34 | +1.14 | 0.0465 | (prev) |
+| combo w32+diff | 36× | 30.36 | **31.71** | +1.35 | 0.0475 | 5j9rgid2 |
+| E_best all tweaks | 18× | 31.56 | 31.65 | +0.09 | 0.0468 | k84i5082 |
+| E1b per-view ref | 36× | 33.13 | 33.12 | −0.01 | 0.0368 | ng1hy27r |
+
+Findings @300 (the capacity-table numbers):
+
+- E1b reference and E1d baseline are CONVERGED (−0.01 / −0.08) → captions
+  can say "300 epochs"; tweak delta vs no-tweaks is +3.45 dB (28.20→31.65).
+- **combo (31.71, 36×) now beats E_best (31.65, 18×)** at twice the
+  compression — diff-loss + 32-ch is the better recipe than all-tweaks-in;
+  E_best barely moved with the extension (+0.09, from-scratch arm).
+- Capacity ordering @300: 16ch 28.20 < 32ch 30.61 < 64ch 31.34 <
+  combo 31.71 ≈ E_best 31.65. Combo @36× > 64-ch @18×: the loss tweak
+  outperforms pure widening even with half the latent budget.
+- Gap of best fused arm to per-view reference: 1.41 dB (33.12 − 31.71).
+- E11b @300 exceeds its old cluster value (30.92 → 31.34, +0.42) —
+  confirms the convergence audit: wide arms were undertrained at 170 ep.
 
 ### M3 — complete the 300-ep capacity table (queued 2026-10-05)
 

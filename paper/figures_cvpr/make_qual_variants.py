@@ -29,8 +29,10 @@ import torch
 OUT = Path(__file__).resolve().parent
 DUMP_ROOT = Path("/home/coder/vae/Open-Sora/outputs")
 
-# Uniform 170-epoch budget (seed 42). Keys are internal only.
-DUMPS = {
+# Budget rule: each figure uses the budget of the table it accompanies.
+# qual_ghosting_v2 (Table 1 arms) -> @170; capacity + per-frame figures
+# (Table 3 arms) -> @300. Keys are internal only.
+DUMPS_170 = {
     "E1b": "paper_E1b_perview_tcT__job1791027540_t2",
     "E1c": "paper_E1c_fused_tcF__job1791042863_t3",
     "E1d": "paper_E1d_fused_tcT__job1791058355_t4",
@@ -39,6 +41,15 @@ DUMPS = {
     "combo": "paper_E_combo_diffLoss_widen32__job1791104094_t36",
     "Ebest": "paper_Ebest_allcombined__job1791119530_t52",
 }
+DUMPS_300 = {
+    "E1b": "paper_E1b_perview_tcT__job1791249364_t2",
+    "E1d": "paper_E1d_fused_tcT__job1791225734_t4",
+    "E11a": "paper_E11a_fused_tcT_widen32__job1791237549_t8",
+    "E11b": "paper_E11b_fused_tcT_widen64__job1791189563_t9",
+    "combo": "paper_E_combo_diffLoss_widen32__job1791201374_t36",
+    "Ebest": "paper_Ebest_allcombined__job1791213193_t52",
+}
+DUMPS = DUMPS_170
 
 QUAL_CLIP = 0
 QUAL_FRAME = 5
@@ -60,6 +71,12 @@ def load_clip(arm: str, clip_idx: int = QUAL_CLIP):
         rec = clip["rec"].float() / 255.0
         _cache[key] = (gt, rec)
     return _cache[key]
+
+
+def set_budget(dumps):
+    global DUMPS
+    DUMPS = dumps
+    _cache.clear()
 
 
 def load_all(arm: str):
@@ -239,7 +256,9 @@ def fig_perframe_motion():
 
 
 if __name__ == "__main__":
+    set_budget(DUMPS_170)   # Table 1 budget
     fig_ghosting_v2()
+    set_budget(DUMPS_300)   # Table 3 (capacity) budget
     fig_capacity_v2()
     fig_perframe_psnr_v2()
     fig_perframe_motion()
