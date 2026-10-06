@@ -194,6 +194,33 @@ would now pick the extended @300 E1b), TRAIN_EPOCHS=300, seed 42. Task 53
 OOM'd at batch 16 and runs at batch 8 / accum 8 (effective 64 unchanged).
 ETA ~9–10 h each → both done ~Wed morning. Log: `local_logs/queue_m4.log`.
 
+### Figure freshness audit (2026-10-06)
+
+UP TO DATE (regenerated from local new-wave data):
+
+- `qual_ghosting_v2/qual_capacity_v2/perframe_psnr_v2/perframe_motion` —
+  dump-based, at their table budgets (@170 Table 1 / @300 capacity).
+- `qual_ghosting/bleeding/capacity/overview_finalwave/best_temporal` —
+  dump-based @170 (make_qual_from_dumps.py). NOTE: make_figures_cvpr.py
+  writes same-named qual PDFs from OLD wandb images — always rerun
+  make_qual_from_dumps.py AFTER make_figures_cvpr.py (it did overwrite once).
+- `latent_width` — updated to @300 (28.20/30.61/31.34, ref 33.12).
+- `interventions` — rebuilt @170 uniform (Table-2 budget); E4i row dropped
+  (never re-run); **sign flip disclosed: diff-loss alone is −1.08 dB now**
+  (old +1.83 was from the biased-PSNR era) — update any prose citing +1.83.
+- `rate_quality` — updated to @170 Table-1 values (35.85/33.13/33.13/28.28).
+- `zeroshot_paths` — true NeRSemble markers added (native 32.5, TC-off 23.1).
+
+OLD-WAVE but internally consistent (arms never re-run; keep with caveat):
+
+- `view_count` (V=4 arms E6b/E6c), `resolution_scaling` (E9a/E9b),
+  `datascale` — datascale's single-sequence 34.56 is a PRE-FIX value
+  (biased LOW) and the cluster jsonl is gone: either re-add the dagger or
+  drop the panel (user decision).
+- `perframe_psnr(_v4)` — hardcoded old-wave curves; superseded by
+  `perframe_psnr_v2`; keep only if the old-wave appendix needs it.
+- `fusion_operators`, `chunking_schematic` — diagrams, no numbers.
+
 ### Reporting rule (budgets per table)
 
 - Keep @170 and @300 side by side in this file for every arm that has

@@ -327,16 +327,16 @@ def fig_perframe():
 
 def fig_latent_width():
     """Single column: widening under joint compression + per-view reference.
-    PSNRs corrected 2026-10-02 (clamp bug, see clean_retrain_metrics_corrected.md)."""
+    2026-10-06: local re-run wave @300 epochs (capacity-table budget, seed 42)."""
     xs = np.arange(3)
-    psnrs = [28.27, 29.78, 30.92]  # E1d, E11a, E11b (clean, corrected)
+    psnrs = [28.20, 30.61, 31.34]  # E1d, E11a, E11b (local wave @300 ep)
     cols = [C_JOINT, C_32CH, C_64CH]
 
     fig, ax = plt.subplots(figsize=(W1, 1.75))
     fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.16)
 
-    ax.axhline(33.19, color=C_PVTCT, lw=1.0, ls="--")
-    ax.text(2.32, 33.19 - 0.25, "per-view, TC on (33.19 dB)", color=C_PVTCT,
+    ax.axhline(33.12, color=C_PVTCT, lw=1.0, ls="--")
+    ax.text(2.32, 33.12 - 0.25, "per-view, TC on (33.12 dB)", color=C_PVTCT,
             fontsize=6.5, ha="right", va="top")
 
     ax.plot(xs, psnrs, "-", color="#aaaaaa", lw=1.0, zorder=2)
@@ -344,10 +344,10 @@ def fig_latent_width():
         ax.scatter([x], [p], color=col, s=34, zorder=5)
         ax.annotate(f"{p:.2f}", (x, p), xytext=(0, 6), textcoords="offset points",
                     ha="center", fontsize=6.5)
-    ax.text(0.5, 28.70, "+1.52 dB", fontsize=6.5, ha="center",
-            color="#222222", rotation=28)
-    ax.text(1.5, 30.05, "+1.14 dB", fontsize=6.5, ha="center", color="#222222",
-            rotation=28)
+    ax.text(0.5, 29.10, "+2.41 dB", fontsize=6.5, ha="center",
+            color="#222222", rotation=32)
+    ax.text(1.5, 30.70, "+0.73 dB", fontsize=6.5, ha="center", color="#222222",
+            rotation=14)
 
     ax.set_xticks(xs)
     ax.set_xticklabels(["16 (Wan default)", "32", "64"])
@@ -360,16 +360,20 @@ def fig_latent_width():
 
 
 def fig_interventions():
-    """Single column: horizontal bars, deltas vs the joint baseline (clean).
-    PSNRs corrected 2026-10-02 (clamp bug, see clean_retrain_metrics_corrected.md)."""
-    base = 28.27
+    """Single column: horizontal bars, deltas vs the joint baseline.
+    2026-10-06: local re-run wave, uniform 170-epoch budget (Table-2 budget,
+    seed 42). NOTE the sign flip vs the old cluster wave: diff-loss ALONE now
+    lands below the baseline (its old +1.83 came from the biased-PSNR era);
+    it only pays off combined with capacity. "+ diff-loss + cache" (E4i)
+    dropped: never re-run in the clean wave."""
+    base = 28.28
     items = [
         ("Baseline (fused, TC on)", base, C_JOINT),
-        ("+ temporal diff-loss", 28.43, "#aec7e8"),
-        ("+ diff-loss + cache", 28.89, "#6baed6"),
-        ("+ 32-ch latent", 29.78, C_32CH),
-        ("+ 64-ch latent", 30.92, C_64CH),
-        ("+ diff-loss + 32-ch", 31.39, "#7a3e9d"),
+        ("+ temporal diff-loss", 27.20, "#aec7e8"),
+        ("+ 32-ch latent", 30.35, C_32CH),
+        ("+ 64-ch latent", 30.20, C_64CH),
+        ("+ diff-loss + 32-ch", 30.36, "#7a3e9d"),
+        ("+ all tweaks (64-ch)", 31.56, "#1f77b4"),
     ]
     fig, ax = plt.subplots(figsize=(W1, 1.8))
     fig.subplots_adjust(left=0.42, right=0.985, top=0.97, bottom=0.20)
@@ -379,12 +383,12 @@ def fig_interventions():
     ax.axvline(base, color=C_JOINT, lw=0.7, ls="--", alpha=0.55)
     for y, (_, v, _) in enumerate(items):
         d = v - base
-        s = f"{v:.2f}" + (f"  (+{d:.2f})" if d > 0.005 else "")
+        s = f"{v:.2f}" + (f"  ({d:+.2f})" if abs(d) > 0.005 else "")
         ax.text(v + 0.07, y, s, va="center", fontsize=6.3)
     ax.set_yticks(ys)
     ax.set_yticklabels([lab for lab, _, _ in items], fontsize=6.2)
     ax.invert_yaxis()
-    ax.set_xlim(26.9, 34.0)
+    ax.set_xlim(25.9, 34.4)
     ax.set_xlabel("PSNR (dB)")
     ax.grid(True, axis="x", alpha=0.25, lw=0.4)
     save(fig, "interventions.pdf")
@@ -445,15 +449,15 @@ def fig_datascale():
 
 
 def fig_rate_quality():
-    """Single column: the 2x2 rate-quality matrix as grouped bars (clean).
-    PSNRs corrected 2026-10-02 (clamp bug, see clean_retrain_metrics_corrected.md)."""
+    """Single column: the 2x2 rate-quality matrix as grouped bars.
+    2026-10-06: local re-run wave, uniform 170-epoch budget (Table-1 budget)."""
     fig, ax = plt.subplots(figsize=(W1, 1.75))
     fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.155)
     x = np.arange(2)
     w = 0.32
-    perview = [35.89, 33.19]  # E1a, E1b (corrected)
-    fused = [32.74, 28.27]    # E1c, E1d (corrected)
-    # additive prediction at TC on: 35.89 - 2.70 - 3.15 = 30.04
+    perview = [35.85, 33.13]  # E1a, E1b (local wave @170)
+    fused = [33.13, 28.28]    # E1c, E1d (local wave @170)
+    # additive prediction at TC on: perview_tcoff - TC cost - fusion cost
     add_pred = perview[0] - (perview[0] - perview[1]) - (perview[0] - fused[0])
     b1 = ax.bar(x - w / 2, perview, w, color="#1f77b4", label="Per-view",
                 edgecolor="white", lw=0.4)
@@ -558,10 +562,14 @@ def fig_zeroshot_paths():
         for bar in bars:
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.25,
                     f"{bar.get_height():.1f}", ha="center", fontsize=6.3)
-    # corrected NeRSemble zero-shot (same TC-off path, 128 px) for reference
-    ax.plot([2.47, 2.74], [23.07, 23.07], color="#444444", lw=1.4)
-    ax.text(2.605, 23.45, "NeRSemble\n23.1", fontsize=5.6,
-            color="#444444", va="bottom", ha="center")
+    # NeRSemble zero-shot references at 128 px (local re-run 2026-10-04, true
+    # values): native chunked path 32.51 dB, TC-off wrapper 23.05 dB.
+    ax.plot([2.47, 2.74], [23.05, 23.05], color="#8b1a1a", lw=1.4)
+    ax.text(2.605, 23.43, "NeRSemble\n23.1", fontsize=5.6,
+            color="#8b1a1a", va="bottom", ha="center")
+    ax.plot([2.47, 2.74], [32.51, 32.51], color="#0d3b66", lw=1.4)
+    ax.text(2.605, 32.13, "NeRSemble\n32.5", fontsize=5.6,
+            color="#0d3b66", va="top", ha="center")
     ax.set_xticks(x)
     ax.set_xticklabels(["704$^2$", "256$^2$", "128$^2$"])
     ax.set_ylabel("PSNR (dB)")
