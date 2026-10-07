@@ -30,6 +30,10 @@ DUMPS = {
     "E11b": "paper_E11b_fused_tcT_widen64__job1791088848_t9",
     "combo": "paper_E_combo_diffLoss_widen32__job1791104094_t36",
     "Ebest": "paper_Ebest_allcombined__job1791119530_t52",
+    # @300 dumps -- capacity figure only (Table-3 budget; everything else @170).
+    "E1d_300": "paper_E1d_fused_tcT__job1791225734_t4",
+    "E11a_300": "paper_E11a_fused_tcT_widen32__job1791237549_t8",
+    "E11b_300": "paper_E11b_fused_tcT_widen64__job1791189563_t9",
 }
 
 DUMP_FILE = "final_eval_dump_val.pt"
@@ -136,10 +140,11 @@ def fig_qual_bleeding():
 
 
 def fig_qual_capacity():
-    """GT / E1d / E11a / E11b — same clip+frame as the ghosting fig (failure
-    there, repair here: one story)."""
-    arms = [("GT", None), ("16-ch", "E1d"), ("32-ch", "E11a"), ("64-ch", "E11b")]
-    gt, _ = load_clip("E1d")
+    """GT / fused 16/32/64-ch — same clip+frame as the ghosting fig (failure
+    there, repair here: one story). Uses the @300 dumps (Table-3 budget);
+    the @170 dumps had 64-ch below 32-ch, an artifact of the shorter budget."""
+    arms = [("GT", None), ("16-ch", "E1d_300"), ("32-ch", "E11a_300"), ("64-ch", "E11b_300")]
+    gt, _ = load_clip("E1d_300")
     t, v = QUAL_FRAME, 0
     fig, axes = plt.subplots(1, 4, figsize=(6.875, 1.85))
     fig.subplots_adjust(wspace=0.04, left=0.02, right=0.99, top=0.88, bottom=0.12)

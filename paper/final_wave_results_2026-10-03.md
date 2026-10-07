@@ -308,6 +308,52 @@ projection; if they stay near 28.2, the latent-stats finding remains a
 discussion point and the capacity wording stands. ETA: pretrained-init
 this evening, reinit overnight; runs `paper_Ebound_fused_tcT_trainbound*`.
 
+### Warm-start audit (2026-10-07, from run logs — ground truth for Setup)
+
+Verified from each run's `log.txt` ("Loaded checkpoint ..."), not from the
+script. The draft sentence "fused models with rank-32 adapters use the E1b
+warm start" is WRONG on both sides; the correct facts:
+
+WARM-STARTED from per-view TC-on @170 (epoch 169), fusion attention
+re-randomized after load:
+- fused TC-on 16-ch baseline (E1d)
+- fused widen-32 (E11a) and widen-64 (E11b)
+- temporal-diff-loss arm (E4h)
+- BOTH per-view width controls (not fused models!)
+- bottleneck-projection control (in flight)
+
+TRAINED FROM PRETRAINED WAN ONLY (no warm start):
+- per-view references E1a and E1b, fused TC-off (E1c) — despite E1c being
+  fused with rank-32 adapters
+- 32-ch + diff-loss combo — its task disables warm start (boundary-conv
+  shape mismatch guard), unlike E11a which did warm start. Mild init
+  confound between combo (31.71) and E11a (30.61); at @170 they tie
+  (30.36 vs 30.35), so the init effect is small — disclose in a footnote.
+- all-tweaks model — rank-128 adapters are shape-incompatible with the
+  rank-32 warm start (disclosed by design).
+
+ONE PROTOCOL ASYMMETRY: the encoder-unfreezing ablation (E5b refill) warm
+started from per-view @300 epoch 299 (the auto-finder picked the newest
+E1b checkpoint, which by then was the extended one), not from epoch 169
+like the other arms. Footnote-worthy, direction unaffected (it still
+scores below baseline, 28.10 < 28.28, despite the better warm start).
+
+Suggested Setup sentence: "The fused TC-on arms (16/32/64-channel), the
+temporal-difference-loss arm, and the per-view width controls are
+initialized from the 170-epoch per-view TC-on reference (fusion attention
+re-initialized); the per-view references, the fused TC-off model, the
+combo, and the all-tweaks model train directly from the pretrained Wan
+weights."
+
+### Figure fix (2026-10-07): qual_capacity now @300
+
+`qual_capacity` (make_qual_from_dumps.py) had been using the @170 dumps,
+where 64-ch sits below 32-ch (30.20 < 30.35) — a budget artifact. Added
+dedicated @300 dump entries and repointed the figure; both `qual_capacity`
+and `qual_capacity_v2` now show the @300 models with monotonic per-clip
+PSNRs (27.5 / 29.8 / 30.4 dB on the shared qualitative clip).
+`qual_capacity_v2` was already @300 (regenerated, unchanged).
+
 ### Reporting rule (budgets per table)
 
 - Keep @170 and @300 side by side in this file for every arm that has
