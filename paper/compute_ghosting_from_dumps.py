@@ -19,18 +19,25 @@ except ImportError:
     lpips = None
 
 OUT_DIR = Path(__file__).resolve().parent
-DUMP_ROOT = Path("/home/piado/projects/aip-lindell/piado/vae/Open-Sora/outputs")
+# 2026-10-07: repointed at the local re-run wave; uses final_eval_dump_val.pt
+# (matches reported final numbers). Old cluster-wave results are preserved in
+# ghosting_metrics.{md,json}; this writes ghosting_metrics_finalwave.*.
+DUMP_ROOT = Path("/home/coder/vae/Open-Sora/outputs")
 
+# Table-1 arms @170 + capacity arms @300 (suffix marks the budget).
 ARMS = {
-    "E1a": "paper_E1a_perview_tcF__job5562190_t1",
-    "E1b": "paper_E1b_perview_tcT__job5556206_t2",
-    "E1c": "paper_E1c_fused_tcF__job5562191_t3",
-    "E1d": "paper_E1d_fused_tcT__job5562192_t4",
-    "E11a": "paper_E11a_fused_tcT_widen32__job5562201_t8",
-    "E11b": "paper_E11b_fused_tcT_widen64__job5562202_t9",
-    "combo": "paper_E_combo_diffLoss_widen32__job5562206_t36",
-    "E3d": "paper_E3d_no_emb_no_lora__job5556246_t16",
-    "E2b": "paper_E2b_fused_tcF_self_attn__job5562194_t11",
+    "E1a@170": "paper_E1a_perview_tcF__job1791135751_t1",
+    "E1b@170": "paper_E1b_perview_tcT__job1791027540_t2",
+    "E1c@170": "paper_E1c_fused_tcF__job1791042863_t3",
+    "E1d@170": "paper_E1d_fused_tcT__job1791058355_t4",
+    "zeroshot_tcON@0": "paper_E1z_perview_zeroshot_tcON__job1791026450_t50",
+    "E1d@300": "paper_E1d_fused_tcT__job1791225734_t4",
+    "E11a@300": "paper_E11a_fused_tcT_widen32__job1791237549_t8",
+    "E11b@300": "paper_E11b_fused_tcT_widen64__job1791189563_t9",
+    "combo@300": "paper_E_combo_diffLoss_widen32__job1791201374_t36",
+    "Ebest@300": "paper_Ebest_allcombined__job1791213193_t52",
+    "ctrl_pv32@300": "paper_Ectrl_perview_tcT_widen32__job1791271134_t53",
+    "ctrl_pv64@300": "paper_Ectrl_perview_tcT_widen64__job1791298425_t54",
 }
 
 
@@ -96,7 +103,9 @@ def mean_lpips_between_views(frames: torch.Tensor, loss_fn) -> float:
 
 
 def eval_arm(dump_dir: Path, loss_fn) -> dict:
-    dump = dump_dir / "best_val_eval_dump.pt"
+    dump = dump_dir / "final_eval_dump_val.pt"
+    if not dump.exists():
+        dump = dump_dir / "best_val_eval_dump.pt"
     if not dump.exists():
         dump = dump_dir / "latest_full_eval_dump.pt"
     data = torch.load(dump, map_location="cpu", weights_only=False)
@@ -161,22 +170,18 @@ def main():
     for name, jobdir in ARMS.items():
         d = DUMP_ROOT / jobdir
         if not d.exists():
-            # try glob
-            matches = list(DUMP_ROOT.glob(jobdir.split("__job")[0] + "__job*/"))
-            matches = [m for m in matches if (m / "best_val_eval_dump.pt").exists()]
-            if not matches:
-                print(f"SKIP {name}: no dump")
-                continue
-            d = sorted(matches, key=lambda p: p.stat().st_mtime)[-1]
+            print(f"SKIP {name}: no dir")
+            continue
         print(f"eval {name} <- {d.name}")
         results[name] = eval_arm(d, loss_fn)
 
-    (OUT_DIR / "ghosting_metrics.json").write_text(json.dumps(results, indent=2))
+    (OUT_DIR / "ghosting_metrics_finalwave.json").write_text(json.dumps(results, indent=2))
 
     lines = [
-        "# Ghosting metrics from clean eval dumps",
+        "# Ghosting metrics from local final-wave eval dumps (2026-10-07)",
         "",
-        "Computed offline from `best_val_eval_dump.pt` (gt/rec uint8).",
+        "Computed offline from `final_eval_dump_val.pt` (gt/rec uint8).",
+        "@170 = Table-1 budget, @300 = capacity-table budget (never mix).",
         "FG mask = not near-white in GT (thresh 0.96), unioned across views.",
         "LPIPS = mean Alex-LPIPS between the two views over time (lower = more similar / more ghosting).",
         "",
@@ -204,6 +209,10 @@ def main():
         "",
     ]
     # auto takeaway
+    if "E1d@170" in results and "E1c@170" in results:
+        results = dict(results)
+        results["E1d"] = results["E1d@170"]
+        results["E1c"] = results["E1c@170"]
     if "E1d" in results and "E1c" in results:
         g_d = results["E1d"].get("gap_fg")
         g_c = results["E1c"].get("gap_fg")
@@ -223,8 +232,8 @@ def main():
         elif g_d is not None and g_c is not None and g_d > g_c + 0.01:
             lines.append("- **Decision lean:** FG XView gap is informative — consider a FG-XView column.")
 
-    (OUT_DIR / "ghosting_metrics.md").write_text("\n".join(lines) + "\n")
-    print("wrote", OUT_DIR / "ghosting_metrics.md")
+    (OUT_DIR / "ghosting_metrics_finalwave.md").write_text("\n".join(lines) + "\n")
+    print("wrote", OUT_DIR / "ghosting_metrics_finalwave.md")
 
 
 if __name__ == "__main__":

@@ -246,6 +246,55 @@ OLD-WAVE but internally consistent (arms never re-run; keep with caveat):
   `perframe_psnr_v2`; keep only if the old-wave appendix needs it.
 - `fusion_operators`, `chunking_schematic` — diagrams, no numbers.
 
+### Final eval-only wave (2026-10-07): bleed, ghosting, view-swap, latent stats
+
+All training is done; these three items are offline/eval-only, run on the
+final checkpoints. Full tables in the per-item files; headlines here.
+
+**1. Bleed ratios** (`paper/bleed_finalwave.md`, extracted from each run's
+`eval_metrics.jsonl` final eval — train.py logs them, no recompute needed).
+Bleed-W = within-chunk motion ratio (1.0 = GT motion), Bleed-A = across
+chunk boundaries. @170: per-view TC-on 0.942, fused TC-off 0.972, fused
+TC-on **0.910** (the motion-bleeding cost of joint compression), diff-loss
+0.950, unfreeze-enc 0.895. @300 fused ladder: 16-ch 0.920 → 32-ch 0.941 →
+64-ch 0.947, combo 0.945, all-tweaks 0.928; per-view controls ≈0.947.
+So capacity recovers most of the motion deficit (0.920→0.947 ≈ per-view
+0.947) even though PSNR still trails — bleeding and PSNR are partly
+decoupled. Zero-shot TC-on: 0.969.
+
+**2. XView/ghosting recompute** (`paper/ghosting_metrics_finalwave.md`,
+from `final_eval_dump_val.pt`, FG-masked cosine + inter-view LPIPS).
+Same conclusion as the old-wave analysis: FG XView gaps are tiny
+(fused TC-on +0.0057, the largest) and do NOT cleanly separate joint from
+single-axis arms → keep ghosting qualitative (grids + Bleed-W), do not put
+absolute XView numbers in the main claim.
+
+**3. View-swap eval** (fused TC-off @170, eval-only, views swapped in the
+input). Harness control on normal data reproduces the reported number
+exactly (33.14 vs 33.13 ✓). On swapped views: **30.94 dB (−2.20), LPIPS
+doubles 0.0373→0.0752**. The fused model is NOT view-symmetric — the
+fusion attention + per-view decoder LoRAs learn view-specific roles.
+Paper use: one sentence in analysis ("the fused codec binds views to
+roles; swapping them costs 2.2 dB"), supports the view-specialization
+story. Runs: `paper_Eswap_E1c_{control,viewswap}_eval__job179135*`;
+swapped data tree at `nersemble-data/processed/2view-swap/` (eval-only
+artifact, same license constraints as the source data).
+
+**4. Latent statistics / sampleability** (`paper/latent_stats_finalwave.md`
++ .json, 10 fixed val clips, EMA weights @300). Two findings:
+- **Widened latents never use the extra channels.** In every widened arm
+  (fused AND per-view controls) exactly 16 channels carry signal
+  (per-channel SNR = std(mu)/sigma > 1000) and ALL extra channels sit at
+  noise level (SNR 0.01–0.05, std(mu) ≤ 0.04). The widen tweak's +3.1 dB
+  on the fused codec therefore comes from the unfrozen/retrained boundary
+  convs, not from extra code dimensions — a downstream DiT would still see
+  an effectively 16-channel code.
+- **None of these posteriors are sampleable as-is** (KL weight 1e-6 →
+  sigma ≈ 0 on active channels; reconstruction-first protocol, expected).
+  Also a scale shift: fused 16-ch mu-std 0.87 vs per-view/pretrained 1.84 —
+  any pretrained prior would need latent re-normalization. Report as a
+  caveat/future-work note, not a table.
+
 ### Reporting rule (budgets per table)
 
 - Keep @170 and @300 side by side in this file for every arm that has

@@ -1,0 +1,92 @@
+{
+  "zero-shot TC on (@0)": {
+    "bleed_within": 0.9691409826278686,
+    "bleed_across": 1.0059641659259797,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E1a per-view TC off (@170)": {
+    "bleed_within": 0.9915373921394348,
+    "bleed_across": 1.0098722219467162,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E1b per-view TC on (@170)": {
+    "bleed_within": 0.9420375049114227,
+    "bleed_across": 0.9587210357189179,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E1c fused TC off (@170)": {
+    "bleed_within": 0.9724137544631958,
+    "bleed_across": 0.9874563574790954,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E1d fused TC on (@170)": {
+    "bleed_within": 0.9098670721054077,
+    "bleed_across": 0.9335321605205535,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E4h diff-loss (@170)": {
+    "bleed_within": 0.9501607120037079,
+    "bleed_across": 0.9373311579227448,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E5b unfreeze-enc (@170)": {
+    "bleed_within": 0.8946478366851807,
+    "bleed_across": 0.902985292673111,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E1d fused TC on (@300)": {
+    "bleed_within": 0.9204209625720978,
+    "bleed_across": 0.9428135097026825,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E11a 32-ch (@300)": {
+    "bleed_within": 0.9408902227878571,
+    "bleed_across": 0.9492443799972534,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E11b 64-ch (@300)": {
+    "bleed_within": 0.947396582365036,
+    "bleed_across": 0.9519799828529358,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "combo w32+diff (@300)": {
+    "bleed_within": 0.9451401174068451,
+    "bleed_across": 0.958371776342392,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E_best all tweaks (@300)": {
+    "bleed_within": 0.9277984023094177,
+    "bleed_across": 0.9084348857402802,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "ctrl per-view 32-ch (@300)": {
+    "bleed_within": 0.9482982277870178,
+    "bleed_across": 0.9643198192119599,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "ctrl per-view 64-ch (@300)": {
+    "bleed_within": 0.9460483610630035,
+    "bleed_across": 0.9629122138023376,
+    "kind": "final_eval",
+    "epoch": null
+  },
+  "E1b per-view TC on (@300)": {
+    "bleed_within": 0.9471781432628632,
+    "bleed_across": 0.9629799246788024,
+    "kind": "final_eval",
+    "epoch": null
+  }
+}

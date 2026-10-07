@@ -305,6 +305,35 @@ case "$TASK" in
                  --perceptual_loss_weight 0.5
                  --vae_loss_config.perceptual_loss_weight 0.5 )
     ;;
+  56|57)
+    # View-swap eval (2026-10-07): eval-only pass of the trained fused TC=off
+    # model (E1c @170). TASK=57 runs on the NORMAL data (harness control; must
+    # reproduce the reported 33.13 dB). TASK=56 runs on a view-swapped copy of
+    # the data (frames[[1,0]]) to probe view-role asymmetry: a symmetric fused
+    # model should lose ~nothing; a large drop means the fusion/LoRA learned
+    # view-specific roles. Loads via --load in MODEL_ARGS (NOT INIT_CKPT, whose
+    # WARMSTART_ARGS would reinit_view_attention_after_load and destroy the
+    # trained fusion). INIT_CKPT=none keeps the auto-warm-starter away.
+    INIT_CKPT="none"
+    _E1C_CKPT="${OPEN_SORA_ROOT}/outputs/paper_E1c_fused_tcF__job1791042863_t3/epoch169-global_step1105"
+    if [[ "$TASK" == "56" ]]; then
+      run_name="paper_Eswap_E1c_viewswap_eval"
+      _swapbase="${NERSEMBLE_BASE%/}"; _swapbase="${_swapbase%/2view}/2view-swap"
+      _swap128="${_swapbase}/128-res"
+      _DATA_OVR=( --nersemble_processed_base "$_swapbase"
+                  --dataset_presets.all_people_one_expression.data_path "$_swap128"
+                  --val_dataset_presets.all_people_one_expression.data_path "$_swap128" )
+    else
+      run_name="paper_Eswap_E1c_control_eval"
+      _DATA_OVR=()
+    fi
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression False
+                 --load "$_E1C_CKPT" --load_optimizer False
+                 --epochs 0 --save_ckpt False --final_eval True
+                 --wandb_min_steps_before_init -1
+                 "${_DATA_OVR[@]}" )
+    ;;
   50)
     # TRUE zero-shot floor at 128² (2026-10-02 audit): temporal_compression=True
     # runs the native Wan chunked causal path (1+4+4, feat_cache). TASK=7 (TC=False)
