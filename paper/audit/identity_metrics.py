@@ -29,7 +29,7 @@ DUMP_ROOT = Path("/home/coder/vae/Open-Sora/outputs")
 OUT_JSON = Path(__file__).resolve().parent / "identity_metrics.json"
 OUT_MD = Path(__file__).resolve().parent / "identity_metrics.md"
 
-# Table-1 arms + capacity arms, uniform 170-epoch dumps (update dirs after @300).
+# Table-1 arms, uniform 170-epoch dumps.
 ARMS = {
     "zero-shot per-view (TC on)": "paper_E1z_perview_zeroshot_tcON__job1791026450_t50",
     "per-view TC on": "paper_E1b_perview_tcT__job1791027540_t2",
@@ -40,6 +40,18 @@ ARMS = {
     "fused TC on, 64-ch": "paper_E11b_fused_tcT_widen64__job1791088848_t9",
     "32-ch + diff-loss": "paper_E_combo_diffLoss_widen32__job1791104094_t36",
     "all tweaks": "paper_Ebest_allcombined__job1791119530_t52",
+}
+
+# Capacity-table arms + matched-width controls, 300-epoch dumps.
+ARMS_300 = {
+    "per-view TC on (16-ch)": "paper_E1b_perview_tcT__job1791249364_t2",
+    "per-view TC on, 32-ch (ctrl)": "paper_Ectrl_perview_tcT_widen32__job1791271134_t53",
+    "per-view TC on, 64-ch (ctrl)": "paper_Ectrl_perview_tcT_widen64__job1791298425_t54",
+    "fused TC on (16-ch)": "paper_E1d_fused_tcT__job1791225734_t4",
+    "fused TC on, 32-ch": "paper_E11a_fused_tcT_widen32__job1791237549_t8",
+    "fused TC on, 64-ch": "paper_E11b_fused_tcT_widen64__job1791189563_t9",
+    "32-ch + diff-loss": "paper_E_combo_diffLoss_widen32__job1791201374_t36",
+    "all tweaks": "paper_Ebest_allcombined__job1791213193_t52",
 }
 
 device = torch.device("cpu")
@@ -75,10 +87,13 @@ def cos(a, b):
     return float(F.cosine_similarity(a.unsqueeze(0), b.unsqueeze(0)))
 
 
-def main():
+def main(arms=None, out_json=None, out_md=None, title_suffix=""):
+    arms = arms or ARMS
+    out_json = out_json or OUT_JSON
+    out_md = out_md or OUT_MD
     results = {}
     gt_boxes = {}  # (clip, v, t) -> box, shared across arms (GT identical)
-    for name, d in ARMS.items():
+    for name, d in arms.items():
         data = torch.load(DUMP_ROOT / d / "final_eval_dump_val.pt",
                           map_location="cpu", weights_only=False)
         id_sims, xview_gts, xview_recs = [], [], []
@@ -120,9 +135,9 @@ def main():
               f"xview rec={r['xview_rec_mean']:.4f} (gt {r['xview_gt_mean']:.4f}, "
               f"gap {r['xview_gap']:+.4f})  n={r['n_frames']} skip={skipped}")
 
-    OUT_JSON.write_text(json.dumps(results, indent=2))
+    out_json.write_text(json.dumps(results, indent=2))
     lines = [
-        "# Identity-embedding metrics (FaceNet VGGFace2, eval-only, from 170-ep final dumps)",
+        f"# Identity-embedding metrics (FaceNet VGGFace2, eval-only{title_suffix})",
         "",
         "Crops detected on GT, identical crop applied to rec. 10 val clips x 9 frames.",
         "",
@@ -139,9 +154,13 @@ def main():
         "about identity than the two real camera views do (positive = identity drift added",
         "by the codec).",
     ]
-    OUT_MD.write_text("\n".join(lines) + "\n")
-    print("wrote", OUT_JSON, "and", OUT_MD)
+    out_md.write_text("\n".join(lines) + "\n")
+    print("wrote", out_json, "and", out_md)
 
 
 if __name__ == "__main__":
-    main()
+    base = Path(__file__).resolve().parent
+    main(ARMS, base / "identity_metrics.json", base / "identity_metrics.md",
+         ", from 170-ep final dumps (Table-1 budget)")
+    main(ARMS_300, base / "identity_metrics_300.json", base / "identity_metrics_300.md",
+         ", from 300-ep final dumps (capacity-table budget)")

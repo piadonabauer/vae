@@ -192,7 +192,32 @@ capacity?". Protocol parity with the fused widen arms: warm start from the
 SAME E1b epoch-169 checkpoint (INIT_CKPT passed explicitly; the auto-finder
 would now pick the extended @300 E1b), TRAIN_EPOCHS=300, seed 42. Task 53
 OOM'd at batch 16 and runs at batch 8 / accum 8 (effective 64 unchanged).
-ETA ~9–10 h each → both done ~Wed morning. Log: `local_logs/queue_m4.log`.
+
+**RESULTS (2026-10-07, both @300, seed 42):**
+
+| arm | 16-ch | 32-ch | 64-ch |
+|---|---|---|---|
+| per-view TC on | 33.12 | **33.07** | **33.03** |
+| fused TC on | 28.20 | 30.61 | 31.34 |
+
+Widening does NOTHING for the per-view codec (−0.05/−0.09 = noise) while
+buying the fused codec +2.41/+3.14 dB. The matched-width gap stays ~2.5 dB
+(32-ch: 33.07 vs 30.61) → the fused deficit is caused by joint
+view+temporal compression itself, NOT undercapacity. This is the paper's
+capacity-necessary-but-not-sufficient claim, now with the control.
+(Also: per-view at 32 ch has HALF the compression rate of per-view 16-ch
+and still gains nothing — per-view is data/architecture-limited, not
+rate-limited, at 128².) wandb: controls in wan_multiview_vae_paper.
+
+**E5b refill (2026-10-06, @170): 28.10 / LPIPS 0.0726** — unfreezing the
+encoder is slightly WORSE than the frozen baseline (28.28/0.0692);
+Table 2 trainability row filled; freeze-encoder design confirmed.
+Seed-43 repeats: CANCELLED per user decision 2026-10-06.
+
+Identity metrics @300 (`paper/audit/identity_metrics_300.md`) mirror the
+control: per-view id-sim flat across widths (0.892/0.892/0.890), fused
+climbs with capacity (0.747→0.836→0.856) but stays below per-view even at
+64 ch; `latent_width.pdf` updated with the flat per-view control curve.
 
 ### Figure freshness audit (2026-10-06)
 

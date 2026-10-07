@@ -1,0 +1,74 @@
+{
+  "per-view TC on (16-ch)": {
+    "id_sim_mean": 0.8923298067516751,
+    "id_sim_std": 0.09472239650070173,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8994234853320652,
+    "xview_gap": 0.06484369834264114,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "per-view TC on, 32-ch (ctrl)": {
+    "id_sim_mean": 0.8917552062206798,
+    "id_sim_std": 0.09649682361207366,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8933236996332804,
+    "xview_gap": 0.07094348404142592,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "per-view TC on, 64-ch (ctrl)": {
+    "id_sim_mean": 0.890360624425941,
+    "id_sim_std": 0.09646548775370817,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8943670789400736,
+    "xview_gap": 0.0699001047346327,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "fused TC on (16-ch)": {
+    "id_sim_mean": 0.74652226070563,
+    "id_sim_std": 0.16753248225826037,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.7772919671403037,
+    "xview_gap": 0.18697521653440263,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "fused TC on, 32-ch": {
+    "id_sim_mean": 0.8363792508012718,
+    "id_sim_std": 0.13775444788097882,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8393031815687816,
+    "xview_gap": 0.12496400210592473,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "fused TC on, 64-ch": {
+    "id_sim_mean": 0.8561451228128539,
+    "id_sim_std": 0.12339202522346124,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8554907828569412,
+    "xview_gap": 0.10877640081776507,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "32-ch + diff-loss": {
+    "id_sim_mean": 0.8599339365959168,
+    "id_sim_std": 0.11935285302194056,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8621572732925415,
+    "xview_gap": 0.10210991038216477,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  },
+  "all tweaks": {
+    "id_sim_mean": 0.8653222329086727,
+    "id_sim_std": 0.11347918117519314,
+    "xview_gt_mean": 0.9642671836747063,
+    "xview_rec_mean": 0.8796739823288388,
+    "xview_gap": 0.08459320134586756,
+    "n_frames": 90,
+    "n_skipped_no_face": 0
+  }
+}

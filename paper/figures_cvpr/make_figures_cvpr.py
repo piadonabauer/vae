@@ -326,21 +326,26 @@ def fig_perframe():
 
 
 def fig_latent_width():
-    """Single column: widening under joint compression + per-view reference.
-    2026-10-06: local re-run wave @300 epochs (capacity-table budget, seed 42)."""
+    """Single column: widening under joint compression vs the per-view control.
+    2026-10-07: local re-run wave @300 epochs (capacity-table budget, seed 42).
+    The per-view curve is the matched-width control (tasks 53/54): widening
+    does nothing per-view, so the fused deficit is not undercapacity."""
     xs = np.arange(3)
-    psnrs = [28.20, 30.61, 31.34]  # E1d, E11a, E11b (local wave @300 ep)
+    fused = [28.20, 30.61, 31.34]    # E1d, E11a, E11b @300
+    perview = [33.12, 33.07, 33.03]  # E1b + matched-width controls @300
     cols = [C_JOINT, C_32CH, C_64CH]
 
     fig, ax = plt.subplots(figsize=(W1, 1.75))
     fig.subplots_adjust(left=0.115, right=0.985, top=0.96, bottom=0.16)
 
-    ax.axhline(33.12, color=C_PVTCT, lw=1.0, ls="--")
-    ax.text(2.32, 33.12 - 0.25, "per-view, TC on (33.12 dB)", color=C_PVTCT,
-            fontsize=6.5, ha="right", va="top")
+    ax.plot(xs, perview, "s--", color=C_PVTCT, lw=1.0, ms=3.6, zorder=4,
+            label="per-view, TC on")
+    for x, p in zip(xs, perview):
+        ax.annotate(f"{p:.2f}", (x, p), xytext=(0, 5), textcoords="offset points",
+                    ha="center", fontsize=6.0, color=C_PVTCT)
 
-    ax.plot(xs, psnrs, "-", color="#aaaaaa", lw=1.0, zorder=2)
-    for x, p, col in zip(xs, psnrs, cols):
+    ax.plot(xs, fused, "-", color="#aaaaaa", lw=1.0, zorder=2, label="fused, TC on")
+    for x, p, col in zip(xs, fused, cols):
         ax.scatter([x], [p], color=col, s=34, zorder=5)
         ax.annotate(f"{p:.2f}", (x, p), xytext=(0, 6), textcoords="offset points",
                     ha="center", fontsize=6.5)
@@ -348,6 +353,7 @@ def fig_latent_width():
             color="#222222", rotation=32)
     ax.text(1.5, 30.70, "+0.73 dB", fontsize=6.5, ha="center", color="#222222",
             rotation=14)
+    ax.legend(fontsize=6.0, loc="lower right", framealpha=0.95)
 
     ax.set_xticks(xs)
     ax.set_xticklabels(["16 (Wan default)", "32", "64"])

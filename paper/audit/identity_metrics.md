@@ -1,4 +1,4 @@
-# Identity-embedding metrics (FaceNet VGGFace2, eval-only, from 170-ep final dumps)
+# Identity-embedding metrics (FaceNet VGGFace2, eval-only, from 170-ep final dumps (Table-1 budget))
 
 Crops detected on GT, identical crop applied to rec. 10 val clips x 9 frames.
 
