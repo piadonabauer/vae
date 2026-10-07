@@ -305,6 +305,31 @@ case "$TASK" in
                  --perceptual_loss_weight 0.5
                  --vae_loss_config.perceptual_loss_weight 0.5 )
     ;;
+  58|59)
+    # Bottleneck-projection control (2026-10-07): fused TC=on at the NATIVE 16
+    # channels with only the 4 boundary convs (encoder head out, quant,
+    # post-quant, decoder in; 0.50M params) additionally trainable -- the same
+    # convs latent_widen_to unfreezes, minus the widening. Decides whether the
+    # widen gains (28.20 -> 30.61/31.34 @300) come from retraining the latent
+    # projections rather than from extra channels (the latent-stats audit shows
+    # the extra channels are never used). TASK=58 keeps the pretrained boundary
+    # weights; TASK=59 re-randomizes them (reinit applied again post-warm-start
+    # inside train.py, since --load restores pretrained boundary convs).
+    # Protocol parity with E1d@300: warm start from the SAME E1b@170 checkpoint
+    # (explicit -- the auto-finder would now pick E1b@300), 300 epochs,
+    # SAVE_CKPT=True; otherwise defaults.
+    INIT_CKPT="${INIT_CKPT:-${OPEN_SORA_ROOT}/outputs/paper_E1b_perview_tcT__job1791027540_t2/epoch169-global_step1083}"
+    if [[ "$TASK" == "58" ]]; then
+      run_name="paper_Ebound_fused_tcT_trainbound"
+      _BND=( --model.train_boundary_convs True )
+    else
+      run_name="paper_Ebound_fused_tcT_trainbound_reinit"
+      _BND=( --model.reinit_boundary_convs True )
+    fi
+    MODEL_ARGS=( --model.fusion_mode cross_attention --model.use_viewwise_decoder_lora True
+                 --model.temporal_compression True
+                 "${_BND[@]}" )
+    ;;
   56|57)
     # View-swap eval (2026-10-07): eval-only pass of the trained fused TC=off
     # model (E1c @170). TASK=57 runs on the NORMAL data (harness control; must

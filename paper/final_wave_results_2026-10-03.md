@@ -295,6 +295,19 @@ artifact, same license constraints as the source data).
   any pretrained prior would need latent re-normalization. Report as a
   caveat/future-work note, not a table.
 
+### IN FLIGHT (2026-10-07): bottleneck-projection control
+
+Decides the open point from the latent-stats finding. Fused TC-on at the
+NATIVE 16 channels with only the 4 boundary convs (0.50M params — the same
+ones the widen tweak unfreezes) additionally trainable; one variant keeps
+their pretrained weights (TASK 58), one re-randomizes them (TASK 59,
+re-applied post-warm-start). Protocol identical to the fused 16-ch @300
+baseline (same E1b@170 warm start, 300 epochs). Read-out: if either lands
+at ~30.6–31.3, the capacity section gets retitled around the bottleneck
+projection; if they stay near 28.2, the latent-stats finding remains a
+discussion point and the capacity wording stands. ETA: pretrained-init
+this evening, reinit overnight; runs `paper_Ebound_fused_tcT_trainbound*`.
+
 ### Reporting rule (budgets per table)
 
 - Keep @170 and @300 side by side in this file for every arm that has

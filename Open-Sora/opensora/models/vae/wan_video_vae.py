@@ -365,6 +365,17 @@ class MultiviewWanVideoVAE(nn.Module):
         # wider shapes (see _widen_wan_latent_ckpt) and the four convs that touch
         # the latent are unfrozen. VAE only -- we don't retrain the diffusion model.
         latent_widen_to: int = None,
+        # Bottleneck-projection control (2026-10-07): unfreeze the SAME four
+        # boundary convs that latent_widen_to unfreezes, but at the native 16
+        # channels (no widening). Isolates whether the widen gains come from
+        # retraining the latent projections rather than from extra channels
+        # (the latent-stats audit showed widened arms never use the extras).
+        train_boundary_convs: bool = False,
+        # Variant: re-randomize those four convs instead of starting from the
+        # pretrained weights. Applied at build AND again after any --load warm
+        # start (see train.py), since the loaded checkpoint carries pretrained
+        # boundary convs. Implies train_boundary_convs.
+        reinit_boundary_convs: bool = False,
         temporal_compression: bool = True,
         crossview_grad_checkpoint: bool = False,
         crossview_grad_checkpoint_encoder: bool = None,
@@ -387,6 +398,8 @@ class MultiviewWanVideoVAE(nn.Module):
             self.pretrained_z_dim = z_dim
             z_dim = latent_widen_to
         self.latent_widen_to = latent_widen_to
+        self.train_boundary_convs = train_boundary_convs or reinit_boundary_convs
+        self.reinit_boundary_convs = reinit_boundary_convs
 
         self.view_in = view_in
         self.z_dim = z_dim
@@ -483,23 +496,22 @@ class MultiviewWanVideoVAE(nn.Module):
 
                 # Unfreeze the four widened convs -- they hold the new capacity, and
                 # a rank-r LoRA path alone would bottleneck the extra channels.
-                if self.latent_widen_to is not None:
-                    boundary = [
-                        self.crossview_vae.encoder.head[2],
-                        self.crossview_vae.conv1,
-                        self.crossview_vae.conv2,
-                        self.crossview_vae.decoder.conv1,
-                    ]
+                # train_boundary_convs does the same at the native width (the
+                # bottleneck-projection control).
+                if self.latent_widen_to is not None or self.train_boundary_convs:
                     n_unfrozen = 0
-                    for m in boundary:
+                    for m in self._boundary_convs():
                         base = m.base_conv if hasattr(m, "base_conv") else m
                         for p in base.parameters():
                             p.requires_grad = True
                             n_unfrozen += p.numel()
+                    why = "latent_widen_to" if self.latent_widen_to is not None else "train_boundary_convs"
                     print(
-                        f"[MultiviewWanVideoVAE] latent_widen_to: unfroze the 4 boundary "
+                        f"[MultiviewWanVideoVAE] {why}: unfroze the 4 boundary "
                         f"convs ({n_unfrozen/1e6:.2f}M params)"
                     )
+                if self.reinit_boundary_convs:
+                    self.reset_boundary_convs()
 
             # Train full decoder conv/attn weights inside LoRA wrappers (still uses view_idx + view embeddings).
             if full_finetune_decoder:
@@ -658,6 +670,32 @@ class MultiviewWanVideoVAE(nn.Module):
 
         if not self.use_crossview_encoder:
             self.init_multiview_layers()
+
+    def _boundary_convs(self):
+        """The four convs that touch the latent (encoder head out, quant,
+        post-quant, decoder in) -- the ones latent_widen_to grows/unfreezes."""
+        return [
+            self.crossview_vae.encoder.head[2],
+            self.crossview_vae.conv1,
+            self.crossview_vae.conv2,
+            self.crossview_vae.decoder.conv1,
+        ]
+
+    def reset_boundary_convs(self) -> int:
+        """Re-randomize the four boundary convs (keeps requires_grad flags).
+        Called at build for reinit_boundary_convs=True, and again from train.py
+        after a --load warm start (which would otherwise restore the pretrained
+        boundary weights)."""
+        n_reset = 0
+        for m in self._boundary_convs():
+            base = m.base_conv if hasattr(m, "base_conv") else m
+            base.reset_parameters()
+            n_reset += sum(p.numel() for p in base.parameters())
+        print(
+            f"[MultiviewWanVideoVAE] reset_boundary_convs: re-randomized the 4 "
+            f"boundary convs ({n_reset/1e6:.2f}M params)"
+        )
+        return n_reset
 
     def init_multiview_layers(self):
         """Initializes multi-view layers for training stability."""

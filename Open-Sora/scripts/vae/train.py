@@ -2327,6 +2327,17 @@ def main():
                 n_reset,
             )
 
+        # Fresh-init variant of the bottleneck-projection control: the loaded
+        # warm-start checkpoint carries pretrained boundary convs, so the
+        # re-randomization from build time must be applied again post-load.
+        if cfg.model.get("reinit_boundary_convs", False):
+            core = model.module if hasattr(model, "module") else model
+            if hasattr(core, "reset_boundary_convs"):
+                n = core.reset_boundary_convs()
+                logger.info(
+                    "reinit_boundary_convs=True: re-randomized boundary convs after load (%d params)", n
+                )
+
         if cfg.get("lr", None) is not None:
             set_lr(optimizer, lr_scheduler, cfg.lr, cfg.get("initial_lr", None))
 
