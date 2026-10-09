@@ -108,14 +108,15 @@ def psnr(a, b):
     return 99.0 if mse < 1e-10 else 10 * np.log10(1.0 / mse)
 
 
-def show(ax, img, title=None, xlabel=None, boxes=False):
+def show(ax, img, title=None, xlabel=None, boxes=None):
     ax.imshow(img)
     ax.set_xticks([])
     ax.set_yticks([])
     for s in ax.spines.values():
         s.set_visible(False)
     if boxes:
-        for box, color in [(BOX_MOUTH, "#00d0ff"), (BOX_EYE, "#ffd000")]:
+        box_mouth, box_eye = boxes
+        for box, color in [(box_mouth, "#00d0ff"), (box_eye, "#ffd000")]:
             y0, y1, x0, x1 = box
             ax.add_patch(mpatches.Rectangle((x0, y0), x1 - x0, y1 - y0,
                                             fill=False, edgecolor=color, linewidth=1.0))
@@ -133,36 +134,37 @@ def save(fig, name):
     print("Saved", name)
 
 
-def fig_ghosting_v2():
+def fig_ghosting_v2(clip_idx=QUAL_CLIP, box_mouth=BOX_MOUTH, box_eye=BOX_EYE, suffix=""):
     arms = [
         ("GT", None),
         ("Per-view\nTC on", "E1b"),
         ("Fused\nTC off", "E1c"),
         ("Fused\nTC on", "E1d"),
     ]
-    gt, _ = load_clip("E1d")
+    gt, _ = load_clip("E1d", clip_idx)
     t = QUAL_FRAME
     rows = ["view 0", "view 1", "mouth (v0)", "eye (v0)", "|diff| x5 (v0)"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 8.2))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.08, right=0.99, top=0.94, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
-        rec = None if arm is None else load_clip(arm)[1]
+        rec = None if arm is None else load_clip(arm, clip_idx)[1]
         img0 = to_img(gt[0, :, t]) if arm is None else to_img(rec[0, :, t])
         img1 = to_img(gt[1, :, t]) if arm is None else to_img(rec[1, :, t])
         xlab0 = None if arm is None else f"{psnr(gt[0, :, t], rec[0, :, t]):.1f} dB"
         xlab1 = None if arm is None else f"{psnr(gt[1, :, t], rec[1, :, t]):.1f} dB"
-        show(axes[0, c], img0, title=lab, xlabel=xlab0, boxes=(arm is None))
+        show(axes[0, c], img0, title=lab, xlabel=xlab0,
+             boxes=(box_mouth, box_eye) if arm is None else None)
         show(axes[1, c], img1, xlabel=xlab1)
-        show(axes[2, c], crop(img0, BOX_MOUTH))
-        show(axes[3, c], crop(img0, BOX_EYE))
+        show(axes[2, c], crop(img0, box_mouth))
+        show(axes[3, c], crop(img0, box_eye))
         dm = np.zeros((128, 128, 3), np.uint8) if arm is None else diff_img(gt[0, :, t], rec[0, :, t])
         show(axes[4, c], dm)
     for r, lab in enumerate(rows):
         axes[r, 0].set_ylabel(lab, fontsize=7)
-    save(fig, "qual_ghosting_v2.pdf")
+    save(fig, f"qual_ghosting_v2{suffix}.pdf")
 
 
-def fig_capacity_v2():
+def fig_capacity_v2(clip_idx=QUAL_CLIP, box_mouth=BOX_MOUTH, box_eye=BOX_EYE, suffix=""):
     arms = [
         ("GT", None),
         ("16-ch", "E1d"),
@@ -170,23 +172,32 @@ def fig_capacity_v2():
         ("64-ch", "E11b"),
         ("Best combination", "Ebest"),
     ]
-    gt, _ = load_clip("E1d")
+    gt, _ = load_clip("E1d", clip_idx)
     t, v = QUAL_FRAME, 0
     rows = ["view 0", "mouth", "eye", "|diff| x5"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 6.6))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.07, right=0.99, top=0.93, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
-        rec = None if arm is None else load_clip(arm)[1]
+        rec = None if arm is None else load_clip(arm, clip_idx)[1]
         img = to_img(gt[v, :, t]) if arm is None else to_img(rec[v, :, t])
         xlab = None if arm is None else f"{psnr(gt[v, :, t], rec[v, :, t]):.1f} dB"
-        show(axes[0, c], img, title=lab, xlabel=xlab, boxes=(arm is None))
-        show(axes[1, c], crop(img, BOX_MOUTH))
-        show(axes[2, c], crop(img, BOX_EYE))
+        show(axes[0, c], img, title=lab, xlabel=xlab,
+             boxes=(box_mouth, box_eye) if arm is None else None)
+        show(axes[1, c], crop(img, box_mouth))
+        show(axes[2, c], crop(img, box_eye))
         dm = np.zeros((128, 128, 3), np.uint8) if arm is None else diff_img(gt[v, :, t], rec[v, :, t])
         show(axes[3, c], dm)
     for r, lab in enumerate(rows):
         axes[r, 0].set_ylabel(lab, fontsize=7)
-    save(fig, "qual_capacity_v2.pdf")
+    save(fig, f"qual_capacity_v2{suffix}.pdf")
+
+
+# Additional identities for diversity (same val dump, different clips).
+# (clip_idx, mouth box, eye box, filename suffix) — boxes hand-placed per face.
+EXTRA_IDENTITIES = [
+    (3, (100, 128, 44, 80), (66, 92, 52, 84), "_id2"),    # p175
+    (4, (80, 112, 28, 68), (44, 70, 52, 84), "_id3"),     # p085
+]
 
 
 # Wan causal chunking at T=9: f0 | f1-f4 | f5-f8.
@@ -272,8 +283,12 @@ def fig_perframe_motion():
 if __name__ == "__main__":
     set_budget(DUMPS_170)   # Table 1 budget
     fig_ghosting_v2()
+    for clip_idx, bm, be, sfx in EXTRA_IDENTITIES:
+        fig_ghosting_v2(clip_idx, bm, be, sfx)
     set_budget(DUMPS_300)   # Table 3 (capacity) budget
     fig_capacity_v2()
+    for clip_idx, bm, be, sfx in EXTRA_IDENTITIES:
+        fig_capacity_v2(clip_idx, bm, be, sfx)
     fig_perframe_psnr_v2()
     fig_perframe_motion()
     print("done")
