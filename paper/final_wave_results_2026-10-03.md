@@ -295,18 +295,32 @@ artifact, same license constraints as the source data).
   any pretrained prior would need latent re-normalization. Report as a
   caveat/future-work note, not a table.
 
-### IN FLIGHT (2026-10-07): bottleneck-projection control
+### RESULT (2026-10-08): bottleneck-projection control — capacity wording STANDS
 
-Decides the open point from the latent-stats finding. Fused TC-on at the
-NATIVE 16 channels with only the 4 boundary convs (0.50M params — the same
-ones the widen tweak unfreezes) additionally trainable; one variant keeps
-their pretrained weights (TASK 58), one re-randomizes them (TASK 59,
-re-applied post-warm-start). Protocol identical to the fused 16-ch @300
-baseline (same E1b@170 warm start, 300 epochs). Read-out: if either lands
-at ~30.6–31.3, the capacity section gets retitled around the bottleneck
-projection; if they stay near 28.2, the latent-stats finding remains a
-discussion point and the capacity wording stands. ETA: pretrained-init
-this evening, reinit overnight; runs `paper_Ebound_fused_tcT_trainbound*`.
+Fused TC-on at the NATIVE 16 channels with only the 4 boundary convs
+(0.50M params — the same ones the widen tweak unfreezes) additionally
+trainable; protocol identical to the fused 16-ch @300 baseline (same
+E1b@170 warm start, 300 epochs). Final val @300:
+
+| arm | PSNR | LPIPS | Bleed-W |
+|---|---:|---:|---:|
+| fused 16-ch baseline | 28.20 | 0.0709 | 0.920 |
+| + trainable boundary convs (pretrained init) | **28.07** | 0.0712 | 0.941 |
+| + trainable boundary convs (fresh init) | **27.99** | 0.0740 | 0.917 |
+| fused widen-32 (reference) | 30.61 | 0.0505 | 0.941 |
+
+**Read-out: the "stays near 28.2" branch.** Trainable boundary
+projections alone reproduce NONE of the widen gain (both variants land
+at/below baseline; train PSNR ran +0.45 ahead mid-run → the 0.5M extra
+params mildly overfit). So Section 5.4 keeps its capacity title and
+wording; the latent-stats finding (extra channels dead in widened arms)
+stays a discussion point, now sharpened: the widen gain needs the WIDER
+projection (more parameters inside the 4 convs / wider intermediate
+representation at the bottleneck), not merely trainable projections and
+not extra active latent channels. Side note: pretrained-init Bleed-W
+improves to 0.941 (= widen-32 level) even though PSNR does not — more
+evidence that motion-bleeding and PSNR are partly decoupled.
+Runs: `paper_Ebound_fused_tcT_trainbound{,_reinit}__job179138/6*`.
 
 ### Warm-start audit (2026-10-07, from run logs — ground truth for Setup)
 
