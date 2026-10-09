@@ -192,6 +192,42 @@ def fig_capacity_v2(clip_idx=QUAL_CLIP, box_mouth=BOX_MOUTH, box_eye=BOX_EYE, su
     save(fig, f"qual_capacity_v2{suffix}.pdf")
 
 
+def fig_identity_overview(clip_idx, box_mouth, box_eye, suffix):
+    """Single per-identity appendix figure: all variants side by side, like
+    qual_overview_finalwave. UNIFORM @170 budget (the fused TC-off arm has no
+    300-epoch run, and figures must not mix budgets). Replaces the separate
+    ghosting/capacity pair for the extra identities."""
+    arms = [
+        ("GT", None),
+        ("Per-view\nTC on, 36x", "E1b"),
+        ("Fused\nTC off, 24x", "E1c"),
+        ("Fused\nTC on, 72x", "E1d"),
+        ("Fused TC on\n32-ch, 36x", "E11a"),
+        ("Fused TC on\n64-ch, 18x", "E11b"),
+        ("Best\ncombination, 18x", "Ebest"),
+    ]
+    gt, _ = load_clip("E1d", clip_idx)
+    t = QUAL_FRAME
+    rows = ["view 0", "view 1", "mouth (v0)", "eye (v0)", "|diff| x5 (v0)"]
+    fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.55 * len(arms), 7.6))
+    fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.05, right=0.99, top=0.94, bottom=0.03)
+    for c, (lab, arm) in enumerate(arms):
+        rec = None if arm is None else load_clip(arm, clip_idx)[1]
+        img0 = to_img(gt[0, :, t]) if arm is None else to_img(rec[0, :, t])
+        img1 = to_img(gt[1, :, t]) if arm is None else to_img(rec[1, :, t])
+        xlab0 = None if arm is None else f"{psnr(gt[0, :, t], rec[0, :, t]):.1f} dB"
+        show(axes[0, c], img0, title=lab, xlabel=xlab0,
+             boxes=(box_mouth, box_eye) if arm is None else None)
+        show(axes[1, c], img1)
+        show(axes[2, c], crop(img0, box_mouth))
+        show(axes[3, c], crop(img0, box_eye))
+        dm = np.zeros((128, 128, 3), np.uint8) if arm is None else diff_img(gt[0, :, t], rec[0, :, t])
+        show(axes[4, c], dm)
+    for r, lab in enumerate(rows):
+        axes[r, 0].set_ylabel(lab, fontsize=7)
+    save(fig, f"qual_identity_overview{suffix}.pdf")
+
+
 # Additional identities for diversity (same val dump, different clips).
 # (clip_idx, mouth box, eye box, filename suffix) — boxes hand-placed per face.
 EXTRA_IDENTITIES = [
@@ -286,6 +322,7 @@ if __name__ == "__main__":
     fig_ghosting_v2()
     for clip_idx, bm, be, sfx in EXTRA_IDENTITIES:
         fig_ghosting_v2(clip_idx, bm, be, sfx)
+        fig_identity_overview(clip_idx, bm, be, sfx)
     set_budget(DUMPS_300)   # Table 3 (capacity) budget
     fig_capacity_v2()
     for clip_idx, bm, be, sfx in EXTRA_IDENTITIES:

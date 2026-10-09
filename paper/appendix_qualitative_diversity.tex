@@ -1,9 +1,10 @@
 % ---------------------------------------------------------------------------
 % Appendix: qualitative results across identities
-% Figures: qual_capacity_v2_id2/id3/id4.pdf (+ qual_ghosting_v2_id2/id3/id4.pdf
-% if the ghosting variants are wanted too). No experiment codenames in text.
-% Per-clip dB values below are from the rendered figures (single clip, view 0,
-% frame 5); dataset-level means are in Table 3.
+% Figures: qual_identity_overview_id3.pdf (man), _id2.pdf (woman),
+%          _id4.pdf (woman). One combined figure per identity: all variants
+% side by side (like the main overview figure), BOTH views, mouth/eye insets,
+% error map. UNIFORM 170-epoch budget (the fused TC-off arm has no 300-epoch
+% run; figures never mix budgets). Per-clip dB values are view 0, frame 5.
 % ---------------------------------------------------------------------------
 
 \section{Qualitative Results Across Identities}
@@ -12,50 +13,54 @@
 The qualitative figures in the main paper show a single validation subject.
 To verify that the failure mode of joint view--temporal compression and its
 recovery with latent capacity are not specific to one face, we repeat the
-capacity comparison of Fig.~\ref{fig:qual_capacity} on three additional
-validation identities spanning gender and skin tone
-(Figs.~\ref{fig:qual_identities_a}--\ref{fig:qual_identities_c}). All models,
-frames, views, and inset regions follow the protocol of the main figure; only
-the subject changes.
+full comparison on three additional validation identities spanning gender and
+skin tone (Figs.~\ref{fig:qual_identities_a}--\ref{fig:qual_identities_c}).
+Each figure shows all model variants side by side at the 170-epoch budget of
+the main comparison: the per-view and fused references without temporal
+compression, the jointly compressed model at 16 channels, its widened 32- and
+64-channel versions, and the best combination; rows show both camera views,
+mouth and eye insets, and an amplified error map.
 
-The pattern is consistent across identities. At the native latent width, the
-jointly compressed model degrades precisely the articulated regions: teeth are
-smeared into a single band, mouth corners are displaced, and eye detail is
-lost, while static regions (forehead, cheeks, clothing) remain comparatively
-clean. Widening the latent restores these regions progressively, and the best
-combination recovers most of the remaining gap. The severity of the failure
-scales with the amount of articulation in the clip: for the subject with a
-wide-open laugh (Fig.~\ref{fig:qual_identities_a}), the native-width
-reconstruction drops to 22.6\,dB on the shown frame with the mouth interior
-essentially erased, whereas subjects with closed or moderately open mouths
-degrade more mildly (26--27\,dB). The error maps (bottom rows) confirm that
-residual error concentrates on hair boundaries and facial articulation for
-every identity, i.e.\ the compression bottleneck spends its budget on exactly
-the regions that matter for talking-head applications.
+The pattern is consistent across identities. The per-view and fused
+TC-off references reconstruct every subject cleanly (30--33\,dB on the shown
+frames). Under joint view--temporal compression, degradation concentrates on
+the articulated regions: teeth are smeared into a single band, mouth corners
+are displaced, and eye detail is lost, while static regions (forehead,
+cheeks, clothing) remain comparatively clean. Widening the latent and the
+best combination recover much of the gap, in line with the quantitative
+tables. The severity of the failure scales with articulation: for the
+subject with a wide-open laugh (Fig.~\ref{fig:qual_identities_a}), the
+16-channel jointly compressed reconstruction drops to 22.7\,dB with the mouth
+interior essentially erased, whereas subjects with moderate expressions
+degrade more mildly (26--27\,dB). The error maps confirm that residual error
+concentrates on hair boundaries and facial articulation for every identity,
+i.e.\ the compression bottleneck spends its budget on exactly the regions
+that matter most for talking-head applications.
 
 \begin{figure*}[t]
   \centering
-  \includegraphics[width=0.92\linewidth]{figures/qual_capacity_v2_id3.pdf}
-  \caption{Latent-capacity comparison (300 epochs) for a male subject with a
-  wide-open laugh. The native-width jointly compressed model (second column)
-  erases the mouth interior; capacity restores it.}
+  \includegraphics[width=\linewidth]{figures/qual_identity_overview_id3.pdf}
+  \caption{All model variants for a male subject with a wide-open laugh
+  (170 epochs). Joint view--temporal compression (fourth column) erases the
+  mouth interior (22.7\,dB); latent capacity and the best combination
+  progressively restore it.}
   \label{fig:qual_identities_a}
 \end{figure*}
 
 \begin{figure*}[t]
   \centering
-  \includegraphics[width=0.92\linewidth]{figures/qual_capacity_v2_id2.pdf}
-  \caption{Latent-capacity comparison (300 epochs) for a second female
-  subject. Teeth and eye detail degrade at native width and recover with
+  \includegraphics[width=\linewidth]{figures/qual_identity_overview_id2.pdf}
+  \caption{All model variants for a second female subject (170 epochs).
+  Teeth and eye detail degrade under joint compression and recover with
   capacity; skin tone is preserved by all variants.}
   \label{fig:qual_identities_b}
 \end{figure*}
 
 \begin{figure*}[t]
   \centering
-  \includegraphics[width=0.92\linewidth]{figures/qual_capacity_v2_id4.pdf}
-  \caption{Latent-capacity comparison (300 epochs) for a third subject.
-  The same failure/recovery pattern holds; the smile-narrowed eyes and teeth
-  band are the regions most affected at native width.}
+  \includegraphics[width=\linewidth]{figures/qual_identity_overview_id4.pdf}
+  \caption{All model variants for a third female subject (170 epochs). The
+  same failure/recovery pattern holds; the teeth band and smile-narrowed
+  eyes are the regions most affected by joint compression.}
   \label{fig:qual_identities_c}
 \end{figure*}
