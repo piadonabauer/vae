@@ -177,12 +177,12 @@ def fig_qual_overview():
         ("GT", None),
         ("Zero-shot\nper-view, 36x", "zeroshot"),
         ("Per-view\nTC on, 36x", "E1b"),
-        ("Fused\nTC off, 36x", "E1c"),
+        ("Fused\nTC off, 24x", "E1c"),
         ("Fused\nTC on, 72x", "E1d"),
         ("Fused TC on\n32-ch, 36x", "E11a"),
         ("32-ch +\ndiff-loss, 36x", "combo"),
         ("Fused TC on\n64-ch, 18x", "E11b"),
-        ("All tweaks\n18x", "Ebest"),
+        ("Best combination\n18x", "Ebest"),
     ]
     gt, _ = load_clip("E1d")
     t = QUAL_FRAME
@@ -211,7 +211,7 @@ def fig_qual_overview():
 def fig_qual_best_temporal():
     """GT vs no-tweaks fused (E1d) vs E_best across all 9 frames: shows where
     in the chunk structure the tweak stack helps (chunk-interior frames)."""
-    arms = [("GT", None), ("Fused TC on\n(no tweaks)", "E1d"), ("Fused TC on\n(all tweaks)", "Ebest")]
+    arms = [("GT", None), ("Fused TC on\n(baseline)", "E1d"), ("Fused TC on\n(best combination)", "Ebest")]
     gt, _ = load_clip("E1d")
     v = 0
     T = gt.shape[2]

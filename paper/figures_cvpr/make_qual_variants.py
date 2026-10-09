@@ -142,7 +142,7 @@ def fig_ghosting_v2():
     ]
     gt, _ = load_clip("E1d")
     t = QUAL_FRAME
-    rows = ["view 0", "view 1", "mouth (v0)", "left eye (v0)", "|diff| x5 (v0)"]
+    rows = ["view 0", "view 1", "mouth (v0)", "eye (v0)", "|diff| x5 (v0)"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 8.2))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.08, right=0.99, top=0.94, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
@@ -168,11 +168,11 @@ def fig_capacity_v2():
         ("16-ch", "E1d"),
         ("32-ch", "E11a"),
         ("64-ch", "E11b"),
-        ("All tweaks", "Ebest"),
+        ("Best combination", "Ebest"),
     ]
     gt, _ = load_clip("E1d")
     t, v = QUAL_FRAME, 0
-    rows = ["view 0", "mouth", "left eye", "|diff| x5"]
+    rows = ["view 0", "mouth", "eye", "|diff| x5"]
     fig, axes = plt.subplots(len(rows), len(arms), figsize=(1.72 * len(arms), 6.6))
     fig.subplots_adjust(wspace=0.04, hspace=0.1, left=0.07, right=0.99, top=0.93, bottom=0.03)
     for c, (lab, arm) in enumerate(arms):
@@ -197,7 +197,7 @@ ARMS_CURVES = [
     ("Fused TC on, 32-ch", "E11a", "#ff7f0e"),
     ("Fused TC on, 64-ch", "E11b", "#2ca02c"),
     ("32-ch + diff-loss", "combo", "#9467bd"),
-    ("All tweaks", "Ebest", "#1f77b4"),
+    ("Best combination", "Ebest", "#1f77b4"),
 ]
 
 
@@ -235,7 +235,7 @@ def fig_perframe_motion():
         ("Per-view TC on", "E1b", "0.35"),
         ("Fused TC on (16-ch)", "E1d", "#d62728"),
         ("Fused TC on, 64-ch", "E11b", "#2ca02c"),
-        ("All tweaks", "Ebest", "#1f77b4"),
+        ("Best combination", "Ebest", "#1f77b4"),
     ]:
         _, rec = load_all(arm)
         rec_d = (rec[:, :, :, 1:] - rec[:, :, :, :-1]).abs()

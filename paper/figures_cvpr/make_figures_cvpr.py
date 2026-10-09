@@ -379,7 +379,7 @@ def fig_interventions():
         ("+ 32-ch latent", 30.35, C_32CH),
         ("+ 64-ch latent", 30.20, C_64CH),
         ("+ diff-loss + 32-ch", 30.36, "#7a3e9d"),
-        ("+ all tweaks (64-ch)", 31.56, "#1f77b4"),
+        ("+ best combination (64-ch)", 31.56, "#1f77b4"),
     ]
     fig, ax = plt.subplots(figsize=(W1, 1.8))
     fig.subplots_adjust(left=0.42, right=0.985, top=0.97, bottom=0.20)
