@@ -197,6 +197,7 @@ def fig_capacity_v2(clip_idx=QUAL_CLIP, box_mouth=BOX_MOUTH, box_eye=BOX_EYE, su
 EXTRA_IDENTITIES = [
     (3, (100, 128, 44, 80), (66, 92, 52, 84), "_id2"),    # p175
     (4, (80, 112, 28, 68), (44, 70, 52, 84), "_id3"),     # p085
+    (7, (60, 90, 42, 78), (36, 62, 58, 90), "_id4"),      # p038
 ]
 
 
