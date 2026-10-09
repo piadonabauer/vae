@@ -193,12 +193,15 @@ def fig_capacity_v2():
 CHUNKS = [(0, 0), (1, 4), (5, 8)]
 
 ARMS_CURVES = [
-    ("Fused TC on (16-ch)", "E1d", "#d62728"),
+    ("Fused TC on, 16-ch", "E1d", "#d62728"),
     ("Fused TC on, 32-ch", "E11a", "#ff7f0e"),
     ("Fused TC on, 64-ch", "E11b", "#2ca02c"),
-    ("32-ch + diff-loss", "combo", "#9467bd"),
     ("Best combination", "Ebest", "#1f77b4"),
 ]
+
+# Chunk-band tints (same palette as the older per-frame figure).
+C_CHUNK1 = "#4C78A8"
+C_CHUNK2 = "#E45756"
 
 
 def fig_perframe_psnr_v2():
@@ -210,8 +213,19 @@ def fig_perframe_psnr_v2():
     gt, rec = load_all("E1b")
     ref = [psnr(gt[..., t, :, :], rec[..., t, :, :]) for t in range(gt.shape[3])]
     ax.plot(range(len(ref)), ref, ls="--", lw=1.2, color="0.35", label="Per-view TC on (ref)")
-    for a, b in CHUNKS[1:]:
-        ax.axvline(a - 0.5, color="0.85", lw=0.8, zorder=0)
+    # Chunk bands: f0 | f1-f4 | f5-f8 (grey / blue tint / red tint).
+    ax.axvspan(-0.5, 0.5, color="#dddddd", alpha=0.5, lw=0, zorder=0)
+    ax.axvspan(0.5, 4.5, color=C_CHUNK1, alpha=0.08, lw=0, zorder=0)
+    ax.axvspan(4.5, 8.5, color=C_CHUNK2, alpha=0.08, lw=0, zorder=0)
+    for x in (0.5, 4.5):
+        ax.axvline(x, color="#999999", lw=0.5, ls="--", zorder=0)
+    ax.set_xlim(-0.5, 8.5)
+    ylo, yhi = ax.get_ylim()
+    ytxt = yhi - 0.03 * (yhi - ylo)
+    ax.text(0.0, ylo + 0.03 * (yhi - ylo), "$f_0$", color="#666666", fontsize=6,
+            ha="center", va="bottom")
+    ax.text(2.5, ytxt, "chunk 1", color=C_CHUNK1, fontsize=6, ha="center", va="top")
+    ax.text(6.5, ytxt, "chunk 2", color=C_CHUNK2, fontsize=6, ha="center", va="top")
     ax.set_xlabel("frame index", fontsize=8)
     ax.set_ylabel("PSNR (dB)", fontsize=8)
     ax.tick_params(labelsize=7)
